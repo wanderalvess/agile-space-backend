@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: agile-space-backend
+  datasource:
+    url: jdbc:postgresql://localhost:5432/espacoagil
+    username: postgres
+    password: postgres
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+server:
+  port: 8002
