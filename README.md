@@ -8,6 +8,7 @@ O **Agile Space Backend** é o motor central (API REST e WebSockets) da platafor
 
 - **Linguagem:** Java 17+
 - **Framework Core:** Spring Boot 3.x
+- **Documentação de API:** OpenAPI 3 / Swagger (Springdoc OpenAPI UI)
 - **Banco de Dados:** PostgreSQL (Spring Data JPA)
 - **Tempo Real:** Spring WebSockets (Stomp/SockJS)
 - **Testes:** JUnit 5, Mockito
@@ -67,7 +68,16 @@ O projeto segue os princípios de Arquitetura em Camadas (Layered Architecture):
    # Em ambiente Linux/Mac:
    ./mvnw spring-boot:run
    ```
-   A aplicação subirá por padrão na porta `8080`.
+   A aplicação subirá por padrão na porta `8002`.
+
+---
+
+## 📖 Documentação da API (Swagger / OpenAPI)
+
+Com a aplicação em execução, a documentação interativa e os endpoints podem ser acessados em:
+
+- **Swagger UI (Interface Interativa):** [http://localhost:8002/swagger-ui.html](http://localhost:8002/swagger-ui.html)
+- **OpenAPI Spec (JSON):** [http://localhost:8002/v3/api-docs](http://localhost:8002/v3/api-docs)
 
 ---
 
