@@ -94,6 +94,7 @@ public class AdminService {
         long secretsCount = countTableRows("vault_secrets");
         long focusCount = countTableRows("user_focus_sessions");
         long kanbanCount = countTableRows("user_kanban_cards");
+        long releasesCount = countTableRows("app_releases");
 
         stats.put("totalUsers", usersCount);
         stats.put("totalShowcaseSessions", showcaseCount);
@@ -101,6 +102,7 @@ public class AdminService {
         stats.put("totalVaultSecrets", secretsCount);
         stats.put("totalFocusSessions", focusCount);
         stats.put("totalKanbanCards", kanbanCount);
+        stats.put("totalReleases", releasesCount);
 
         return stats;
     }
