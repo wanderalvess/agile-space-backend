@@ -39,3 +39,9 @@ build/
 *.log
 *.jar
 *.war
+
+### Environment & Secrets ###
+.env
+.env.*
+*.pem
+*.key

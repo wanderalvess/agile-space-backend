@@ -25,3 +25,8 @@ springdoc:
     operationsSorter: method
     tagsSorter: alpha
     tryItOutEnabled: true
+
+app:
+  security:
+    encryption-key: ${APP_ENCRYPTION_SECRET:AgileSpaceSecureMasterKey2026Default#AES256GCMKey}
+

@@ -5,13 +5,13 @@ import jakarta.persistence.*;
 import lombok.*;
 
 @Entity
-@Table(name = "user_jira_configs")
+@Table(name = "user_tdn_configs")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class UserJiraConfig {
+public class UserTdnConfig {
 
     @Id
     @Column(name = "user_id")
@@ -21,7 +21,12 @@ public class UserJiraConfig {
     @Column(nullable = false, length = 1000)
     private String token;
 
-    @Column(nullable = false)
-    private String domain;
-}
+    @Column(name = "base_url", nullable = false)
+    private String baseUrl;
 
+    @Column
+    private String space;
+
+    @Column
+    private String label;
+}

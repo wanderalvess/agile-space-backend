@@ -2,8 +2,10 @@ package com.agilespace.backend;
 
 import com.agilespace.backend.domain.User;
 import com.agilespace.backend.domain.UserJiraConfig;
+import com.agilespace.backend.domain.UserTdnConfig;
 import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.repository.UserJiraConfigRepository;
+import com.agilespace.backend.repository.UserTdnConfigRepository;
 import com.agilespace.backend.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,6 +25,9 @@ public class UserServiceTest {
 
     @Mock
     private UserJiraConfigRepository jiraConfigRepository;
+
+    @Mock
+    private UserTdnConfigRepository tdnConfigRepository;
 
     @InjectMocks
     private UserService service;
@@ -99,4 +104,38 @@ public class UserServiceTest {
 
         verify(jiraConfigRepository, times(1)).deleteById("user-123");
     }
+
+    @Test
+    public void testGetTdnConfig() {
+        UserTdnConfig config = UserTdnConfig.builder().userId("user-123").baseUrl("tdn.totvs.com").token("tdn-token").space("PRO").label("test").build();
+        when(tdnConfigRepository.findById("user-123")).thenReturn(Optional.of(config));
+
+        UserTdnConfig result = service.getTdnConfig("user-123");
+
+        assertNotNull(result);
+        assertEquals("tdn-token", result.getToken());
+        assertEquals("tdn.totvs.com", result.getBaseUrl());
+        assertEquals("PRO", result.getSpace());
+        verify(tdnConfigRepository, times(1)).findById("user-123");
+    }
+
+    @Test
+    public void testSaveTdnConfig() {
+        UserTdnConfig config = UserTdnConfig.builder().userId("u1").baseUrl("tdn.totvs.com").token("token").build();
+        when(tdnConfigRepository.save(config)).thenReturn(config);
+
+        UserTdnConfig saved = service.saveTdnConfig(config);
+        assertEquals("u1", saved.getUserId());
+        assertEquals("tdn.totvs.com", saved.getBaseUrl());
+    }
+
+    @Test
+    public void testDeleteTdnConfig() {
+        doNothing().when(tdnConfigRepository).deleteById("user-123");
+
+        service.deleteTdnConfig("user-123");
+
+        verify(tdnConfigRepository, times(1)).deleteById("user-123");
+    }
 }
+

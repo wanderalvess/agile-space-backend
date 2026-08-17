@@ -2,6 +2,7 @@ package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.User;
 import com.agilespace.backend.domain.UserJiraConfig;
+import com.agilespace.backend.domain.UserTdnConfig;
 import com.agilespace.backend.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -50,4 +51,27 @@ public class UserController {
         service.deleteJiraConfig(userId);
         return ResponseEntity.noContent().build();
     }
+
+    @GetMapping("/{userId}/tdn-config")
+    public ResponseEntity<UserTdnConfig> getTdnConfig(@PathVariable String userId) {
+        UserTdnConfig config = service.getTdnConfig(userId);
+        if (config == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(config);
+    }
+
+    @PostMapping("/{userId}/tdn-config")
+    public ResponseEntity<UserTdnConfig> saveTdnConfig(@PathVariable String userId, @RequestBody UserTdnConfig config) {
+        config.setUserId(userId);
+        UserTdnConfig saved = service.saveTdnConfig(config);
+        return ResponseEntity.ok(saved);
+    }
+
+    @DeleteMapping("/{userId}/tdn-config")
+    public ResponseEntity<Void> deleteTdnConfig(@PathVariable String userId) {
+        service.deleteTdnConfig(userId);
+        return ResponseEntity.noContent().build();
+    }
 }
+

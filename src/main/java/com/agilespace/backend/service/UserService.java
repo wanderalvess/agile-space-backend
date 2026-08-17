@@ -2,8 +2,10 @@ package com.agilespace.backend.service;
 
 import com.agilespace.backend.domain.User;
 import com.agilespace.backend.domain.UserJiraConfig;
+import com.agilespace.backend.domain.UserTdnConfig;
 import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.repository.UserJiraConfigRepository;
+import com.agilespace.backend.repository.UserTdnConfigRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,6 +19,9 @@ public class UserService {
 
     @Autowired
     private UserJiraConfigRepository jiraConfigRepository;
+
+    @Autowired
+    private UserTdnConfigRepository tdnConfigRepository;
 
     @Transactional(readOnly = true)
     public User getUser(String id) {
@@ -43,4 +48,20 @@ public class UserService {
     public void deleteJiraConfig(String userId) {
         jiraConfigRepository.deleteById(userId);
     }
+
+    @Transactional(readOnly = true)
+    public UserTdnConfig getTdnConfig(String userId) {
+        return tdnConfigRepository.findById(userId).orElse(null);
+    }
+
+    @Transactional
+    public UserTdnConfig saveTdnConfig(UserTdnConfig config) {
+        return tdnConfigRepository.save(config);
+    }
+
+    @Transactional
+    public void deleteTdnConfig(String userId) {
+        tdnConfigRepository.deleteById(userId);
+    }
 }
+
