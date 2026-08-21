@@ -15,12 +15,12 @@ public class CryptoConverter implements AttributeConverter<String, String> {
 
     public CryptoConverter() {
         if (secretKey == null) {
-            String defaultSecret = System.getenv().getOrDefault("APP_ENCRYPTION_SECRET", "AgileSpaceSecureMasterKey2026Default#AES256GCMKey");
-            secretKey = EncryptionUtil.deriveKey(defaultSecret);
+            String secret = System.getenv().getOrDefault("APP_ENCRYPTION_SECRET", "AgileSpaceDevMasterKey2026LocalOnly#AES");
+            secretKey = EncryptionUtil.deriveKey(secret);
         }
     }
 
-    @Value("${app.security.encryption-key:AgileSpaceSecureMasterKey2026Default#AES256GCMKey}")
+    @Value("${app.security.encryption-key:AgileSpaceDevMasterKey2026LocalOnly#AES}")
     public void setSecretKeyFromProperty(String secret) {
         if (secret != null && !secret.isBlank()) {
             secretKey = EncryptionUtil.deriveKey(secret);

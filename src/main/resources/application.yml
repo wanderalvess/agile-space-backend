@@ -28,5 +28,11 @@ springdoc:
 
 app:
   security:
-    encryption-key: ${APP_ENCRYPTION_SECRET:AgileSpaceSecureMasterKey2026Default#AES256GCMKey}
+    # Em produção, defina a variável de ambiente APP_ENCRYPTION_SECRET.
+    # O valor padrão abaixo é usado apenas como fallback de desenvolvimento local.
+    encryption-key: ${APP_ENCRYPTION_SECRET:AgileSpaceDevMasterKey2026LocalOnly#AES}
+    # Chave de acesso admin para o endpoint GET /api/users (listagem de usuários).
+    # Defina APP_ADMIN_KEY no ambiente. Sem ela, o endpoint retorna 403.
+    admin-key: ${APP_ADMIN_KEY:}
+
 

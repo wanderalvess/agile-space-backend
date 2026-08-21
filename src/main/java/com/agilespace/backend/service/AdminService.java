@@ -12,6 +12,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.*;
 
+import com.agilespace.backend.dto.UnifiedSessionDto;
+
 @Service
 public class AdminService {
 
@@ -114,6 +116,44 @@ public class AdminService {
         } catch (Exception e) {
             // Tabela pode não existir ainda se a inicialização for preguiçosa
             return 0L;
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public List<UnifiedSessionDto> getSessions() {
+        String sql = "SELECT id, 'poker' as type, title, creator_id as creator_id, created_at as created_at, " +
+                     "jsonb_array_length(CASE WHEN jsonb_typeof(participant_ids) = 'array' THEN participant_ids ELSE '[]'::jsonb END) as participant_count " +
+                     "FROM poker_rooms " +
+                     "UNION ALL " +
+                     "SELECT id, 'retro' as type, title, creator_id as creator_id, CAST(created_at AS VARCHAR) as created_at, 0 as participant_count " +
+                     "FROM retro_boards " +
+                     "UNION ALL " +
+                     "SELECT id, 'health' as type, sprint_name as title, creator_id as creator_id, created_at as created_at, " +
+                     "jsonb_array_length(CASE WHEN jsonb_typeof(participant_ids) = 'array' THEN participant_ids ELSE '[]'::jsonb END) as participant_count " +
+                     "FROM health_check_boards " +
+                     "UNION ALL " +
+                     "SELECT id, 'brainstorm' as type, title, creator_id as creator_id, created_at as created_at, " +
+                     "jsonb_array_length(CASE WHEN jsonb_typeof(participant_ids) = 'array' THEN participant_ids ELSE '[]'::jsonb END) as participant_count " +
+                     "FROM brainstorming_boards " +
+                     "UNION ALL " +
+                     "SELECT id, 'sprint_planning' as type, title, created_by as creator_id, created_at as created_at, " +
+                     "jsonb_array_length(CASE WHEN jsonb_typeof(members) = 'array' THEN members ELSE '[]'::jsonb END) as participant_count " +
+                     "FROM sprint_plannings " +
+                     "ORDER BY created_at DESC " +
+                     "LIMIT 100";
+
+        try {
+            return jdbcTemplate.query(sql, (rs, rowNum) -> UnifiedSessionDto.builder()
+                    .id(rs.getString("id"))
+                    .type(rs.getString("type"))
+                    .title(rs.getString("title"))
+                    .creatorId(rs.getString("creator_id"))
+                    .createdAt(rs.getString("created_at"))
+                    .participantCount(rs.getInt("participant_count"))
+                    .build());
+        } catch (Exception e) {
+            // Se as tabelas não existirem, retorna lista vazia
+            return new ArrayList<>();
         }
     }
 }

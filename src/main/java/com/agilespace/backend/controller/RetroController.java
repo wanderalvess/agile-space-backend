@@ -15,7 +15,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/retros")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
+@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class RetroController {
 
     private final RetroService retroService;

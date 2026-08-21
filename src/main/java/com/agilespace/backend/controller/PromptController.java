@@ -18,7 +18,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/prompts")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*") // Permite chamadas do frontend Next.js de qualquer porta
+@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class PromptController {
 
     private final PromptService promptService;

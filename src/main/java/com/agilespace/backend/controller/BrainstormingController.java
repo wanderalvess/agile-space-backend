@@ -15,7 +15,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/brainstormings")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
+@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class BrainstormingController {
 
     private final BrainstormingService brainstormingService;

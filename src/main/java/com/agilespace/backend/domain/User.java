@@ -14,7 +14,10 @@ import java.time.LocalDateTime;
 public class User {
 
     @Id
-    private String id; // uid do Firebase
+    private String id;
+
+    @Column(unique = true, nullable = false)
+    private String email;
 
     @Column(nullable = false)
     private String name;
@@ -22,10 +25,14 @@ public class User {
     @Column(nullable = false)
     private String role;
 
+    @Column(name = "jira_account_id")
+    private String jiraAccountId;
+
+    @Column(name = "sso_id", unique = true)
+    private String ssoId;
+
     @Column(name = "squad_id")
     private String squadId;
-
-    private String email;
 
     @Column(name = "avatar_seed")
     private String avatarSeed;
@@ -36,6 +43,10 @@ public class User {
     @Column(name = "is_guest", nullable = false)
     private boolean isGuest;
 
+    @Column(name = "created_at")
+    private LocalDateTime createdAt;
+
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 }
+

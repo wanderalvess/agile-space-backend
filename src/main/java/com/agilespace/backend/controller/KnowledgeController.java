@@ -17,7 +17,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/knowledge")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
+@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class KnowledgeController {
 
     private final KnowledgeService knowledgeService;

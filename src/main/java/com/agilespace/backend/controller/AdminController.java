@@ -2,6 +2,7 @@ package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.AuditLog;
 import com.agilespace.backend.domain.GlobalAnnouncement;
+import com.agilespace.backend.dto.UnifiedSessionDto;
 import com.agilespace.backend.service.AdminService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -63,5 +64,10 @@ public class AdminController {
                                               @RequestParam String performedBy,
                                               @RequestBody(required = false) String details) {
         return ResponseEntity.ok(service.logAction(action, performedBy, details));
+    }
+
+    @GetMapping("/sessions")
+    public ResponseEntity<List<UnifiedSessionDto>> getSessions() {
+        return ResponseEntity.ok(service.getSessions());
     }
 }

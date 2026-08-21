@@ -14,7 +14,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/daily")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
+@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class DailyFlowController {
 
     private final DailyFlowService dailyFlowService;

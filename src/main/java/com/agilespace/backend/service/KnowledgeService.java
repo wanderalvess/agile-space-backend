@@ -22,16 +22,55 @@ public class KnowledgeService {
 
     private final KnowledgeRepository knowledgeRepository;
 
+    private static final Set<String> STOP_WORDS = Set.of(
+            "a", "o", "as", "os", "um", "uma", "uns", "umas",
+            "de", "do", "da", "dos", "das", "em", "no", "na", "nos", "nas",
+            "por", "pelo", "pela", "pelos", "pelas", "para", "pra", "com", "sem",
+            "qual", "quais", "quem", "como", "onde", "quando", "porque", "que",
+            "este", "esta", "esse", "essa", "aquele", "aquela", "tem", "temos", "e", "ou"
+    );
+
     @Transactional(readOnly = true)
     public Page<KnowledgeDocument> listDocuments(String query, Set<String> tags, Pageable pageable) {
         Page<KnowledgeDocument> docsPage;
         if (query != null && !query.trim().isEmpty()) {
-            docsPage = knowledgeRepository.searchActive(query, "deleted", pageable);
+            String trimmedQuery = query.trim();
+            // Tenta busca exata inicial
+            docsPage = knowledgeRepository.searchActive(trimmedQuery, "deleted", pageable);
+
+            // Se devolver poucos/nenhum resultado e a busca tiver múltiplas palavras, extrai palavras-chave
+            if (docsPage.getContent().size() < 3 && trimmedQuery.contains(" ")) {
+                List<String> keywords = java.util.Arrays.stream(trimmedQuery.toLowerCase().split("\\s+"))
+                        .map(w -> w.replaceAll("[^a-zA-Z0-9\\-_]", ""))
+                        .filter(w -> w.length() > 1 && !STOP_WORDS.contains(w))
+                        .collect(Collectors.toList());
+
+                if (!keywords.isEmpty()) {
+                    List<KnowledgeDocument> allDocs = knowledgeRepository.findByStatusNot("deleted", Pageable.unpaged()).getContent();
+                    List<KnowledgeDocument> matched = allDocs.stream()
+                            .map(doc -> {
+                                String text = (doc.getTitle() + " " + doc.getContent() + " " + doc.getCategory() + " " + doc.getFullPath()).toLowerCase();
+                                long matches = keywords.stream().filter(text::contains).count();
+                                return new java.util.AbstractMap.SimpleEntry<>(doc, matches);
+                            })
+                            .filter(entry -> entry.getValue() > 0)
+                            .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
+                            .map(java.util.AbstractMap.SimpleEntry::getKey)
+                            .collect(Collectors.toList());
+
+                    if (!matched.isEmpty()) {
+                        int start = (int) pageable.getOffset();
+                        int end = Math.min(start + pageable.getPageSize(), matched.size());
+                        List<KnowledgeDocument> pageContent = start < matched.size() ? matched.subList(start, end) : List.of();
+                        docsPage = new PageImpl<>(pageContent, pageable, matched.size());
+                    }
+                }
+            }
         } else {
             docsPage = knowledgeRepository.findByStatusNot("deleted", pageable);
         }
 
-        // Se houver filtro de tags, filtramos na memória (por simplicidade e flexibilidade)
+        // Se houver filtro de tags, filtramos na memória
         if (tags != null && !tags.isEmpty()) {
             List<KnowledgeDocument> filteredList = docsPage.getContent().stream()
                     .filter(doc -> doc.getTags().containsAll(tags))

@@ -16,7 +16,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/poker")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
+@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class PokerController {
 
     private final PokerService pokerService;

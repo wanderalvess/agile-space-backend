@@ -15,7 +15,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/action-plans")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
+@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class ActionPlanController {
 
     private final ActionPlanService actionPlanService;
