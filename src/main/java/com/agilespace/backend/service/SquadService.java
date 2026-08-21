@@ -22,8 +22,14 @@ public class SquadService {
     private final SquadMemberMetricRepository memberMetricRepository;
     private final SquadDailySnapshotRepository dailySnapshotRepository;
     private final SquadIssueWorklogCacheRepository worklogCacheRepository;
+    private final UserRepository userRepository;
 
     // ----- Squad Config -----
+    @Transactional(readOnly = true)
+    public List<Squad> getAllSquads() {
+        return squadRepository.findAll();
+    }
+
     @Transactional(readOnly = true)
     public Optional<Squad> getSquad(String squadId) {
         return squadRepository.findById(squadId);
@@ -31,7 +37,38 @@ public class SquadService {
 
     @Transactional
     public Squad saveSquad(Squad squad) {
-        return squadRepository.save(squad);
+        if (squad.getId() == null || squad.getId().isBlank()) {
+            throw new IllegalArgumentException("Squad ID cannot be null");
+        }
+        Squad target = squadRepository.findById(squad.getId()).orElse(new Squad());
+        target.setId(squad.getId());
+
+        if (squad.getName() != null && !squad.getName().isBlank()) {
+            target.setName(squad.getName());
+        } else if (target.getName() == null || target.getName().isBlank()) {
+            target.setName(squad.getId());
+        }
+
+        if (squad.getJiraProjectKey() != null) target.setJiraProjectKey(squad.getJiraProjectKey());
+        if (squad.getSyncJql() != null) target.setSyncJql(squad.getSyncJql());
+        if (squad.getJiraDomain() != null) target.setJiraDomain(squad.getJiraDomain());
+        if (squad.getSprintFieldId() != null) target.setSprintFieldId(squad.getSprintFieldId());
+        if (squad.getActiveSprintId() != null) target.setActiveSprintId(squad.getActiveSprintId());
+        if (squad.getSchemaVersion() != null) target.setSchemaVersion(squad.getSchemaVersion());
+        if (squad.getRankingEnabled() != null) target.setRankingEnabled(squad.getRankingEnabled());
+        if (squad.getRankingEnabledAt() != null) target.setRankingEnabledAt(squad.getRankingEnabledAt());
+        if (squad.getLastSyncAt() != null) target.setLastSyncAt(squad.getLastSyncAt());
+        if (squad.getLastFullReconcileAt() != null) target.setLastFullReconcileAt(squad.getLastFullReconcileAt());
+        if (squad.getLastSyncStatus() != null) target.setLastSyncStatus(squad.getLastSyncStatus());
+        if (squad.getReconcileIntervalHours() != null) target.setReconcileIntervalHours(squad.getReconcileIntervalHours());
+        if (squad.getDefaultDailyCapacityHours() != null) target.setDefaultDailyCapacityHours(squad.getDefaultDailyCapacityHours());
+        if (squad.getCapacityCalculationMethod() != null) target.setCapacityCalculationMethod(squad.getCapacityCalculationMethod());
+        if (squad.getCapacityJql() != null) target.setCapacityJql(squad.getCapacityJql());
+        if (squad.getCapacityFormula() != null) target.setCapacityFormula(squad.getCapacityFormula());
+        if (squad.getUpdatedAt() != null) target.setUpdatedAt(squad.getUpdatedAt());
+        if (squad.getSprintHistory() != null) target.setSprintHistory(squad.getSprintHistory());
+
+        return squadRepository.save(target);
     }
 
     // ----- Metrics Rollup -----
@@ -69,8 +106,13 @@ public class SquadService {
     public List<SquadIssueSnapshot> batchUpsertIssues(String squadId, List<SquadIssueSnapshot> snapshots) {
         for (SquadIssueSnapshot snap : snapshots) {
             snap.setSquadId(squadId);
-            if (snap.getDbId() == null || snap.getDbId().isBlank()) {
-                snap.setDbId(squadId + "_" + snap.getJiraKey());
+            if (snap.getJiraKey() == null || snap.getJiraKey().isBlank()) {
+                if (snap.getKey() != null && !snap.getKey().isBlank()) {
+                    snap.setJiraKey(snap.getKey());
+                }
+            }
+            if (snap.getDbId() == null || snap.getDbId().isBlank() || snap.getDbId().endsWith("_null")) {
+                snap.setDbId(squadId + "_" + (snap.getJiraKey() != null ? snap.getJiraKey() : "unknown"));
             }
         }
         return issueSnapshotRepository.saveAll(snapshots);
@@ -87,6 +129,14 @@ public class SquadService {
         return memberRepository.findBySquadIdOrderByDisplayNameAsc(squadId);
     }
 
+    @Transactional(readOnly = true)
+    public List<SquadMember> getSquadMembersForUser(String identifier) {
+        if (identifier == null || identifier.isBlank()) {
+            return java.util.Collections.emptyList();
+        }
+        return memberRepository.findByUserIdentifier(identifier.trim());
+    }
+
     @Transactional
     public SquadMember saveMember(String squadId, String jiraAccountId, SquadMember member) {
         member.setSquadId(squadId);
@@ -98,10 +148,41 @@ public class SquadService {
         if (existing.isPresent()) {
             SquadMember e = existing.get();
             if (member.getDisplayName() == null) member.setDisplayName(e.getDisplayName());
+            if (member.getEmail() == null) member.setEmail(e.getEmail());
+            if (member.getRole() == null) member.setRole(e.getRole());
             if (member.getCapacityHoursPerDay() == null) member.setCapacityHoursPerDay(e.getCapacityHoursPerDay());
+            if (member.getSystemCalculatedCapacityHoursPerDay() == null) member.setSystemCalculatedCapacityHoursPerDay(e.getSystemCalculatedCapacityHoursPerDay());
+            if (member.getCalibrationNotes() == null) member.setCalibrationNotes(e.getCalibrationNotes());
+            if (member.getOverrideType() == null) member.setOverrideType(e.getOverrideType());
             if (member.getClaimedByUid() == null) member.setClaimedByUid(e.getClaimedByUid());
         }
-        return memberRepository.save(member);
+        SquadMember saved = memberRepository.save(member);
+
+        // Sincroniza tabela central de usuários
+        try {
+            User user = userRepository.findById(jiraAccountId).orElse(null);
+            if (user == null && saved.getEmail() != null && !saved.getEmail().isBlank()) {
+                user = userRepository.findByEmail(saved.getEmail()).orElse(null);
+            }
+            if (user == null) {
+                user = userRepository.findByJiraAccountId(jiraAccountId).orElse(null);
+            }
+            if (user != null) {
+                if (saved.getRole() != null && !saved.getRole().isBlank()) {
+                    user.setRole(saved.getRole());
+                }
+                if (saved.getDisplayName() != null && !saved.getDisplayName().isBlank()) {
+                    user.setName(saved.getDisplayName());
+                }
+                user.setSquadId(squadId);
+                user.setUpdatedAt(java.time.LocalDateTime.now());
+                userRepository.save(user);
+            }
+        } catch (Exception ex) {
+            log.debug("Aviso ao sincronizar usuário no saveMember: {}", ex.getMessage());
+        }
+
+        return saved;
     }
 
     @Transactional
@@ -113,6 +194,24 @@ public class SquadService {
             }
         }
         return memberRepository.saveAll(members);
+    }
+
+    @Transactional
+    public void deleteMember(String squadId, String jiraAccountId) {
+        memberRepository.findBySquadIdAndJiraAccountId(squadId, jiraAccountId)
+                .ifPresent(m -> {
+                    memberRepository.delete(m);
+                    // Atualiza usuário desvinculando da squad
+                    try {
+                        userRepository.findByJiraAccountId(jiraAccountId).ifPresent(u -> {
+                            if (squadId.equalsIgnoreCase(u.getSquadId())) {
+                                u.setSquadId(null);
+                                u.setUpdatedAt(java.time.LocalDateTime.now());
+                                userRepository.save(u);
+                            }
+                        });
+                    } catch (Exception ignored) {}
+                });
     }
 
     // ----- Member Metrics -----
@@ -166,8 +265,13 @@ public class SquadService {
     public List<SquadIssueWorklogCache> batchUpsertWorklogCache(String squadId, List<SquadIssueWorklogCache> entries) {
         for (SquadIssueWorklogCache w : entries) {
             w.setSquadId(squadId);
-            if (w.getDbId() == null || w.getDbId().isBlank()) {
-                w.setDbId(squadId + "_" + w.getJiraKey());
+            if (w.getJiraKey() == null || w.getJiraKey().isBlank()) {
+                if (w.getKey() != null && !w.getKey().isBlank()) {
+                    w.setJiraKey(w.getKey());
+                }
+            }
+            if (w.getDbId() == null || w.getDbId().isBlank() || w.getDbId().endsWith("_null")) {
+                w.setDbId(squadId + "_" + (w.getJiraKey() != null ? w.getJiraKey() : "unknown"));
             }
         }
         return worklogCacheRepository.saveAll(entries);

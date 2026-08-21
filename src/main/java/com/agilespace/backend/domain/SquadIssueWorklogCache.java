@@ -1,5 +1,7 @@
 package com.agilespace.backend.domain;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.*;
 import lombok.*;
@@ -22,8 +24,21 @@ public class SquadIssueWorklogCache {
     @Column(name = "squad_id", nullable = false)
     private String squadId;
 
+    @JsonProperty("jiraKey")
+    @JsonAlias({"key", "jiraKey", "jira_key"})
     @Column(name = "jira_key", nullable = false)
     private String jiraKey;
+
+    @JsonProperty("key")
+    public String getKey() {
+        return jiraKey != null ? jiraKey : "";
+    }
+
+    public void setKey(String key) {
+        if (key != null && !key.isBlank()) {
+            this.jiraKey = key;
+        }
+    }
 
     @Column(name = "sprint_id")
     private String sprintId;

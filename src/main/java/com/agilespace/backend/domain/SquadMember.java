@@ -27,8 +27,23 @@ public class SquadMember {
     @Column(name = "display_name")
     private String displayName;
 
+    @Column(name = "email")
+    private String email;
+
+    @Column(name = "role")
+    private String role;
+
     @Column(name = "capacity_hours_per_day")
     private Double capacityHoursPerDay;
+
+    @Column(name = "system_calculated_capacity_hours_per_day")
+    private Double systemCalculatedCapacityHoursPerDay;
+
+    @Column(name = "calibration_notes")
+    private String calibrationNotes;
+
+    @Column(name = "override_type")
+    private String overrideType;
 
     @Column(name = "claimed_by_uid")
     private String claimedByUid;

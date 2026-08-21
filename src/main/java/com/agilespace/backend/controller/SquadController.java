@@ -11,12 +11,17 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/squads")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
+@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class SquadController {
 
     private final SquadService squadService;
 
     // ----- Squad Config -----
+    @GetMapping
+    public ResponseEntity<List<Squad>> getAllSquads() {
+        return ResponseEntity.ok(squadService.getAllSquads());
+    }
+
     @GetMapping("/{squadId}")
     public ResponseEntity<Squad> getSquad(@PathVariable String squadId) {
         return squadService.getSquad(squadId)
@@ -84,6 +89,11 @@ public class SquadController {
     }
 
     // ----- Members -----
+    @GetMapping("/by-user")
+    public ResponseEntity<List<SquadMember>> getSquadMembersForUser(@RequestParam String identifier) {
+        return ResponseEntity.ok(squadService.getSquadMembersForUser(identifier));
+    }
+
     @GetMapping("/{squadId}/members")
     public ResponseEntity<List<SquadMember>> getMembers(@PathVariable String squadId) {
         return ResponseEntity.ok(squadService.getMembers(squadId));
@@ -95,6 +105,14 @@ public class SquadController {
             @PathVariable String jiraAccountId,
             @RequestBody SquadMember member) {
         return ResponseEntity.ok(squadService.saveMember(squadId, jiraAccountId, member));
+    }
+
+    @DeleteMapping("/{squadId}/members/{jiraAccountId}")
+    public ResponseEntity<Void> deleteMember(
+            @PathVariable String squadId,
+            @PathVariable String jiraAccountId) {
+        squadService.deleteMember(squadId, jiraAccountId);
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{squadId}/members/batch")

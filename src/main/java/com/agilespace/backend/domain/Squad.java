@@ -16,7 +16,10 @@ import org.hibernate.type.SqlTypes;
 public class Squad {
 
     @Id
-    private String id; // squadId
+    private String id;
+
+    @Column(nullable = false)
+    private String name;
 
     @Column(name = "jira_project_key")
     private String jiraProjectKey;
@@ -56,6 +59,15 @@ public class Squad {
 
     @Column(name = "default_daily_capacity_hours")
     private Double defaultDailyCapacityHours;
+
+    @Column(name = "capacity_calculation_method")
+    private String capacityCalculationMethod;
+
+    @Column(name = "capacity_jql", columnDefinition = "TEXT")
+    private String capacityJql;
+
+    @Column(name = "capacity_formula")
+    private String capacityFormula;
 
     @Column(name = "updated_at")
     private String updatedAt;

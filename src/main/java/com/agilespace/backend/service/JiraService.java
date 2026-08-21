@@ -71,7 +71,7 @@ public class JiraService {
         if (request.getFields() != null && !request.getFields().isEmpty()) {
             fieldsStr = String.join(",", request.getFields());
         } else {
-            fieldsStr = "summary,description,issuetype,status,priority,assignee,updated,created,duedate,labels,parent,customfield_10100,customfield_10046,customfield_25307,customfield_10016,customfield_10002,customfield_10004,timespent,timeoriginalestimate,timeestimate,aggregatetimespent,aggregatetimeoriginalestimate,aggregatetimeestimate,worklog,comment";
+            fieldsStr = "summary,description,issuetype,status,priority,assignee,updated,created,duedate,labels,parent,subtasks,customfield_10100,customfield_10046,customfield_25307,customfield_10016,customfield_10002,customfield_10004,customfield_10015,customfield_10014,customfield_25300,customfield_25301,timespent,timeoriginalestimate,timeestimate,aggregatetimespent,aggregatetimeoriginalestimate,aggregatetimeestimate,worklog,comment";
         }
 
         // Importante: passamos a URL como URI para o restTemplate.exchange.
@@ -100,7 +100,8 @@ public class JiraService {
         headers.set("Authorization", "Bearer " + request.getToken().trim());
         headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+        headers.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+        headers.set("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7");
 
         HttpEntity<Void> entity = new HttpEntity<>(headers);
 
@@ -154,6 +155,39 @@ public class JiraService {
             log.error("Jira search failed", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("{\"error\": \"Erro ao conectar ao Jira: " + e.getMessage() + "\"}");
+        }
+    }
+
+    public ResponseEntity<String> getMyself(String domain, String token) {
+        String cleanDomain = domain.trim().replace("https://", "").replace("http://", "");
+        URI jiraUri;
+        try {
+            jiraUri = new URI("https://" + cleanDomain + "/rest/api/2/myself");
+        } catch (Exception e) {
+            log.error("Failed to construct Jira myself URI", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("{\"error\": \"Erro ao construir URL do Jira: " + e.getMessage() + "\"}");
+        }
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", "Bearer " + token.trim());
+        headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+        headers.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+        headers.set("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7");
+
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+        try {
+            log.info("Fetching authenticated user info from Jira URI: {}", jiraUri);
+            ResponseEntity<String> response = restTemplate.exchange(jiraUri, HttpMethod.GET, entity, String.class);
+            return ResponseEntity.ok(response.getBody());
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            log.error("Jira myself failed with status: {}, body: {}", e.getStatusCode(), e.getResponseBodyAsString());
+            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+        } catch (Exception e) {
+            log.error("Jira myself failed", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("{\"error\": \"Erro ao buscar dados do usuário no Jira: " + e.getMessage() + "\"}");
         }
     }
 }

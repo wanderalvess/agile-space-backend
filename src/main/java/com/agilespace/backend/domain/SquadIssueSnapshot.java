@@ -1,5 +1,7 @@
 package com.agilespace.backend.domain;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -19,8 +21,21 @@ public class SquadIssueSnapshot {
     @Column(name = "squad_id", nullable = false)
     private String squadId;
 
+    @JsonProperty("jiraKey")
+    @JsonAlias({"key", "jiraKey", "jira_key"})
     @Column(name = "jira_key", nullable = false)
     private String jiraKey; // ex: PROJ-123 — renomeado de 'key' para evitar colisão SQL
+
+    @JsonProperty("key")
+    public String getKey() {
+        return jiraKey != null ? jiraKey : "";
+    }
+
+    public void setKey(String key) {
+        if (key != null && !key.isBlank()) {
+            this.jiraKey = key;
+        }
+    }
 
     @Column(name = "issue_type")
     private String type;
