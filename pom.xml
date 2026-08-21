@@ -10,7 +10,7 @@
 	</parent>
 	<groupId>com.agilespace</groupId>
 	<artifactId>backend</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
+	<version>4.0.0</version>
 	<name>agile-space-backend</name>
 	<description>Agile Space Backend</description>
 	<properties>
