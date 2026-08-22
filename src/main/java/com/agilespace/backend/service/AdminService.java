@@ -97,6 +97,12 @@ public class AdminService {
         long focusCount = countTableRows("user_focus_sessions");
         long kanbanCount = countTableRows("user_kanban_cards");
         long releasesCount = countTableRows("app_releases");
+        long pokerRoomsCount = countTableRows("poker_rooms");
+        long retroBoardsCount = countTableRows("retro_boards");
+        long sprintPlanningsCount = countTableRows("sprint_plannings");
+        long healthCheckBoardsCount = countTableRows("health_check_boards");
+        long brainstormingBoardsCount = countTableRows("brainstorming_boards");
+        long dailyCheckinsCount = countTableRows("daily_checkins");
 
         stats.put("totalUsers", usersCount);
         stats.put("totalShowcaseSessions", showcaseCount);
@@ -105,6 +111,12 @@ public class AdminService {
         stats.put("totalFocusSessions", focusCount);
         stats.put("totalKanbanCards", kanbanCount);
         stats.put("totalReleases", releasesCount);
+        stats.put("totalPokerRooms", pokerRoomsCount);
+        stats.put("totalRetroBoards", retroBoardsCount);
+        stats.put("totalSprintPlannings", sprintPlanningsCount);
+        stats.put("totalHealthCheckBoards", healthCheckBoardsCount);
+        stats.put("totalBrainstormingBoards", brainstormingBoardsCount);
+        stats.put("totalDailyCheckins", dailyCheckinsCount);
 
         return stats;
     }

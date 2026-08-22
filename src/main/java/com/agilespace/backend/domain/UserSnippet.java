@@ -5,30 +5,27 @@ import lombok.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "feedbacks")
+@Table(name = "user_snippets")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Feedback {
+public class UserSnippet {
 
     @Id
     private String id;
 
-    @Column(name = "tool_name", nullable = false)
-    private String toolName;
-
-    private Integer score; // NPS score (1-5 ou 1-10)
-
-    @Column(columnDefinition = "TEXT")
-    private String comment;
-
-    @Column(name = "user_id")
+    @Column(name = "user_id", nullable = false)
     private String userId;
 
-    @Builder.Default
-    private String status = "OPEN"; // OPEN, REVIEWED, ARCHIVED
+    @Column(nullable = false)
+    private String title;
+
+    @Column(columnDefinition = "TEXT")
+    private String content;
+
+    private String language;
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;

@@ -59,4 +59,14 @@ public class DailyFlowController {
     public ResponseEntity<DailyReport> saveOrUpdateDailyReport(@Valid @RequestBody DailyReport report) {
         return ResponseEntity.status(HttpStatus.CREATED).body(dailyFlowService.saveOrUpdateDailyReport(report));
     }
+
+    @DeleteMapping("/reports/{id}")
+    public ResponseEntity<Void> deleteDailyReport(@PathVariable("id") String id) {
+        try {
+            dailyFlowService.deleteDailyReport(id);
+            return ResponseEntity.noContent().build();
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
 }

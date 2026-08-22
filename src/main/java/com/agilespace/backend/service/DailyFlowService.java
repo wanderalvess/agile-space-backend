@@ -57,4 +57,12 @@ public class DailyFlowService {
         report.setId(calculatedId);
         return reportRepository.save(report);
     }
+
+    @Transactional
+    public void deleteDailyReport(String id) {
+        if (!reportRepository.existsById(id)) {
+            throw new IllegalArgumentException("Daily report not found with id: " + id);
+        }
+        reportRepository.deleteById(id);
+    }
 }

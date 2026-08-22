@@ -3,9 +3,11 @@ package com.agilespace.backend.service;
 import com.agilespace.backend.domain.UserKanbanCard;
 import com.agilespace.backend.domain.UserStickyNote;
 import com.agilespace.backend.domain.UserQuickLink;
+import com.agilespace.backend.domain.UserSnippet;
 import com.agilespace.backend.repository.UserKanbanCardRepository;
 import com.agilespace.backend.repository.UserStickyNoteRepository;
 import com.agilespace.backend.repository.UserQuickLinkRepository;
+import com.agilespace.backend.repository.UserSnippetRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +26,9 @@ public class WorkspaceService {
 
     @Autowired
     private UserQuickLinkRepository linkRepository;
+
+    @Autowired
+    private UserSnippetRepository snippetRepository;
 
     // --- Kanban ---
     @Transactional(readOnly = true)
@@ -85,5 +90,27 @@ public class WorkspaceService {
     @Transactional
     public void deleteQuickLink(String id) {
         linkRepository.deleteById(id);
+    }
+
+    // --- Snippets ---
+    @Transactional(readOnly = true)
+    public List<UserSnippet> getSnippets(String userId) {
+        return snippetRepository.findByUserIdOrderByCreatedAtDesc(userId);
+    }
+
+    @Transactional
+    public UserSnippet saveSnippet(UserSnippet snippet) {
+        if (snippet.getId() == null || snippet.getId().isEmpty()) {
+            snippet.setId(UUID.randomUUID().toString());
+        }
+        if (snippet.getCreatedAt() == null) {
+            snippet.setCreatedAt(LocalDateTime.now());
+        }
+        return snippetRepository.save(snippet);
+    }
+
+    @Transactional
+    public void deleteSnippet(String id) {
+        snippetRepository.deleteById(id);
     }
 }
