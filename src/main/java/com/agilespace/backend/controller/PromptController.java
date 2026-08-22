@@ -2,6 +2,7 @@ package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.Prompt;
 import com.agilespace.backend.domain.PromptComment;
+import com.agilespace.backend.domain.PromptCollection;
 import com.agilespace.backend.service.PromptService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -94,6 +95,72 @@ public class PromptController {
             @Valid @RequestBody PromptComment comment) {
         try {
             return ResponseEntity.status(HttpStatus.CREATED).body(promptService.addComment(id, comment));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    // Coleções
+    @GetMapping("/collections")
+    public ResponseEntity<Page<PromptCollection>> listCollections(
+            @RequestParam(value = "visibility", required = false) String visibility,
+            @RequestParam(value = "ownerId", required = false) String ownerId,
+            @PageableDefault(size = 12) Pageable pageable) {
+        return ResponseEntity.ok(promptService.listCollections(visibility, ownerId, pageable));
+    }
+
+    @GetMapping("/collections/{id}")
+    public ResponseEntity<PromptCollection> getCollectionById(@PathVariable("id") UUID id) {
+        try {
+            return ResponseEntity.ok(promptService.getCollectionById(id));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @PostMapping("/collections")
+    public ResponseEntity<PromptCollection> createCollection(@Valid @RequestBody PromptCollection collection) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(promptService.createCollection(collection));
+    }
+
+    @PutMapping("/collections/{id}")
+    public ResponseEntity<PromptCollection> updateCollection(
+            @PathVariable("id") UUID id,
+            @Valid @RequestBody PromptCollection collection) {
+        try {
+            return ResponseEntity.ok(promptService.updateCollection(id, collection));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @DeleteMapping("/collections/{id}")
+    public ResponseEntity<Void> deleteCollection(@PathVariable("id") UUID id) {
+        try {
+            promptService.deleteCollection(id);
+            return ResponseEntity.noContent().build();
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @PostMapping("/collections/{id}/items/{promptId}")
+    public ResponseEntity<PromptCollection> addItemToCollection(
+            @PathVariable("id") UUID id,
+            @PathVariable("promptId") UUID promptId) {
+        try {
+            return ResponseEntity.ok(promptService.addItemToCollection(id, promptId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @DeleteMapping("/collections/{id}/items/{promptId}")
+    public ResponseEntity<PromptCollection> removeItemFromCollection(
+            @PathVariable("id") UUID id,
+            @PathVariable("promptId") UUID promptId) {
+        try {
+            return ResponseEntity.ok(promptService.removeItemFromCollection(id, promptId));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }

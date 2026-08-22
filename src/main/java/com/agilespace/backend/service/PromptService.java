@@ -2,16 +2,20 @@ package com.agilespace.backend.service;
 
 import com.agilespace.backend.domain.Prompt;
 import com.agilespace.backend.domain.PromptComment;
+import com.agilespace.backend.domain.PromptCollection;
 import com.agilespace.backend.repository.PromptCommentRepository;
+import com.agilespace.backend.repository.PromptCollectionRepository;
 import com.agilespace.backend.repository.PromptRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -19,6 +23,7 @@ public class PromptService {
 
     private final PromptRepository promptRepository;
     private final PromptCommentRepository commentRepository;
+    private final PromptCollectionRepository promptCollectionRepository;
 
     @Transactional(readOnly = true)
     public Page<Prompt> listPrompts(String query, String authorId, Pageable pageable) {
@@ -96,5 +101,78 @@ public class PromptService {
     @Transactional(readOnly = true)
     public List<PromptComment> getComments(UUID promptId) {
         return commentRepository.findByPromptIdOrderByCreatedAtAsc(promptId);
+    }
+
+    // Coleções
+    @Transactional(readOnly = true)
+    public Page<PromptCollection> listCollections(String visibility, String ownerId, Pageable pageable) {
+        boolean hasOwnerId = ownerId != null && !ownerId.trim().isEmpty();
+        boolean hasVisibility = visibility != null && !visibility.trim().isEmpty();
+
+        if (hasOwnerId && hasVisibility) {
+            Page<PromptCollection> ownerPage = promptCollectionRepository.findByOwnerId(ownerId, pageable);
+            List<PromptCollection> filtered = ownerPage.getContent().stream()
+                    .filter(c -> visibility.equals(c.getVisibility()))
+                    .collect(Collectors.toList());
+            return new PageImpl<>(filtered, pageable, filtered.size());
+        }
+        if (hasOwnerId) {
+            return promptCollectionRepository.findByOwnerId(ownerId, pageable);
+        }
+        if (hasVisibility) {
+            return promptCollectionRepository.findByVisibility(visibility, pageable);
+        }
+        return promptCollectionRepository.findByVisibility("public", pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public PromptCollection getCollectionById(UUID id) {
+        return promptCollectionRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Collection not found with id: " + id));
+    }
+
+    @Transactional
+    public PromptCollection createCollection(PromptCollection collection) {
+        return promptCollectionRepository.save(collection);
+    }
+
+    @Transactional
+    public PromptCollection updateCollection(UUID id, PromptCollection updatedCollection) {
+        PromptCollection existing = getCollectionById(id);
+        existing.setName(updatedCollection.getName());
+        existing.setDescription(updatedCollection.getDescription());
+        existing.setVisibility(updatedCollection.getVisibility());
+        if (updatedCollection.getItems() != null) {
+            List<Prompt> resolvedItems = updatedCollection.getItems().stream()
+                    .map(item -> getPromptById(item.getId()))
+                    .collect(Collectors.toList());
+            existing.setItems(resolvedItems);
+        }
+        return promptCollectionRepository.save(existing);
+    }
+
+    @Transactional
+    public void deleteCollection(UUID id) {
+        PromptCollection existing = getCollectionById(id);
+        promptCollectionRepository.delete(existing);
+    }
+
+    @Transactional
+    public PromptCollection addItemToCollection(UUID collectionId, UUID promptId) {
+        PromptCollection collection = getCollectionById(collectionId);
+        Prompt prompt = getPromptById(promptId);
+        boolean alreadyPresent = collection.getItems().stream()
+                .anyMatch(p -> p.getId().equals(promptId));
+        if (!alreadyPresent) {
+            collection.getItems().add(prompt);
+        }
+        return promptCollectionRepository.save(collection);
+    }
+
+    @Transactional
+    public PromptCollection removeItemFromCollection(UUID collectionId, UUID promptId) {
+        PromptCollection collection = getCollectionById(collectionId);
+        collection.getItems().removeIf(p -> p.getId().equals(promptId));
+        return promptCollectionRepository.save(collection);
     }
 }
