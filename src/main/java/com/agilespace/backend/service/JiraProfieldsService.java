@@ -546,6 +546,88 @@ public class JiraProfieldsService {
         return list;
     }
 
+    private static final Set<String> LEADERSHIP_ROLE_NAMES = Set.of(
+            "AGILE MASTER", "AGILE COACH", "PRODUCT OWNER", "PRODUCT MANAGER",
+            "PEOPLE LEAD", "TRIBE LEAD", "TEAM LEAD", "TECH LEAD", "SCRUM MASTER"
+    );
+
+    /**
+     * Cria um projeto do zero, sem depender do Jira — para quem quer começar sem sincronizar nada.
+     * O criador vira automaticamente o Agile Master do projeto recém-criado.
+     */
+    @Transactional
+    public ProjectDetailDto createManualProject(com.agilespace.backend.dto.CreateProjectRequestDto request, User creator) {
+        String key = request.getId().trim().toUpperCase();
+        if (projectConfigRepository.existsById(key)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.CONFLICT, "Já existe um projeto com essa chave");
+        }
+
+        ProjectConfig project = ProjectConfig.builder()
+                .id(key)
+                .name(request.getName().trim())
+                .segmentName(blankToNull(request.getSegmentName()))
+                .tribeName(blankToNull(request.getTribeName()))
+                .status("EM ANDAMENTO")
+                .devTeamSize(1)
+                .build();
+        project = projectConfigRepository.save(project);
+
+        ProjectMemberRole founder = ProjectMemberRole.builder()
+                .projectId(key)
+                .roleName("Agile Master")
+                .roleKey("AGILE_MASTER")
+                .jiraAccountId(creator.getJiraAccountId())
+                .displayName(creator.getName())
+                .email(creator.getEmail())
+                .userId(creator.getId())
+                .isLeadership(true)
+                .build();
+        projectMemberRoleRepository.save(founder);
+
+        return toDetailDto(project, List.of(founder));
+    }
+
+    /**
+     * Vincula o usuário autenticado a um projeto já existente, com o papel que ele escolher —
+     * fluxo de auto-atendimento pra quando alguém já configurou o projeto mas o vínculo automático
+     * por e-mail não encontrou o usuário (ex: cadastro com e-mail diferente do que está no Jira).
+     */
+    @Transactional
+    public void joinProject(String projectKey, String roleName, User user) {
+        String key = projectKey.trim().toUpperCase();
+        if (!projectConfigRepository.existsById(key)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.NOT_FOUND, "Projeto não encontrado");
+        }
+
+        boolean alreadyMember = projectMemberRoleRepository.findByProjectId(key).stream()
+                .anyMatch(m -> user.getId().equals(m.getUserId()));
+        if (alreadyMember) {
+            return;
+        }
+
+        String cleanRoleName = roleName.trim();
+        String roleKey = cleanRoleName.toUpperCase().replace(" ", "_").replaceAll("[^A-Z_]", "");
+        boolean isLeadership = LEADERSHIP_ROLE_NAMES.contains(cleanRoleName.toUpperCase());
+
+        ProjectMemberRole member = ProjectMemberRole.builder()
+                .projectId(key)
+                .roleName(cleanRoleName)
+                .roleKey(roleKey)
+                .jiraAccountId(user.getJiraAccountId())
+                .displayName(user.getName())
+                .email(user.getEmail())
+                .userId(user.getId())
+                .isLeadership(isLeadership)
+                .build();
+        projectMemberRoleRepository.save(member);
+    }
+
+    private String blankToNull(String value) {
+        return (value == null || value.isBlank()) ? null : value.trim();
+    }
+
     private ProjectDetailDto toDetailDto(ProjectConfig project, List<ProjectMemberRole> members) {
         List<ProjectMemberRoleDto> memberDtos = members.stream()
                 .map(m -> ProjectMemberRoleDto.builder()
