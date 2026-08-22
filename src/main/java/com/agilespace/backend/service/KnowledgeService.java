@@ -1,7 +1,16 @@
 package com.agilespace.backend.service;
 
+import com.agilespace.backend.domain.KnowledgeConversation;
 import com.agilespace.backend.domain.KnowledgeDocument;
+import com.agilespace.backend.domain.KnowledgeTokenUsage;
+import com.agilespace.backend.domain.KnowledgeUserAiSettings;
+import com.agilespace.backend.repository.KnowledgeConversationRepository;
 import com.agilespace.backend.repository.KnowledgeRepository;
+import com.agilespace.backend.repository.KnowledgeTokenUsageRepository;
+import com.agilespace.backend.repository.KnowledgeUserAiSettingsRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -10,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -21,6 +31,10 @@ import java.util.stream.Collectors;
 public class KnowledgeService {
 
     private final KnowledgeRepository knowledgeRepository;
+    private final KnowledgeConversationRepository knowledgeConversationRepository;
+    private final KnowledgeUserAiSettingsRepository knowledgeUserAiSettingsRepository;
+    private final KnowledgeTokenUsageRepository knowledgeTokenUsageRepository;
+    private final ObjectMapper objectMapper;
 
     private static final Set<String> STOP_WORDS = Set.of(
             "a", "o", "as", "os", "um", "uma", "uns", "umas",
@@ -30,8 +44,14 @@ public class KnowledgeService {
             "este", "esta", "esse", "essa", "aquele", "aquela", "tem", "temos", "e", "ou"
     );
 
+    // Overload preservado para compatibilidade de origem com chamadas existentes sem filtro de status.
     @Transactional(readOnly = true)
     public Page<KnowledgeDocument> listDocuments(String query, Set<String> tags, Pageable pageable) {
+        return listDocuments(query, tags, null, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<KnowledgeDocument> listDocuments(String query, Set<String> tags, String status, Pageable pageable) {
         Page<KnowledgeDocument> docsPage;
         if (query != null && !query.trim().isEmpty()) {
             String trimmedQuery = query.trim();
@@ -66,6 +86,8 @@ public class KnowledgeService {
                     }
                 }
             }
+        } else if (status != null && !status.trim().isEmpty()) {
+            docsPage = knowledgeRepository.findByStatus(status, pageable);
         } else {
             docsPage = knowledgeRepository.findByStatusNot("deleted", pageable);
         }
@@ -149,5 +171,97 @@ public class KnowledgeService {
         KnowledgeDocument doc = getDocumentById(id);
         doc.setViews(doc.getViews() + 1);
         return knowledgeRepository.save(doc);
+    }
+
+    @Transactional(readOnly = true)
+    public List<KnowledgeConversation> listConversations(String userId) {
+        return knowledgeConversationRepository.findByUserIdOrderByUpdatedAtDesc(userId);
+    }
+
+    @Transactional(readOnly = true)
+    public KnowledgeConversation getConversation(UUID id, String userId) {
+        KnowledgeConversation existing = knowledgeConversationRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Conversation not found with id: " + id));
+        // Conversas são privadas por usuário e nunca compartilhadas: valida a posse antes de retornar.
+        if (!existing.getUserId().equals(userId)) {
+            throw new IllegalArgumentException("Conversation not found with id: " + id);
+        }
+        return existing;
+    }
+
+    @Transactional
+    public KnowledgeConversation createConversation(String userId, String title) {
+        KnowledgeConversation conversation = KnowledgeConversation.builder()
+                .userId(userId)
+                .title(title)
+                .messages("[]")
+                .updatedAt(LocalDateTime.now())
+                .build();
+        return knowledgeConversationRepository.save(conversation);
+    }
+
+    @Transactional
+    public KnowledgeConversation renameConversation(UUID id, String userId, String newTitle) {
+        KnowledgeConversation existing = getConversation(id, userId);
+        existing.setTitle(newTitle);
+        existing.setUpdatedAt(LocalDateTime.now());
+        return knowledgeConversationRepository.save(existing);
+    }
+
+    @Transactional
+    public KnowledgeConversation appendMessage(UUID id, String userId, Object message) {
+        KnowledgeConversation existing = getConversation(id, userId);
+        try {
+            List<Object> messages = existing.getMessages() != null
+                    ? objectMapper.readValue(existing.getMessages(), new TypeReference<List<Object>>() {})
+                    : new ArrayList<>();
+            messages.add(message);
+            existing.setMessages(objectMapper.writeValueAsString(messages));
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Erro ao processar mensagens da conversa", e);
+        }
+        existing.setUpdatedAt(LocalDateTime.now());
+        return knowledgeConversationRepository.save(existing);
+    }
+
+    @Transactional
+    public void deleteConversation(UUID id, String userId) {
+        KnowledgeConversation existing = getConversation(id, userId);
+        knowledgeConversationRepository.delete(existing);
+    }
+
+    @Transactional(readOnly = true)
+    public KnowledgeUserAiSettings getAiSettings(String userId) {
+        return knowledgeUserAiSettingsRepository.findById(userId)
+                .orElseGet(() -> KnowledgeUserAiSettings.builder().userId(userId).build());
+    }
+
+    @Transactional
+    public KnowledgeUserAiSettings saveAiSettings(String userId, KnowledgeUserAiSettings updates) {
+        KnowledgeUserAiSettings existing = knowledgeUserAiSettingsRepository.findById(userId)
+                .orElseGet(() -> KnowledgeUserAiSettings.builder().userId(userId).build());
+        if (updates.getModel() != null) {
+            existing.setModel(updates.getModel());
+        }
+        if (updates.getByokApiKey() != null) {
+            existing.setByokApiKey(updates.getByokApiKey());
+        }
+        existing.setUpdatedAt(LocalDateTime.now());
+        return knowledgeUserAiSettingsRepository.save(existing);
+    }
+
+    @Transactional
+    public void incrementTokenUsage(String userId, String userName, long tokens) {
+        KnowledgeTokenUsage usage = knowledgeTokenUsageRepository.findById(userId)
+                .orElseGet(() -> KnowledgeTokenUsage.builder().userId(userId).totalTokens(0L).build());
+        usage.setUserName(userName);
+        usage.setTotalTokens(usage.getTotalTokens() + tokens);
+        usage.setUpdatedAt(LocalDateTime.now());
+        knowledgeTokenUsageRepository.save(usage);
+    }
+
+    @Transactional(readOnly = true)
+    public List<KnowledgeTokenUsage> getTopTokenUsage() {
+        return knowledgeTokenUsageRepository.findTop10ByOrderByTotalTokensDesc();
     }
 }
