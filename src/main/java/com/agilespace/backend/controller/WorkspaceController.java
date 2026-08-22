@@ -3,6 +3,7 @@ package com.agilespace.backend.controller;
 import com.agilespace.backend.domain.UserKanbanCard;
 import com.agilespace.backend.domain.UserStickyNote;
 import com.agilespace.backend.domain.UserQuickLink;
+import com.agilespace.backend.domain.UserSnippet;
 import com.agilespace.backend.service.WorkspaceService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -67,6 +68,24 @@ public class WorkspaceController {
     @DeleteMapping("/links/{id}")
     public ResponseEntity<Void> deleteQuickLink(@PathVariable String id) {
         service.deleteQuickLink(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    // --- Snippets ---
+    @GetMapping("/{userId}/snippets")
+    public ResponseEntity<List<UserSnippet>> getSnippets(@PathVariable String userId) {
+        return ResponseEntity.ok(service.getSnippets(userId));
+    }
+
+    @PostMapping("/{userId}/snippets")
+    public ResponseEntity<UserSnippet> saveSnippet(@PathVariable String userId, @RequestBody UserSnippet snippet) {
+        snippet.setUserId(userId);
+        return ResponseEntity.ok(service.saveSnippet(snippet));
+    }
+
+    @DeleteMapping("/snippets/{id}")
+    public ResponseEntity<Void> deleteSnippet(@PathVariable String id) {
+        service.deleteSnippet(id);
         return ResponseEntity.noContent().build();
     }
 }

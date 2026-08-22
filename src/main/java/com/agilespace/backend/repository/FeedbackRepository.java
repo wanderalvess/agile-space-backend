@@ -8,4 +8,5 @@ import java.util.List;
 @Repository
 public interface FeedbackRepository extends JpaRepository<Feedback, String> {
     List<Feedback> findByOrderByCreatedAtDesc();
+    List<Feedback> findByStatus(String status);
 }

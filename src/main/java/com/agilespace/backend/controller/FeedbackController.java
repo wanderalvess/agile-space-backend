@@ -21,6 +21,11 @@ public class FeedbackController {
         return ResponseEntity.ok(repository.findByOrderByCreatedAtDesc());
     }
 
+    @GetMapping(params = "status")
+    public ResponseEntity<List<Feedback>> getFeedbacksByStatus(@RequestParam String status) {
+        return ResponseEntity.ok(repository.findByStatus(status));
+    }
+
     @PostMapping
     public ResponseEntity<Feedback> saveFeedback(@RequestBody Feedback feedback) {
         if (feedback.getId() == null || feedback.getId().isEmpty()) {
@@ -29,5 +34,24 @@ public class FeedbackController {
         feedback.setCreatedAt(LocalDateTime.now());
         Feedback saved = repository.save(feedback);
         return ResponseEntity.ok(saved);
+    }
+
+    @PatchMapping("/{id}/status")
+    public ResponseEntity<Feedback> updateFeedbackStatus(@PathVariable String id, @RequestParam String status) {
+        return repository.findById(id)
+                .map(feedback -> {
+                    feedback.setStatus(status);
+                    return ResponseEntity.ok(repository.save(feedback));
+                })
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteFeedback(@PathVariable String id) {
+        if (!repository.existsById(id)) {
+            return ResponseEntity.notFound().build();
+        }
+        repository.deleteById(id);
+        return ResponseEntity.noContent().build();
     }
 }
