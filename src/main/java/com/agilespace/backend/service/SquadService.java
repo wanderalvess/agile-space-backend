@@ -7,8 +7,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -23,6 +28,7 @@ public class SquadService {
     private final SquadDailySnapshotRepository dailySnapshotRepository;
     private final SquadIssueWorklogCacheRepository worklogCacheRepository;
     private final UserRepository userRepository;
+    private final SquadPanelRepository panelRepository;
 
     // ----- Squad Config -----
     @Transactional(readOnly = true)
@@ -280,5 +286,56 @@ public class SquadService {
     @Transactional
     public void deleteWorklogCacheEntry(String squadId, String jiraKey) {
         worklogCacheRepository.deleteById(squadId + "_" + jiraKey);
+    }
+
+    // ----- Panels -----
+    @Transactional(readOnly = true)
+    public List<SquadPanel> listPanelsForUser(String squadId, String requestingUserIdentifier) {
+        Map<UUID, SquadPanel> merged = new LinkedHashMap<>();
+        for (SquadPanel panel : panelRepository.findBySquadIdAndVisibility(squadId, "SQUAD")) {
+            merged.put(panel.getId(), panel);
+        }
+        for (SquadPanel panel : panelRepository.findBySquadIdAndOwnerId(squadId, requestingUserIdentifier)) {
+            merged.put(panel.getId(), panel);
+        }
+        return new ArrayList<>(merged.values());
+    }
+
+    @Transactional
+    public SquadPanel createPanel(String squadId, String ownerId, SquadPanel panel) {
+        panel.setSquadId(squadId);
+        panel.setOwnerId(ownerId);
+        panel.setUpdatedAt(LocalDateTime.now());
+        return panelRepository.save(panel);
+    }
+
+    @Transactional
+    public SquadPanel updatePanel(UUID panelId, String requestingUserIdentifier, SquadPanel updates) {
+        SquadPanel existing = panelRepository.findById(panelId)
+                .orElseThrow(() -> new IllegalArgumentException("Panel not found: " + panelId));
+
+        if (!existing.getOwnerId().equals(requestingUserIdentifier)) {
+            throw new SecurityException("Only the panel owner can modify this panel");
+        }
+
+        if (updates.getName() != null) existing.setName(updates.getName());
+        if (updates.getType() != null) existing.setType(updates.getType());
+        if (updates.getConfig() != null) existing.setConfig(updates.getConfig());
+        if (updates.getVisibility() != null) existing.setVisibility(updates.getVisibility());
+        existing.setUpdatedAt(LocalDateTime.now());
+
+        return panelRepository.save(existing);
+    }
+
+    @Transactional
+    public void deletePanel(UUID panelId, String requestingUserIdentifier) {
+        SquadPanel existing = panelRepository.findById(panelId)
+                .orElseThrow(() -> new IllegalArgumentException("Panel not found: " + panelId));
+
+        if (!existing.getOwnerId().equals(requestingUserIdentifier)) {
+            throw new SecurityException("Only the panel owner can delete this panel");
+        }
+
+        panelRepository.delete(existing);
     }
 }
