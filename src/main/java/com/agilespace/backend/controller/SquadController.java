@@ -1,12 +1,17 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.*;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.SquadService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/squads")
@@ -171,5 +176,53 @@ public class SquadController {
             @PathVariable String jiraKey) {
         squadService.deleteWorklogCacheEntry(squadId, jiraKey);
         return ResponseEntity.noContent().build();
+    }
+
+    // ----- Panels -----
+    @GetMapping("/{squadId}/panels")
+    public ResponseEntity<List<SquadPanel>> getPanels(@PathVariable String squadId, HttpServletRequest request) {
+        String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        return ResponseEntity.ok(squadService.listPanelsForUser(squadId, userId));
+    }
+
+    @PostMapping("/{squadId}/panels")
+    public ResponseEntity<SquadPanel> createPanel(
+            @PathVariable String squadId,
+            @Valid @RequestBody SquadPanel panel,
+            HttpServletRequest request) {
+        String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        return ResponseEntity.status(HttpStatus.CREATED).body(squadService.createPanel(squadId, userId, panel));
+    }
+
+    @PutMapping("/{squadId}/panels/{panelId}")
+    public ResponseEntity<SquadPanel> updatePanel(
+            @PathVariable String squadId,
+            @PathVariable UUID panelId,
+            @RequestBody SquadPanel panel,
+            HttpServletRequest request) {
+        String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        try {
+            return ResponseEntity.ok(squadService.updatePanel(panelId, userId, panel));
+        } catch (SecurityException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @DeleteMapping("/{squadId}/panels/{panelId}")
+    public ResponseEntity<Void> deletePanel(
+            @PathVariable String squadId,
+            @PathVariable UUID panelId,
+            HttpServletRequest request) {
+        String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        try {
+            squadService.deletePanel(panelId, userId);
+            return ResponseEntity.noContent().build();
+        } catch (SecurityException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
     }
 }
