@@ -1,6 +1,7 @@
 package com.agilespace.backend.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -19,6 +20,7 @@ public class RegisterRequestDto {
     private String name;
 
     @NotBlank(message = "Senha é obrigatória")
+    @Size(min = 8, max = 128, message = "Senha deve ter entre 8 e 128 caracteres")
     private String password;
 
     private String jiraAccountId;

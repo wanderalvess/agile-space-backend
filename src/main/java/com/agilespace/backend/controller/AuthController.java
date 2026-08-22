@@ -3,7 +3,9 @@ package com.agilespace.backend.controller;
 import com.agilespace.backend.dto.AuthResponseDto;
 import com.agilespace.backend.dto.LoginRequestDto;
 import com.agilespace.backend.dto.RegisterRequestDto;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.AuthService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,23 +38,22 @@ public class AuthController {
     }
 
     /**
-     * Retorna os dados da sessão autenticada.
+     * Retorna os dados da sessão autenticada a partir do usuário validado pelo JwtAuthenticationFilter.
      */
     @GetMapping("/me")
-    public ResponseEntity<AuthResponseDto> getMe(
-            @RequestHeader(value = "Authorization", required = false) String authHeader,
-            @RequestParam(value = "userId", required = false) String userId) {
-        String token = authHeader != null ? authHeader.replace("Bearer ", "").trim() : userId;
-        return ResponseEntity.ok(authService.getMe(token));
+    public ResponseEntity<AuthResponseDto> getMe(HttpServletRequest request) {
+        String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        return ResponseEntity.ok(authService.getMe(userId));
     }
 
     /**
-     * Alterna o projeto ativo do usuário.
+     * Alterna o projeto ativo do usuário autenticado.
      */
     @PostMapping("/switch-project")
     public ResponseEntity<AuthResponseDto> switchProject(
-            @RequestParam String userId,
+            HttpServletRequest request,
             @RequestParam String projectId) {
+        String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
         return ResponseEntity.ok(authService.switchActiveProject(userId, projectId));
     }
 }

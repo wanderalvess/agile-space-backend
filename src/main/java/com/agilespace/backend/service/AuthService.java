@@ -9,7 +9,6 @@ import com.agilespace.backend.repository.ProjectMemberRoleRepository;
 import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.security.JwtTokenUtil;
 import com.agilespace.backend.security.PasswordUtil;
-import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -123,38 +122,31 @@ public class AuthService {
     }
 
     /**
-     * Retorna os dados completos do usuário autenticado a partir do token ou id.
+     * Retorna os dados completos do usuário autenticado (id já validado pelo JwtAuthenticationFilter).
      */
     @Transactional(readOnly = true)
-    public AuthResponseDto getMe(String tokenOrUserId) {
-        User user = null;
-
-        if (tokenOrUserId != null && tokenOrUserId.contains(".")) {
-            JsonNode claims = jwtTokenUtil.validateAndExtractClaims(tokenOrUserId);
-            if (claims != null && claims.has("sub")) {
-                user = userRepository.findById(claims.get("sub").asText()).orElse(null);
-            }
-        }
-
-        if (user == null && tokenOrUserId != null) {
-            user = userRepository.findById(tokenOrUserId).orElse(null);
-        }
-
-        if (user == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão inválida ou expirada");
-        }
+    public AuthResponseDto getMe(String userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão inválida ou expirada"));
 
         UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(user);
         return buildAuthResponse(user, access);
     }
 
     /**
-     * Alterna o projeto ativo do usuário.
+     * Alterna o projeto ativo do usuário autenticado, validando que ele tem acesso ao projeto destino.
      */
     @Transactional
     public AuthResponseDto switchActiveProject(String userId, String newProjectId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado"));
+
+        UserProjectAccessDto currentAccess = userProjectResolverService.resolveUserAccess(user);
+        boolean hasAccess = currentAccess.getProjects().stream()
+                .anyMatch(p -> p.getProjectId().equalsIgnoreCase(newProjectId));
+        if (!hasAccess) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Usuário não tem acesso a este projeto");
+        }
 
         user.setDefaultProjectId(newProjectId);
         user = userRepository.save(user);

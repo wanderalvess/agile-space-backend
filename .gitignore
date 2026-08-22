@@ -45,3 +45,7 @@ build/
 .env.*
 *.pem
 *.key
+
+### Claude Code (local dev tooling, machine-specific) ###
+.claude/
+run-backend.cmd

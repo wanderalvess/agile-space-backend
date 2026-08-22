@@ -4,7 +4,9 @@ import com.agilespace.backend.domain.SquadMember;
 import com.agilespace.backend.domain.User;
 import com.agilespace.backend.domain.UserJiraConfig;
 import com.agilespace.backend.domain.UserTdnConfig;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.UserService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -62,8 +64,23 @@ public class UserController {
         return ResponseEntity.ok(user);
     }
 
+    /** Cria/atualiza um perfil — o chamador só pode gravar o próprio id, a menos que seja ADMIN
+     *  (usado pelo painel /admin para editar outros usuários), impedindo que um usuário comum
+     *  sobrescreva o perfil de outro trocando o id no corpo da requisição. */
     @PostMapping
-    public ResponseEntity<User> saveUser(@RequestBody User user) {
+    public ResponseEntity<?> saveUser(@RequestBody User user, HttpServletRequest request) {
+        String authUserId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        String authRole = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        if (authUserId == null) {
+            return forbidden("Sessão inválida.");
+        }
+        boolean isAdmin = "ADMIN".equals(authRole);
+        if (!isAdmin && user.getId() != null && !user.getId().isBlank() && !user.getId().equals(authUserId)) {
+            return forbidden("Você só pode salvar o seu próprio perfil.");
+        }
+        if (user.getId() == null || user.getId().isBlank()) {
+            user.setId(authUserId);
+        }
         User saved = service.saveUser(user);
         return ResponseEntity.ok(saved);
     }

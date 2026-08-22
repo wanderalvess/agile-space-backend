@@ -16,6 +16,9 @@ spring:
 
 server:
   port: ${PORT:8002}
+  error:
+    include-message: always
+    include-binding-errors: always
 
 springdoc:
   api-docs:
