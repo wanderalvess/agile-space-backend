@@ -115,6 +115,23 @@ public class SquadServiceTest {
     }
 
     @Test
+    public void testBatchUpsertIssuesPersistsScheduleDates() {
+        SquadIssueSnapshot snap1 = SquadIssueSnapshot.builder()
+            .jiraKey("JIRA-2")
+            .status("In Progress")
+            .targetStart("2026-08-18")
+            .targetEnd("2026-08-25")
+            .build();
+        List<SquadIssueSnapshot> list = Arrays.asList(snap1);
+
+        when(issueSnapshotRepository.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        List<SquadIssueSnapshot> result = service.batchUpsertIssues("squad-alpha", list);
+        assertEquals("2026-08-18", result.get(0).getTargetStart());
+        assertEquals("2026-08-25", result.get(0).getTargetEnd());
+    }
+
+    @Test
     public void testBatchDeleteIssues() {
         service.batchDeleteIssues("s1", Arrays.asList("k1"));
         verify(issueSnapshotRepository).deleteBySquadIdAndJiraKeyIn("s1", Arrays.asList("k1"));

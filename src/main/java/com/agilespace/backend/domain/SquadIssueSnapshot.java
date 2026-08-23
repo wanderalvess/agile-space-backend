@@ -76,6 +76,12 @@ public class SquadIssueSnapshot {
     @Column(name = "due_date")
     private String dueDate;
 
+    @Column(name = "target_start")
+    private String targetStart;
+
+    @Column(name = "target_end")
+    private String targetEnd;
+
     @Column(name = "parent_key")
     private String parentKey;
 
