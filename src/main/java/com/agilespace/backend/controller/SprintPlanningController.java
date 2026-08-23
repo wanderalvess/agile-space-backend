@@ -7,6 +7,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/sprint-plannings")
 @RequiredArgsConstructor
@@ -14,6 +16,16 @@ import org.springframework.web.bind.annotation.*;
 public class SprintPlanningController {
 
     private final SprintPlanningService sprintPlanningService;
+
+    @GetMapping
+    public ResponseEntity<List<SprintPlanning>> listReadyForPoker(
+            @RequestParam(value = "readyForPoker", required = false, defaultValue = "false") boolean readyForPoker,
+            @RequestParam(value = "limit", required = false, defaultValue = "20") int limit) {
+        if (!readyForPoker) {
+            return ResponseEntity.ok(List.of());
+        }
+        return ResponseEntity.ok(sprintPlanningService.listReadyForPoker(limit));
+    }
 
     @GetMapping("/{id}")
     public ResponseEntity<SprintPlanning> getPlanner(@PathVariable("id") String id) {

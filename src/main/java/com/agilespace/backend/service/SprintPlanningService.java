@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -37,5 +38,10 @@ public class SprintPlanningService {
     @Transactional
     public void deletePlanner(String id) {
         sprintPlanningRepository.deleteById(id);
+    }
+
+    @Transactional(readOnly = true)
+    public List<SprintPlanning> listReadyForPoker(int limit) {
+        return sprintPlanningRepository.findReadyForPoker(limit);
     }
 }
