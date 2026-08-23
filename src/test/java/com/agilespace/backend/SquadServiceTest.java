@@ -47,10 +47,12 @@ public class SquadServiceTest {
 
     @Test
     public void testSaveSquad() {
-        Squad squad = Squad.builder().build();
-        when(squadRepository.save(squad)).thenReturn(squad);
+        Squad squad = Squad.builder().id("squad-alpha").build();
+        when(squadRepository.findById("squad-alpha")).thenReturn(Optional.empty());
+        when(squadRepository.save(any(Squad.class))).thenAnswer(i -> i.getArgument(0));
         Squad saved = service.saveSquad(squad);
         assertNotNull(saved);
+        assertEquals("squad-alpha", saved.getId());
     }
 
     @Test

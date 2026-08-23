@@ -2,7 +2,9 @@ package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.User;
 import com.agilespace.backend.domain.UserJiraConfig;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.UserService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -48,10 +50,25 @@ public class UserControllerTest {
     @Test
     public void testSaveUser() {
         User user = new User();
+        user.setId("u1");
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("u1");
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE)).thenReturn("MEMBER");
         when(service.saveUser(user)).thenReturn(user);
-        
-        ResponseEntity<User> response = controller.saveUser(user);
-        
+
+        ResponseEntity<?> response = controller.saveUser(user, request);
+
         assertEquals(HttpStatus.OK, response.getStatusCode());
+    }
+
+    @Test
+    public void testSaveUserRejectsUnauthenticatedRequest() {
+        User user = new User();
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn(null);
+
+        ResponseEntity<?> response = controller.saveUser(user, request);
+
+        assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
     }
 }

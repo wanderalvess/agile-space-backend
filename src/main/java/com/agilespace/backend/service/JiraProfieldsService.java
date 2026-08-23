@@ -27,7 +27,6 @@ import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
-import jakarta.annotation.PostConstruct;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -41,18 +40,6 @@ public class JiraProfieldsService {
     private final ProjectMemberRoleRepository projectMemberRoleRepository;
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper = new ObjectMapper();
-
-    @PostConstruct
-    public void initDefaultProjectIfEmpty() {
-        try {
-            if (projectConfigRepository.count() == 0) {
-                log.info("Inicializando projeto padrão de Governança Profields: DDWMISSI");
-                syncProjectFromProfields(null, "DDWMISSI", null);
-            }
-        } catch (Exception e) {
-            log.warn("Aviso na auto-inicialização do projeto Profields: {}", e.getMessage());
-        }
-    }
 
     private RestTemplate createSslLenientRestTemplate() {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory() {
@@ -88,44 +75,44 @@ public class JiraProfieldsService {
      */
     @Transactional
     public ProjectDetailDto syncProjectFromProfields(String domain, String projectKey, String token) {
-        String cleanDomain = (domain != null && !domain.isBlank()) 
-                ? domain.trim().replace("https://", "").replace("http://", "") 
+        if (token == null || token.isBlank()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "Token do Jira é obrigatório para sincronizar o projeto");
+        }
+
+        String cleanDomain = (domain != null && !domain.isBlank())
+                ? domain.trim().replace("https://", "").replace("http://", "")
                 : "jira.empresa.com.br";
         String cleanKey = projectKey.trim().toUpperCase();
 
         log.info("Iniciando sincronização Profields para projeto {} no domínio {}", cleanKey, cleanDomain);
 
-        JsonNode rootNode = null;
-        if (token != null && !token.isBlank()) {
-            try {
-                RestTemplate restTemplate = createSslLenientRestTemplate();
-                HttpHeaders headers = new HttpHeaders();
-                headers.set("Authorization", "Bearer " + token.trim());
-                headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
-                headers.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AgileSpace/1.0");
-                HttpEntity<Void> entity = new HttpEntity<>(headers);
+        JsonNode rootNode;
+        try {
+            RestTemplate restTemplate = createSslLenientRestTemplate();
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Authorization", "Bearer " + token.trim());
+            headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+            headers.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AgileSpace/1.0");
+            HttpEntity<Void> entity = new HttpEntity<>(headers);
 
-                String url = "https://" + cleanDomain + "/rest/profields/api/2.0/layouts/projects/" + cleanKey + "?expand=predefined";
-                ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
-                if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-                    rootNode = objectMapper.readTree(response.getBody());
-                }
-            } catch (Exception e) {
-                log.warn("Não foi possível obter dados reais do Profields ({}), utilizando parser de fallback/mock.", e.getMessage());
+            String url = "https://" + cleanDomain + "/rest/profields/api/2.0/layouts/projects/" + cleanKey + "?expand=predefined";
+            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+                throw new org.springframework.web.server.ResponseStatusException(
+                        HttpStatus.BAD_GATEWAY, "Jira Profields retornou resposta inválida para o projeto " + cleanKey);
             }
+            rootNode = objectMapper.readTree(response.getBody());
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("Falha ao sincronizar projeto {} com o Profields: {}", cleanKey, e.getMessage());
+            throw new org.springframework.web.server.ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY, "Não foi possível obter dados do Profields para o projeto " + cleanKey + ": " + e.getMessage(), e);
         }
 
-        // Se não obteve dados da API remota ou está sem token, cria/retorna o modelo populado (ex: DDWMISSI)
-        ProjectConfig project;
-        List<ProjectMemberRole> members = new ArrayList<>();
-
-        if (rootNode != null) {
-            project = parseProfieldsJson(cleanKey, rootNode);
-            members = parseProfieldsMembers(cleanKey, rootNode);
-        } else {
-            project = getOrCreateDefaultProjectConfig(cleanKey);
-            members = getOrCreateDefaultMembers(cleanKey);
-        }
+        ProjectConfig project = parseProfieldsJson(cleanKey, rootNode);
+        List<ProjectMemberRole> members = parseProfieldsMembers(cleanKey, rootNode);
 
         // Salva Projeto
         project = projectConfigRepository.save(project);
@@ -450,100 +437,6 @@ public class JiraProfieldsService {
             return new MemberExtracted(accountId, displayName, email, avatarUrl);
         }
         return null;
-    }
-
-    /**
-     * Cria a configuração padrão / mock baseada na imagem real enviada da TOTVS (DDWMISSI).
-     */
-    private ProjectConfig getOrCreateDefaultProjectConfig(String projectKey) {
-        return projectConfigRepository.findById(projectKey).orElseGet(() ->
-            ProjectConfig.builder()
-                    .id(projectKey)
-                    .name(projectKey)
-                    .segmentName("Distribuição")
-                    .tribeName("Distribuição")
-                    .locality("Goiânia")
-                    .vicePresident("Diretoria de Operações")
-                    .vpArea("Engenharia & Produtos")
-                    .devTeamSize(12)
-                    .status("EM ANDAMENTO")
-                    .creationDate("19/06/24")
-                    .autoTdnDoc(false)
-                    .disableAutoSubtasks(true)
-                    .specificSubtasks("Sub-tarefas de Desenvolvimento e Testes Automatizados")
-                    .saasExpedition(false)
-                    .engineeringOnlyExpedition(false)
-                    .optionalWorklog(false)
-                    .build()
-        );
-    }
-
-    /**
-     * Cria os membros e lideranças oficiais baseados no layout do projeto da imagem.
-     */
-    private List<ProjectMemberRole> getOrCreateDefaultMembers(String projectKey) {
-        List<ProjectMemberRole> list = new ArrayList<>();
-        list.add(ProjectMemberRole.builder()
-                .projectId(projectKey)
-                .roleName("Agile Master")
-                .roleKey("AGILE_MASTER")
-                .jiraAccountId("marielen.leite")
-                .displayName("Marielen Cristine de Almeida Leite")
-                .email("marielen.leite@empresa.com.br")
-                .isLeadership(true)
-                .build());
-
-        list.add(ProjectMemberRole.builder()
-                .projectId(projectKey)
-                .roleName("Agile Coach")
-                .roleKey("AGILE_COACH")
-                .jiraAccountId("kamila.santos")
-                .displayName("Kamila Silveira dos Santos")
-                .email("kamila.santos@empresa.com.br")
-                .isLeadership(true)
-                .build());
-
-        list.add(ProjectMemberRole.builder()
-                .projectId(projectKey)
-                .roleName("Product Owner")
-                .roleKey("PRODUCT_OWNER")
-                .jiraAccountId("caio.almeida")
-                .displayName("Caio Fabio Tavares Almeida")
-                .email("caio.almeida@empresa.com.br")
-                .isLeadership(true)
-                .build());
-
-        list.add(ProjectMemberRole.builder()
-                .projectId(projectKey)
-                .roleName("Product Manager")
-                .roleKey("PRODUCT_MANAGER")
-                .jiraAccountId("alvario.junior")
-                .displayName("Alvario de Matos E Silva Junior")
-                .email("alvario.junior@empresa.com.br")
-                .isLeadership(true)
-                .build());
-
-        list.add(ProjectMemberRole.builder()
-                .projectId(projectKey)
-                .roleName("People Lead")
-                .roleKey("PEOPLE_LEAD")
-                .jiraAccountId("guilherme.marques")
-                .displayName("Guilherme Silva Marques")
-                .email("guilherme.marques@empresa.com.br")
-                .isLeadership(true)
-                .build());
-
-        list.add(ProjectMemberRole.builder()
-                .projectId(projectKey)
-                .roleName("Tribe Lead")
-                .roleKey("TRIBE_LEAD")
-                .jiraAccountId("silas.lopes")
-                .displayName("Silas Henrique de Oliveira Lopes")
-                .email("silas.lopes@empresa.com.br")
-                .isLeadership(true)
-                .build());
-
-        return list;
     }
 
     private static final Set<String> LEADERSHIP_ROLE_NAMES = Set.of(

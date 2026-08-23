@@ -138,7 +138,9 @@ public class JiraAdminService {
                 try {
                     String rolesUrl = "https://" + domain + "/rest/api/2/project/" + projectKey + "/role";
                     rolesNode = getJson(rolesUrl, entity);
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    log.warn("Falha ao buscar roles do projeto {} via endpoint /role: {}", projectKey, e.getMessage());
+                }
             }
 
             if (rolesNode != null && rolesNode.isObject()) {
@@ -201,19 +203,25 @@ public class JiraAdminService {
                     }
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            log.warn("Falha ao buscar líderes de componentes do projeto {}: {}", projectKey, e.getMessage());
+        }
 
         // 4. Épicos e Iniciativas via JQL
         try {
             String epicSearchUrl = "https://" + domain + "/rest/api/2/search?jql=project%3D" + projectKey + "+AND+issuetype+in+(Epic%2CEpico%2C%C3%89pico%2CInitiative%2CIniciativa%2CFeature%2CTema)+ORDER+BY+updated+DESC&fields=*all&expand=names&maxResults=100";
             collectMembersFromJql(epicSearchUrl, entity, recordMember);
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            log.warn("Falha ao buscar membros via épicos/iniciativas do projeto {}: {}", projectKey, e.getMessage());
+        }
 
         // 5. Tarefas Recentes via JQL
         try {
             String searchUrl = "https://" + domain + "/rest/api/2/search?jql=project%3D" + projectKey + "+ORDER+BY+updated+DESC&fields=*all&expand=names&maxResults=100";
             collectMembersFromJql(searchUrl, entity, recordMember);
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            log.warn("Falha ao buscar membros via tarefas recentes do projeto {}: {}", projectKey, e.getMessage());
+        }
 
         List<JiraMemberCandidateDto> members = candidateMap.values().stream()
                 .map(c -> JiraMemberCandidateDto.builder()

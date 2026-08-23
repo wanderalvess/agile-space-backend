@@ -216,7 +216,9 @@ public class SquadService {
                                 userRepository.save(u);
                             }
                         });
-                    } catch (Exception ignored) {}
+                    } catch (Exception ex) {
+                        log.warn("Falha ao desvincular usuário {} da squad {} após remoção: {}", jiraAccountId, squadId, ex.getMessage());
+                    }
                 });
     }
 
