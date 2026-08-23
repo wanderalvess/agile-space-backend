@@ -1,5 +1,6 @@
 package com.agilespace.backend.domain;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -22,6 +23,7 @@ public class PromptComment {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "prompt_id", nullable = false)
+    @JsonIgnore
     private Prompt prompt;
 
     @Column(columnDefinition = "TEXT", nullable = false)
