@@ -204,7 +204,7 @@ public class JiraAdminServiceTest {
         verify(userRepository).save(userCaptor.capture());
         User created = userCaptor.getValue();
         assertEquals("acc1", created.getId());
-        assertEquals("acc1@totvs.com.br", created.getEmail());
+        assertEquals("acc1@empresa.com", created.getEmail());
         assertEquals("PROJ1", created.getSquadId());
         assertEquals(6, created.getDailyHours());
     }

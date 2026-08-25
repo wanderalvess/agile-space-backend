@@ -37,10 +37,10 @@ public class ProjectMemberRole {
     private String jiraAccountId;
 
     @Column(name = "display_name", nullable = false)
-    private String displayName; // Ex: "Marielen Cristine de Almeida Leite"
+    private String displayName; //
 
     @Column(name = "email")
-    private String email; // Ex: "marielen.leite@totvs.com.br"
+    private String email; // Ex: "colaborador@empresa.com.br"
 
     @Column(name = "avatar_url")
     private String avatarUrl;

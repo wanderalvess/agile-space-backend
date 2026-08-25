@@ -1,0 +1,1997 @@
+[
+  {
+    "tag": "v4.0.0",
+    "date": "25 de Agosto, 2026",
+    "title": "Arquitetura Next.js 16 & Java 21 Spring Boot — Espaço Ágil v4",
+    "description": "Evolução estrutural completa da suíte com backend Spring Boot, persistência JPA, inteligência artificial integrada e nova central de versões.",
+    "changes": [
+      "Migração do frontend para Next.js 16 (App Router) com suporte a React 19.",
+      "Backend reestruturado em Java 21 Spring Boot com Spring Security e JPA/Hibernate.",
+      "Nova central de Changelog e Gerenciamento de Versões com persistência no banco.",
+      "Integração com IA Generativa para assistência em cerimoniais ágeis."
+    ],
+    "type": "major",
+    "iconName": "Rocket",
+    "iconClass": "h-5 w-5 text-primary"
+  },
+  {
+    "tag": "v3.117.1",
+    "date": "7 de Agosto, 2026",
+    "title": "fix(squad): bloqueia acesso sem login em /squad e /squa...",
+    "description": "fix(squad): bloqueia acesso sem login em /squad e /squad/panels",
+    "changes": [
+      "fix(squad): bloqueia acesso sem login em /squad e /squad/panels"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.117.0",
+    "date": "7 de Agosto, 2026",
+    "title": "feat(squad): Squad Pulse — dashboard de produtividade i...",
+    "description": "feat(squad): Squad Pulse — dashboard de produtividade integrado ao Jira",
+    "changes": [
+      "feat(squad): Squad Pulse — dashboard de produtividade integrado ao Jira"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.116.6",
+    "date": "7 de Agosto, 2026",
+    "title": "fix(poker): tempo real por tarefa, relatório honesto e ...",
+    "description": "fix(poker): tempo real por tarefa, relatório honesto e PDF refeito",
+    "changes": [
+      "fix(poker): tempo real por tarefa, relatório honesto e PDF refeito"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.116.5",
+    "date": "6 de Agosto, 2026",
+    "title": "fix(poker): busca da Base de Conhecimento no chat da sa...",
+    "description": "fix(poker): busca da Base de Conhecimento no chat da sala",
+    "changes": [
+      "fix(poker): busca da Base de Conhecimento no chat da sala"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.116.4",
+    "date": "6 de Agosto, 2026",
+    "title": "fix(poker): permite participante trocar o proprio role ...",
+    "description": "fix(poker): permite participante trocar o proprio role tecnico",
+    "changes": [
+      "fix(poker): permite participante trocar o proprio role tecnico"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.116.3",
+    "date": "6 de Agosto, 2026",
+    "title": "fix(poker): modal de criar sala mais largo e sem ícone ...",
+    "description": "fix(poker): modal de criar sala mais largo e sem ícone no topo",
+    "changes": [
+      "fix(poker): modal de criar sala mais largo e sem ícone no topo"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.116.2",
+    "date": "5 de Agosto, 2026",
+    "title": "Merge origin/main: reconcilia poker (park/roles/deck/im...",
+    "description": "Merge origin/main: reconcilia poker (park/roles/deck/import) com camiseta+relatório",
+    "changes": [
+      "Merge origin/main: reconcilia poker (park/roles/deck/import) com camiseta+relatório"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.116.1",
+    "date": "5 de Agosto, 2026",
+    "title": "fix: onda de correções e melhorias — poker, daily-flow,...",
+    "description": "fix: onda de correções e melhorias — poker, daily-flow, perfil, layout",
+    "changes": [
+      "fix: onda de correções e melhorias — poker, daily-flow, perfil, layout"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.116.0",
+    "date": "5 de Agosto, 2026",
+    "title": "feat(poker): busca, filtro e badges de status no import...",
+    "description": "feat(poker): busca, filtro e badges de status no import do Jira",
+    "changes": [
+      "feat(poker): busca, filtro e badges de status no import do Jira"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.115.0",
+    "date": "5 de Agosto, 2026",
+    "title": "feat(retro): rastreio de ações entre sprints + painel d...",
+    "description": "feat(retro): rastreio de ações entre sprints + painel de configurações",
+    "changes": [
+      "feat(retro): rastreio de ações entre sprints + painel de configurações"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.114.0",
+    "date": "30 de Julho, 2026",
+    "title": "feat(poker): adicionar modal de exportação de refinamen...",
+    "description": "feat(poker): adicionar modal de exportação de refinamento e compartilhamento de sala",
+    "changes": [
+      "feat(poker): adicionar modal de exportação de refinamento e compartilhamento de sala"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.113.0",
+    "date": "29 de Julho, 2026",
+    "title": "feat(prompt-hub): reformula a Biblioteca de IA e corrig...",
+    "description": "feat(prompt-hub): reformula a Biblioteca de IA e corrige falhas de acesso",
+    "changes": [
+      "feat(prompt-hub): reformula a Biblioteca de IA e corrige falhas de acesso"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.112.0",
+    "date": "23 de Julho, 2026",
+    "title": "feat: melhorias visuais no motor de mock",
+    "description": "Atualização baseada no commit: 773602b",
+    "changes": [
+      "feat: melhorias visuais no motor de mock"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.111.0",
+    "date": "23 de Julho, 2026",
+    "title": "feat: melhoria url mock motor",
+    "description": "Atualização baseada no commit: 123513e",
+    "changes": [
+      "feat: melhoria url mock motor"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.110.0",
+    "date": "23 de Julho, 2026",
+    "title": "feat: adicionar simulador de caos e melhorias visuais n...",
+    "description": "feat: adicionar simulador de caos e melhorias visuais no motor de mock",
+    "changes": [
+      "feat: adicionar simulador de caos e melhorias visuais no motor de mock"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.109.0",
+    "date": "22 de Julho, 2026",
+    "title": "refactor(jira): view de resultados do import mais legiv...",
+    "description": "refactor(jira): view de resultados do import mais legivel",
+    "changes": [
+      "refactor(jira): view de resultados do import mais legivel"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.108.1",
+    "date": "22 de Julho, 2026",
+    "title": "fix(poker): header — botoes uniformes e titulo menor",
+    "description": "Atualização baseada no commit: 2e29937",
+    "changes": [
+      "fix(poker): header — botoes uniformes e titulo menor"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.108.0",
+    "date": "22 de Julho, 2026",
+    "title": "feat(poker): \"Adiar\" (park) atras de toggle opt-in",
+    "description": "Atualização baseada no commit: 3dc6905",
+    "changes": [
+      "feat(poker): \"Adiar\" (park) atras de toggle opt-in"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.107.1",
+    "date": "22 de Julho, 2026",
+    "title": "fix(auth): corrige URL do JWKS para verificar ID token ...",
+    "description": "fix(auth): corrige URL do JWKS para verificar ID token do Firebase",
+    "changes": [
+      "fix(auth): corrige URL do JWKS para verificar ID token do Firebase"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.107.0",
+    "date": "22 de Julho, 2026",
+    "title": "feat(poker): preparação de item (descrição/critérios) e...",
+    "description": "feat(poker): preparação de item (descrição/critérios) e notas de refinamento",
+    "changes": [
+      "feat(poker): preparação de item (descrição/critérios) e notas de refinamento"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.106.0",
+    "date": "22 de Julho, 2026",
+    "title": "feat(poker): adiar tarefa (park) como estado próprio, d...",
+    "description": "feat(poker): adiar tarefa (park) como estado próprio, distinto de pular",
+    "changes": [
+      "feat(poker): adiar tarefa (park) como estado próprio, distinto de pular"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.105.0",
+    "date": "22 de Julho, 2026",
+    "title": "feat(poker): história de referência e aviso de rodadas ...",
+    "description": "feat(poker): história de referência e aviso de rodadas (opt-in)",
+    "changes": [
+      "feat(poker): história de referência e aviso de rodadas (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.104.0",
+    "date": "22 de Julho, 2026",
+    "title": "feat(poker): cargo por voto, agrupamento por papel e ba...",
+    "description": "feat(poker): cargo por voto, agrupamento por papel e baralho oculto pós-reveal",
+    "changes": [
+      "feat(poker): cargo por voto, agrupamento por papel e baralho oculto pós-reveal"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.103.0",
+    "date": "22 de Julho, 2026",
+    "title": "feat(poker): reações colapsáveis que não cobrem o baral...",
+    "description": "feat(poker): reações colapsáveis que não cobrem o baralho",
+    "changes": [
+      "feat(poker): reações colapsáveis que não cobrem o baralho"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.102.0",
+    "date": "22 de Julho, 2026",
+    "title": "refactor(poker): relatório consolidado compacto pós-rev...",
+    "description": "refactor(poker): relatório consolidado compacto pós-reveal",
+    "changes": [
+      "refactor(poker): relatório consolidado compacto pós-reveal"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.101.0",
+    "date": "22 de Julho, 2026",
+    "title": "feat(poker): painel do facilitador com deck preview, bu...",
+    "description": "feat(poker): painel do facilitador com deck preview, busca e agrupar por papel",
+    "changes": [
+      "feat(poker): painel do facilitador com deck preview, busca e agrupar por papel"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.100.0",
+    "date": "22 de Julho, 2026",
+    "title": "feat(poker): importação em lote com dedup/tipo e modais...",
+    "description": "feat(poker): importação em lote com dedup/tipo e modais no padrão glass",
+    "changes": [
+      "feat(poker): importação em lote com dedup/tipo e modais no padrão glass"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.99.0",
+    "date": "22 de Julho, 2026",
+    "title": "feat(poker): baralho estilo carta, voto por teclado e ?...",
+    "description": "feat(poker): baralho estilo carta, voto por teclado e ? / ☕ agrupados",
+    "changes": [
+      "feat(poker): baralho estilo carta, voto por teclado e ? / ☕ agrupados"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.98.4",
+    "date": "20 de Julho, 2026",
+    "title": "chore: ignora .claude/ (config local do Claude Code)",
+    "description": "Atualização baseada no commit: 0c92be8",
+    "changes": [
+      "chore: ignora .claude/ (config local do Claude Code)"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.98.3",
+    "date": "20 de Julho, 2026",
+    "title": "fix(auth): improve error handling and logging in getAut...",
+    "description": "fix(auth): improve error handling and logging in getAuthHeader and fetchJiraIssues",
+    "changes": [
+      "fix(auth): improve error handling and logging in getAuthHeader and fetchJiraIssues"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.98.2",
+    "date": "20 de Julho, 2026",
+    "title": "fix(poker): modal de sessão adapta a light/dark e não r...",
+    "description": "fix(poker): modal de sessão adapta a light/dark e não rola mais",
+    "changes": [
+      "fix(poker): modal de sessão adapta a light/dark e não rola mais"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.98.1",
+    "date": "19 de Julho, 2026",
+    "title": "fix(poker): join falhava ao trocar de sala com role dif...",
+    "description": "fix(poker): join falhava ao trocar de sala com role diferente (list negado)",
+    "changes": [
+      "fix(poker): join falhava ao trocar de sala com role diferente (list negado)"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.98.0",
+    "date": "19 de Julho, 2026",
+    "title": "refactor(poker): painel do facilitador em abas (fim do ...",
+    "description": "refactor(poker): painel do facilitador em abas (fim do scroll infinito)",
+    "changes": [
+      "refactor(poker): painel do facilitador em abas (fim do scroll infinito)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.97.0",
+    "date": "19 de Julho, 2026",
+    "title": "feat(poker): pré-configs e preview do baralho no modal ...",
+    "description": "feat(poker): pré-configs e preview do baralho no modal de sessão",
+    "changes": [
+      "feat(poker): pré-configs e preview do baralho no modal de sessão"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.96.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): redesenha o modal de configurar sessão",
+    "description": "Atualização baseada no commit: 550f028",
+    "changes": [
+      "feat(poker): redesenha o modal de configurar sessão"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.95.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): reações (emoji) efêmeras durante a votação...",
+    "description": "feat(poker): reações (emoji) efêmeras durante a votação (opt-in)",
+    "changes": [
+      "feat(poker): reações (emoji) efêmeras durante a votação (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.94.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): paridade async — insights de revelação por...",
+    "description": "feat(poker): paridade async — insights de revelação por issue",
+    "changes": [
+      "feat(poker): paridade async — insights de revelação por issue"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.93.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): auto-consenso e sugestão de revotação (opt...",
+    "description": "feat(poker): auto-consenso e sugestão de revotação (opt-in)",
+    "changes": [
+      "feat(poker): auto-consenso e sugestão de revotação (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.92.1",
+    "date": "18 de Julho, 2026",
+    "title": "fix(types): resolve follow-ups da limpeza TS + remove c...",
+    "description": "fix(types): resolve follow-ups da limpeza TS + remove componente morto",
+    "changes": [
+      "fix(types): resolve follow-ups da limpeza TS + remove componente morto"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.92.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(jira): melhora importação — campos, dedup, tipo, l...",
+    "description": "feat(jira): melhora importação — campos, dedup, tipo, limite e log de token",
+    "changes": [
+      "feat(jira): melhora importação — campos, dedup, tipo, limite e log de token"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.91.0",
+    "date": "18 de Julho, 2026",
+    "title": "refactor(poker): organiza painel do facilitador em seçõ...",
+    "description": "refactor(poker): organiza painel do facilitador em seções",
+    "changes": [
+      "refactor(poker): organiza painel do facilitador em seções"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.90.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): templates de sala — salvar e reusar deck+c...",
+    "description": "feat(poker): templates de sala — salvar e reusar deck+configs+backlog",
+    "changes": [
+      "feat(poker): templates de sala — salvar e reusar deck+configs+backlog"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.89.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): ação \"enviar para grooming\" nos votos \"?\" ...",
+    "description": "feat(poker): ação \"enviar para grooming\" nos votos \"?\" (opt-in)",
+    "changes": [
+      "feat(poker): ação \"enviar para grooming\" nos votos \"?\" (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.88.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): auto-timer por tópico (opt-in)",
+    "description": "Atualização baseada no commit: 071e7c8",
+    "changes": [
+      "feat(poker): auto-timer por tópico (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.87.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): tempo real por tópico no dashboard final (...",
+    "description": "feat(poker): tempo real por tópico no dashboard final (opt-in)",
+    "changes": [
+      "feat(poker): tempo real por tópico no dashboard final (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.86.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): nota de decisão por tarefa (opt-in)",
+    "description": "Atualização baseada no commit: 019ac85",
+    "changes": [
+      "feat(poker): nota de decisão por tarefa (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.85.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): confiança agregada do time ao revelar",
+    "description": "Atualização baseada no commit: e4c876f",
+    "changes": [
+      "feat(poker): confiança agregada do time ao revelar"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.84.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): histograma de distribuição dos votos ao re...",
+    "description": "feat(poker): histograma de distribuição dos votos ao revelar (opt-in)",
+    "changes": [
+      "feat(poker): histograma de distribuição dos votos ao revelar (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.83.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): notificação \"sua vez\" ao abrir rodada (opt...",
+    "description": "feat(poker): notificação \"sua vez\" ao abrir rodada (opt-in)",
+    "changes": [
+      "feat(poker): notificação \"sua vez\" ao abrir rodada (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.82.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): revelação anônima (opt-in)",
+    "description": "Atualização baseada no commit: 5dd30a2",
+    "changes": [
+      "feat(poker): revelação anônima (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.81.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): histórico/velocity do time entre sessões (...",
+    "description": "feat(poker): histórico/velocity do time entre sessões (opt-in)",
+    "changes": [
+      "feat(poker): histórico/velocity do time entre sessões (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.80.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): voto de confiança (opt-in)",
+    "description": "Atualização baseada no commit: f0ff0de",
+    "changes": [
+      "feat(poker): voto de confiança (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.79.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): ritual de outliers ao revelar (opt-in)",
+    "description": "Atualização baseada no commit: 8a7b0a7",
+    "changes": [
+      "feat(poker): ritual de outliers ao revelar (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.78.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): timer countdown sincronizado entre cliente...",
+    "description": "feat(poker): timer countdown sincronizado entre clientes (offset de servidor)",
+    "changes": [
+      "feat(poker): timer countdown sincronizado entre clientes (offset de servidor)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.77.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): sidebars acessíveis no mobile via drawer (...",
+    "description": "feat(poker): sidebars acessíveis no mobile via drawer (Sheet)",
+    "changes": [
+      "feat(poker): sidebars acessíveis no mobile via drawer (Sheet)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.76.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): presença por heartbeat (online/offline + q...",
+    "description": "feat(poker): presença por heartbeat (online/offline + quórum sem fantasma)",
+    "changes": [
+      "feat(poker): presença por heartbeat (online/offline + quórum sem fantasma)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.75.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): corrige duração da sessão e torna limites ...",
+    "description": "feat(poker): corrige duração da sessão e torna limites de divergência configuráveis",
+    "changes": [
+      "feat(poker): corrige duração da sessão e torna limites de divergência configuráveis"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.74.3",
+    "date": "18 de Julho, 2026",
+    "title": "fix(auth): visitante não é obrigado a logar na tela ini...",
+    "description": "fix(auth): visitante não é obrigado a logar na tela inicial",
+    "changes": [
+      "fix(auth): visitante não é obrigado a logar na tela inicial"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.74.2",
+    "date": "18 de Julho, 2026",
+    "title": "chore(types): zera erros de TypeScript e remove ignoreB...",
+    "description": "chore(types): zera erros de TypeScript e remove ignoreBuildErrors",
+    "changes": [
+      "chore(types): zera erros de TypeScript e remove ignoreBuildErrors"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.74.1",
+    "date": "18 de Julho, 2026",
+    "title": "fix(theme): variantes de cor funcionam em claro e escur...",
+    "description": "fix(theme): variantes de cor funcionam em claro e escuro em todas as telas",
+    "changes": [
+      "fix(theme): variantes de cor funcionam em claro e escuro em todas as telas"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.74.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): configurações funcionais do facilitador",
+    "description": "Atualização baseada no commit: f4b636d",
+    "changes": [
+      "feat(poker): configurações funcionais do facilitador"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.73.2",
+    "date": "18 de Julho, 2026",
+    "title": "fix(poker): métricas e quórum ignoram gestão/espectador",
+    "description": "Atualização baseada no commit: 3b8034c",
+    "changes": [
+      "fix(poker): métricas e quórum ignoram gestão/espectador"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.73.1",
+    "date": "18 de Julho, 2026",
+    "title": "Corrige: gate de voto da gestão no modo assíncrono (Asy...",
+    "description": "Corrige: gate de voto da gestão no modo assíncrono (AsyncPokerRoom)",
+    "changes": [
+      "Corrige: gate de voto da gestão no modo assíncrono (AsyncPokerRoom)"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.73.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): painel do facilitador acessível no modo sí...",
+    "description": "feat(poker): painel do facilitador acessível no modo síncrono",
+    "changes": [
+      "feat(poker): painel do facilitador acessível no modo síncrono"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.72.25",
+    "date": "18 de Julho, 2026",
+    "title": "fix(poker): integridade de votos, denominador e limpeza...",
+    "description": "fix(poker): integridade de votos, denominador e limpeza de sessão",
+    "changes": [
+      "fix(poker): integridade de votos, denominador e limpeza de sessão"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.24",
+    "date": "18 de Julho, 2026",
+    "title": "Corrige: exportação de PDF do Scrum Poker cortava taref...",
+    "description": "Corrige: exportação de PDF do Scrum Poker cortava tarefas em sessões longas",
+    "changes": [
+      "Corrige: exportação de PDF do Scrum Poker cortava tarefas em sessões longas"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.23",
+    "date": "18 de Julho, 2026",
+    "title": "Melhora: acessibilidade nos botões do EliteTimer",
+    "description": "Atualização baseada no commit: 462b3a7",
+    "changes": [
+      "Melhora: acessibilidade nos botões do EliteTimer"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.22",
+    "date": "18 de Julho, 2026",
+    "title": "Melhora: Modo Teatro só encerra por quem apresenta; per...",
+    "description": "Melhora: Modo Teatro só encerra por quem apresenta; performance no Showcase",
+    "changes": [
+      "Melhora: Modo Teatro só encerra por quem apresenta; performance no Showcase"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.21",
+    "date": "18 de Julho, 2026",
+    "title": "Melhora: performance de renderização e validação na Ret...",
+    "description": "Melhora: performance de renderização e validação na Retrospectiva",
+    "changes": [
+      "Melhora: performance de renderização e validação na Retrospectiva"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.20",
+    "date": "18 de Julho, 2026",
+    "title": "Remove: código morto Timer.tsx e RetroGuide.tsx",
+    "description": "Atualização baseada no commit: bb981b4",
+    "changes": [
+      "Remove: código morto Timer.tsx e RetroGuide.tsx"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.19",
+    "date": "18 de Julho, 2026",
+    "title": "Corrige: permission-denied em votes reproduzido em prod...",
+    "description": "Corrige: permission-denied em votes reproduzido em produção",
+    "changes": [
+      "Corrige: permission-denied em votes reproduzido em produção"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.18",
+    "date": "18 de Julho, 2026",
+    "title": "Corrige: rotas /api/jira/* sem autenticação nem rate li...",
+    "description": "Corrige: rotas /api/jira/* sem autenticação nem rate limit",
+    "changes": [
+      "Corrige: rotas /api/jira/* sem autenticação nem rate limit"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.17",
+    "date": "15 de Julho, 2026",
+    "title": "Corrige: segurança, bugs de colaboração e performance e...",
+    "description": "Corrige: segurança, bugs de colaboração e performance em room/showcase/retro",
+    "changes": [
+      "Corrige: segurança, bugs de colaboração e performance em room/showcase/retro"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.16",
+    "date": "15 de Julho, 2026",
+    "title": "Corrige: enumeração de rooms/participants/votes sem esc...",
+    "description": "Corrige: enumeração de rooms/participants/votes sem escopo de sala",
+    "changes": [
+      "Corrige: enumeração de rooms/participants/votes sem escopo de sala"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.15",
+    "date": "15 de Julho, 2026",
+    "title": "Ajuste: v3.27.0",
+    "description": "Atualização baseada no commit: d03769e",
+    "changes": [
+      "Ajuste: v3.27.0"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.14",
+    "date": "15 de Julho, 2026",
+    "title": "Corrige: privilege escalation, XSS armazenado e IDOR em...",
+    "description": "Corrige: privilege escalation, XSS armazenado e IDOR em rooms/boards",
+    "changes": [
+      "Corrige: privilege escalation, XSS armazenado e IDOR em rooms/boards"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.13",
+    "date": "14 de Julho, 2026",
+    "title": "Corrige: worker do pdf-parse não resolvia sob Turbopack",
+    "description": "Atualização baseada no commit: 188b5b6",
+    "changes": [
+      "Corrige: worker do pdf-parse não resolvia sob Turbopack"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.12",
+    "date": "14 de Julho, 2026",
+    "title": "Corrige: vulnerabilidades críticas e bugs encontrados e...",
+    "description": "Corrige: vulnerabilidades críticas e bugs encontrados em auditoria",
+    "changes": [
+      "Corrige: vulnerabilidades críticas e bugs encontrados em auditoria"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.11",
+    "date": "24 de Junho, 2026",
+    "title": "Melhorias: ajuste imports",
+    "description": "Atualização baseada no commit: 6ac52d7",
+    "changes": [
+      "Melhorias: ajuste imports"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.10",
+    "date": "24 de Junho, 2026",
+    "title": "Ajuste: versions.json",
+    "description": "Atualização baseada no commit: 6858b07",
+    "changes": [
+      "Ajuste: versions.json"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.9",
+    "date": "24 de Junho, 2026",
+    "title": "Melhorias: v3.26.1",
+    "description": "Atualização baseada no commit: c513b08",
+    "changes": [
+      "Melhorias: v3.26.1"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.8",
+    "date": "24 de Junho, 2026",
+    "title": "Melhorias: v3.26.0",
+    "description": "Atualização baseada no commit: 50448f7",
+    "changes": [
+      "Melhorias: v3.26.0"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.7",
+    "date": "24 de Junho, 2026",
+    "title": "Melhorias: v3.25.0",
+    "description": "Atualização baseada no commit: baf86fe",
+    "changes": [
+      "Melhorias: v3.25.0"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.6",
+    "date": "24 de Junho, 2026",
+    "title": "Melhorias: v3.24.0",
+    "description": "Atualização baseada no commit: 4e57b5d",
+    "changes": [
+      "Melhorias: v3.24.0"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.5",
+    "date": "6 de Agosto, 2026",
+    "title": "fix(poker): busca da Base de Conhecimento no chat da sa...",
+    "description": "fix(poker): busca da Base de Conhecimento no chat da sala",
+    "changes": [
+      "fix(poker): busca da Base de Conhecimento no chat da sala"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.4",
+    "date": "6 de Agosto, 2026",
+    "title": "fix(poker): permite participante trocar o proprio role ...",
+    "description": "fix(poker): permite participante trocar o proprio role tecnico",
+    "changes": [
+      "fix(poker): permite participante trocar o proprio role tecnico"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.3",
+    "date": "6 de Agosto, 2026",
+    "title": "fix(poker): modal de criar sala mais largo e sem ícone ...",
+    "description": "fix(poker): modal de criar sala mais largo e sem ícone no topo",
+    "changes": [
+      "fix(poker): modal de criar sala mais largo e sem ícone no topo"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.2",
+    "date": "5 de Agosto, 2026",
+    "title": "Merge origin/main: reconcilia poker (park/roles/deck/im...",
+    "description": "Merge origin/main: reconcilia poker (park/roles/deck/import) com camiseta+relatório",
+    "changes": [
+      "Merge origin/main: reconcilia poker (park/roles/deck/import) com camiseta+relatório"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.1",
+    "date": "5 de Agosto, 2026",
+    "title": "fix: onda de correções e melhorias — poker, daily-flow,...",
+    "description": "fix: onda de correções e melhorias — poker, daily-flow, perfil, layout",
+    "changes": [
+      "fix: onda de correções e melhorias — poker, daily-flow, perfil, layout"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.72.0",
+    "date": "5 de Agosto, 2026",
+    "title": "feat(poker): busca, filtro e badges de status no import...",
+    "description": "feat(poker): busca, filtro e badges de status no import do Jira",
+    "changes": [
+      "feat(poker): busca, filtro e badges de status no import do Jira"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.71.0",
+    "date": "5 de Agosto, 2026",
+    "title": "feat(retro): rastreio de ações entre sprints + painel d...",
+    "description": "feat(retro): rastreio de ações entre sprints + painel de configurações",
+    "changes": [
+      "feat(retro): rastreio de ações entre sprints + painel de configurações"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.70.0",
+    "date": "30 de Julho, 2026",
+    "title": "feat(poker): adicionar modal de exportação de refinamen...",
+    "description": "feat(poker): adicionar modal de exportação de refinamento e compartilhamento de sala",
+    "changes": [
+      "feat(poker): adicionar modal de exportação de refinamento e compartilhamento de sala"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.69.0",
+    "date": "29 de Julho, 2026",
+    "title": "feat(prompt-hub): reformula a Biblioteca de IA e corrig...",
+    "description": "feat(prompt-hub): reformula a Biblioteca de IA e corrige falhas de acesso",
+    "changes": [
+      "feat(prompt-hub): reformula a Biblioteca de IA e corrige falhas de acesso"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.68.0",
+    "date": "23 de Julho, 2026",
+    "title": "feat: melhorias visuais no motor de mock",
+    "description": "Atualização baseada no commit: 773602b",
+    "changes": [
+      "feat: melhorias visuais no motor de mock"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.67.0",
+    "date": "23 de Julho, 2026",
+    "title": "feat: melhoria url mock motor",
+    "description": "Atualização baseada no commit: 123513e",
+    "changes": [
+      "feat: melhoria url mock motor"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.66.0",
+    "date": "23 de Julho, 2026",
+    "title": "feat: adicionar simulador de caos e melhorias visuais n...",
+    "description": "feat: adicionar simulador de caos e melhorias visuais no motor de mock",
+    "changes": [
+      "feat: adicionar simulador de caos e melhorias visuais no motor de mock"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.65.0",
+    "date": "22 de Julho, 2026",
+    "title": "refactor(jira): view de resultados do import mais legiv...",
+    "description": "refactor(jira): view de resultados do import mais legivel",
+    "changes": [
+      "refactor(jira): view de resultados do import mais legivel"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.64.1",
+    "date": "22 de Julho, 2026",
+    "title": "fix(poker): header — botoes uniformes e titulo menor",
+    "description": "Atualização baseada no commit: 2e29937",
+    "changes": [
+      "fix(poker): header — botoes uniformes e titulo menor"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.64.0",
+    "date": "22 de Julho, 2026",
+    "title": "feat(poker): \"Adiar\" (park) atras de toggle opt-in",
+    "description": "Atualização baseada no commit: 3dc6905",
+    "changes": [
+      "feat(poker): \"Adiar\" (park) atras de toggle opt-in"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.63.1",
+    "date": "22 de Julho, 2026",
+    "title": "fix(auth): corrige URL do JWKS para verificar ID token ...",
+    "description": "fix(auth): corrige URL do JWKS para verificar ID token do Firebase",
+    "changes": [
+      "fix(auth): corrige URL do JWKS para verificar ID token do Firebase"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.63.0",
+    "date": "22 de Julho, 2026",
+    "title": "feat(poker): preparação de item (descrição/critérios) e...",
+    "description": "feat(poker): preparação de item (descrição/critérios) e notas de refinamento",
+    "changes": [
+      "feat(poker): preparação de item (descrição/critérios) e notas de refinamento"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.62.0",
+    "date": "22 de Julho, 2026",
+    "title": "feat(poker): adiar tarefa (park) como estado próprio, d...",
+    "description": "feat(poker): adiar tarefa (park) como estado próprio, distinto de pular",
+    "changes": [
+      "feat(poker): adiar tarefa (park) como estado próprio, distinto de pular"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.61.0",
+    "date": "22 de Julho, 2026",
+    "title": "feat(poker): história de referência e aviso de rodadas ...",
+    "description": "feat(poker): história de referência e aviso de rodadas (opt-in)",
+    "changes": [
+      "feat(poker): história de referência e aviso de rodadas (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.60.0",
+    "date": "22 de Julho, 2026",
+    "title": "feat(poker): cargo por voto, agrupamento por papel e ba...",
+    "description": "feat(poker): cargo por voto, agrupamento por papel e baralho oculto pós-reveal",
+    "changes": [
+      "feat(poker): cargo por voto, agrupamento por papel e baralho oculto pós-reveal"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.59.0",
+    "date": "22 de Julho, 2026",
+    "title": "feat(poker): reações colapsáveis que não cobrem o baral...",
+    "description": "feat(poker): reações colapsáveis que não cobrem o baralho",
+    "changes": [
+      "feat(poker): reações colapsáveis que não cobrem o baralho"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.58.0",
+    "date": "22 de Julho, 2026",
+    "title": "refactor(poker): relatório consolidado compacto pós-rev...",
+    "description": "refactor(poker): relatório consolidado compacto pós-reveal",
+    "changes": [
+      "refactor(poker): relatório consolidado compacto pós-reveal"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.57.0",
+    "date": "22 de Julho, 2026",
+    "title": "feat(poker): painel do facilitador com deck preview, bu...",
+    "description": "feat(poker): painel do facilitador com deck preview, busca e agrupar por papel",
+    "changes": [
+      "feat(poker): painel do facilitador com deck preview, busca e agrupar por papel"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.56.0",
+    "date": "22 de Julho, 2026",
+    "title": "feat(poker): importação em lote com dedup/tipo e modais...",
+    "description": "feat(poker): importação em lote com dedup/tipo e modais no padrão glass",
+    "changes": [
+      "feat(poker): importação em lote com dedup/tipo e modais no padrão glass"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.55.0",
+    "date": "22 de Julho, 2026",
+    "title": "feat(poker): baralho estilo carta, voto por teclado e ?...",
+    "description": "feat(poker): baralho estilo carta, voto por teclado e ? / ☕ agrupados",
+    "changes": [
+      "feat(poker): baralho estilo carta, voto por teclado e ? / ☕ agrupados"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.54.4",
+    "date": "20 de Julho, 2026",
+    "title": "chore: ignora .claude/ (config local do Claude Code)",
+    "description": "Atualização baseada no commit: 0c92be8",
+    "changes": [
+      "chore: ignora .claude/ (config local do Claude Code)"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.54.3",
+    "date": "20 de Julho, 2026",
+    "title": "fix(auth): improve error handling and logging in getAut...",
+    "description": "fix(auth): improve error handling and logging in getAuthHeader and fetchJiraIssues",
+    "changes": [
+      "fix(auth): improve error handling and logging in getAuthHeader and fetchJiraIssues"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.54.2",
+    "date": "20 de Julho, 2026",
+    "title": "fix(poker): modal de sessão adapta a light/dark e não r...",
+    "description": "fix(poker): modal de sessão adapta a light/dark e não rola mais",
+    "changes": [
+      "fix(poker): modal de sessão adapta a light/dark e não rola mais"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.54.1",
+    "date": "19 de Julho, 2026",
+    "title": "fix(poker): join falhava ao trocar de sala com role dif...",
+    "description": "fix(poker): join falhava ao trocar de sala com role diferente (list negado)",
+    "changes": [
+      "fix(poker): join falhava ao trocar de sala com role diferente (list negado)"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.54.0",
+    "date": "19 de Julho, 2026",
+    "title": "refactor(poker): painel do facilitador em abas (fim do ...",
+    "description": "refactor(poker): painel do facilitador em abas (fim do scroll infinito)",
+    "changes": [
+      "refactor(poker): painel do facilitador em abas (fim do scroll infinito)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.53.0",
+    "date": "19 de Julho, 2026",
+    "title": "feat(poker): pré-configs e preview do baralho no modal ...",
+    "description": "feat(poker): pré-configs e preview do baralho no modal de sessão",
+    "changes": [
+      "feat(poker): pré-configs e preview do baralho no modal de sessão"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.52.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): redesenha o modal de configurar sessão",
+    "description": "Atualização baseada no commit: 550f028",
+    "changes": [
+      "feat(poker): redesenha o modal de configurar sessão"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.51.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): reações (emoji) efêmeras durante a votação...",
+    "description": "feat(poker): reações (emoji) efêmeras durante a votação (opt-in)",
+    "changes": [
+      "feat(poker): reações (emoji) efêmeras durante a votação (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.50.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): paridade async — insights de revelação por...",
+    "description": "feat(poker): paridade async — insights de revelação por issue",
+    "changes": [
+      "feat(poker): paridade async — insights de revelação por issue"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.49.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): auto-consenso e sugestão de revotação (opt...",
+    "description": "feat(poker): auto-consenso e sugestão de revotação (opt-in)",
+    "changes": [
+      "feat(poker): auto-consenso e sugestão de revotação (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.48.1",
+    "date": "18 de Julho, 2026",
+    "title": "fix(types): resolve follow-ups da limpeza TS + remove c...",
+    "description": "fix(types): resolve follow-ups da limpeza TS + remove componente morto",
+    "changes": [
+      "fix(types): resolve follow-ups da limpeza TS + remove componente morto"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.48.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(jira): melhora importação — campos, dedup, tipo, l...",
+    "description": "feat(jira): melhora importação — campos, dedup, tipo, limite e log de token",
+    "changes": [
+      "feat(jira): melhora importação — campos, dedup, tipo, limite e log de token"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.47.0",
+    "date": "18 de Julho, 2026",
+    "title": "refactor(poker): organiza painel do facilitador em seçõ...",
+    "description": "refactor(poker): organiza painel do facilitador em seções",
+    "changes": [
+      "refactor(poker): organiza painel do facilitador em seções"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.46.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): templates de sala — salvar e reusar deck+c...",
+    "description": "feat(poker): templates de sala — salvar e reusar deck+configs+backlog",
+    "changes": [
+      "feat(poker): templates de sala — salvar e reusar deck+configs+backlog"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.45.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): ação \"enviar para grooming\" nos votos \"?\" ...",
+    "description": "feat(poker): ação \"enviar para grooming\" nos votos \"?\" (opt-in)",
+    "changes": [
+      "feat(poker): ação \"enviar para grooming\" nos votos \"?\" (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.44.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): auto-timer por tópico (opt-in)",
+    "description": "Atualização baseada no commit: 071e7c8",
+    "changes": [
+      "feat(poker): auto-timer por tópico (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.43.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): tempo real por tópico no dashboard final (...",
+    "description": "feat(poker): tempo real por tópico no dashboard final (opt-in)",
+    "changes": [
+      "feat(poker): tempo real por tópico no dashboard final (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.42.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): nota de decisão por tarefa (opt-in)",
+    "description": "Atualização baseada no commit: 019ac85",
+    "changes": [
+      "feat(poker): nota de decisão por tarefa (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.41.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): confiança agregada do time ao revelar",
+    "description": "Atualização baseada no commit: e4c876f",
+    "changes": [
+      "feat(poker): confiança agregada do time ao revelar"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.40.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): histograma de distribuição dos votos ao re...",
+    "description": "feat(poker): histograma de distribuição dos votos ao revelar (opt-in)",
+    "changes": [
+      "feat(poker): histograma de distribuição dos votos ao revelar (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.39.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): notificação \"sua vez\" ao abrir rodada (opt...",
+    "description": "feat(poker): notificação \"sua vez\" ao abrir rodada (opt-in)",
+    "changes": [
+      "feat(poker): notificação \"sua vez\" ao abrir rodada (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.38.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): revelação anônima (opt-in)",
+    "description": "Atualização baseada no commit: 5dd30a2",
+    "changes": [
+      "feat(poker): revelação anônima (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.37.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): histórico/velocity do time entre sessões (...",
+    "description": "feat(poker): histórico/velocity do time entre sessões (opt-in)",
+    "changes": [
+      "feat(poker): histórico/velocity do time entre sessões (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.36.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): voto de confiança (opt-in)",
+    "description": "Atualização baseada no commit: f0ff0de",
+    "changes": [
+      "feat(poker): voto de confiança (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.35.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): ritual de outliers ao revelar (opt-in)",
+    "description": "Atualização baseada no commit: 8a7b0a7",
+    "changes": [
+      "feat(poker): ritual de outliers ao revelar (opt-in)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.34.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): timer countdown sincronizado entre cliente...",
+    "description": "feat(poker): timer countdown sincronizado entre clientes (offset de servidor)",
+    "changes": [
+      "feat(poker): timer countdown sincronizado entre clientes (offset de servidor)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.33.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): sidebars acessíveis no mobile via drawer (...",
+    "description": "feat(poker): sidebars acessíveis no mobile via drawer (Sheet)",
+    "changes": [
+      "feat(poker): sidebars acessíveis no mobile via drawer (Sheet)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.32.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): presença por heartbeat (online/offline + q...",
+    "description": "feat(poker): presença por heartbeat (online/offline + quórum sem fantasma)",
+    "changes": [
+      "feat(poker): presença por heartbeat (online/offline + quórum sem fantasma)"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.31.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): corrige duração da sessão e torna limites ...",
+    "description": "feat(poker): corrige duração da sessão e torna limites de divergência configuráveis",
+    "changes": [
+      "feat(poker): corrige duração da sessão e torna limites de divergência configuráveis"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.30.3",
+    "date": "18 de Julho, 2026",
+    "title": "fix(auth): visitante não é obrigado a logar na tela ini...",
+    "description": "fix(auth): visitante não é obrigado a logar na tela inicial",
+    "changes": [
+      "fix(auth): visitante não é obrigado a logar na tela inicial"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.30.2",
+    "date": "18 de Julho, 2026",
+    "title": "chore(types): zera erros de TypeScript e remove ignoreB...",
+    "description": "chore(types): zera erros de TypeScript e remove ignoreBuildErrors",
+    "changes": [
+      "chore(types): zera erros de TypeScript e remove ignoreBuildErrors"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.30.1",
+    "date": "18 de Julho, 2026",
+    "title": "fix(theme): variantes de cor funcionam em claro e escur...",
+    "description": "fix(theme): variantes de cor funcionam em claro e escuro em todas as telas",
+    "changes": [
+      "fix(theme): variantes de cor funcionam em claro e escuro em todas as telas"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.30.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): configurações funcionais do facilitador",
+    "description": "Atualização baseada no commit: f4b636d",
+    "changes": [
+      "feat(poker): configurações funcionais do facilitador"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.29.2",
+    "date": "18 de Julho, 2026",
+    "title": "fix(poker): métricas e quórum ignoram gestão/espectador",
+    "description": "Atualização baseada no commit: 3b8034c",
+    "changes": [
+      "fix(poker): métricas e quórum ignoram gestão/espectador"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.29.1",
+    "date": "18 de Julho, 2026",
+    "title": "Corrige: gate de voto da gestão no modo assíncrono (Asy...",
+    "description": "Corrige: gate de voto da gestão no modo assíncrono (AsyncPokerRoom)",
+    "changes": [
+      "Corrige: gate de voto da gestão no modo assíncrono (AsyncPokerRoom)"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.29.0",
+    "date": "18 de Julho, 2026",
+    "title": "feat(poker): painel do facilitador acessível no modo sí...",
+    "description": "feat(poker): painel do facilitador acessível no modo síncrono",
+    "changes": [
+      "feat(poker): painel do facilitador acessível no modo síncrono"
+    ],
+    "type": "minor",
+    "iconName": "Sparkles",
+    "iconClass": "h-5 w-5 text-emerald-500"
+  },
+  {
+    "tag": "v3.28.101",
+    "date": "18 de Julho, 2026",
+    "title": "fix(poker): integridade de votos, denominador e limpeza...",
+    "description": "fix(poker): integridade de votos, denominador e limpeza de sessão",
+    "changes": [
+      "fix(poker): integridade de votos, denominador e limpeza de sessão"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.28.100",
+    "date": "18 de Julho, 2026",
+    "title": "Corrige: exportação de PDF do Scrum Poker cortava taref...",
+    "description": "Corrige: exportação de PDF do Scrum Poker cortava tarefas em sessões longas",
+    "changes": [
+      "Corrige: exportação de PDF do Scrum Poker cortava tarefas em sessões longas"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.28.99",
+    "date": "18 de Julho, 2026",
+    "title": "Melhora: acessibilidade nos botões do EliteTimer",
+    "description": "Atualização baseada no commit: 462b3a7",
+    "changes": [
+      "Melhora: acessibilidade nos botões do EliteTimer"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.28.98",
+    "date": "18 de Julho, 2026",
+    "title": "Melhora: Modo Teatro só encerra por quem apresenta; per...",
+    "description": "Melhora: Modo Teatro só encerra por quem apresenta; performance no Showcase",
+    "changes": [
+      "Melhora: Modo Teatro só encerra por quem apresenta; performance no Showcase"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.28.97",
+    "date": "18 de Julho, 2026",
+    "title": "Melhora: performance de renderização e validação na Ret...",
+    "description": "Melhora: performance de renderização e validação na Retrospectiva",
+    "changes": [
+      "Melhora: performance de renderização e validação na Retrospectiva"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.28.96",
+    "date": "18 de Julho, 2026",
+    "title": "Remove: código morto Timer.tsx e RetroGuide.tsx",
+    "description": "Atualização baseada no commit: bb981b4",
+    "changes": [
+      "Remove: código morto Timer.tsx e RetroGuide.tsx"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.28.95",
+    "date": "18 de Julho, 2026",
+    "title": "Corrige: permission-denied em votes reproduzido em prod...",
+    "description": "Corrige: permission-denied em votes reproduzido em produção",
+    "changes": [
+      "Corrige: permission-denied em votes reproduzido em produção"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.28.94",
+    "date": "18 de Julho, 2026",
+    "title": "Corrige: rotas /api/jira/* sem autenticação nem rate li...",
+    "description": "Corrige: rotas /api/jira/* sem autenticação nem rate limit",
+    "changes": [
+      "Corrige: rotas /api/jira/* sem autenticação nem rate limit"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.28.93",
+    "date": "15 de Julho, 2026",
+    "title": "Corrige: segurança, bugs de colaboração e performance e...",
+    "description": "Corrige: segurança, bugs de colaboração e performance em room/showcase/retro",
+    "changes": [
+      "Corrige: segurança, bugs de colaboração e performance em room/showcase/retro"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.28.92",
+    "date": "15 de Julho, 2026",
+    "title": "Corrige: enumeração de rooms/participants/votes sem esc...",
+    "description": "Corrige: enumeração de rooms/participants/votes sem escopo de sala",
+    "changes": [
+      "Corrige: enumeração de rooms/participants/votes sem escopo de sala"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.28.91",
+    "date": "15 de Julho, 2026",
+    "title": "Ajuste: v3.27.0",
+    "description": "Atualização baseada no commit: d03769e",
+    "changes": [
+      "Ajuste: v3.27.0"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.28.90",
+    "date": "15 de Julho, 2026",
+    "title": "Corrige: privilege escalation, XSS armazenado e IDOR em...",
+    "description": "Corrige: privilege escalation, XSS armazenado e IDOR em rooms/boards",
+    "changes": [
+      "Corrige: privilege escalation, XSS armazenado e IDOR em rooms/boards"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.28.89",
+    "date": "14 de Julho, 2026",
+    "title": "Corrige: worker do pdf-parse não resolvia sob Turbopack",
+    "description": "Atualização baseada no commit: 188b5b6",
+    "changes": [
+      "Corrige: worker do pdf-parse não resolvia sob Turbopack"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.28.88",
+    "date": "14 de Julho, 2026",
+    "title": "Corrige: vulnerabilidades críticas e bugs encontrados e...",
+    "description": "Corrige: vulnerabilidades críticas e bugs encontrados em auditoria",
+    "changes": [
+      "Corrige: vulnerabilidades críticas e bugs encontrados em auditoria"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.28.87",
+    "date": "24 de Junho, 2026",
+    "title": "Melhorias: ajuste imports",
+    "description": "Atualização baseada no commit: 6ac52d7",
+    "changes": [
+      "Melhorias: ajuste imports"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.28.86",
+    "date": "24 de Junho, 2026",
+    "title": "Ajuste: versions.json",
+    "description": "Atualização baseada no commit: 6858b07",
+    "changes": [
+      "Ajuste: versions.json"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.28.85",
+    "date": "24 de Junho, 2026",
+    "title": "Melhorias: v3.26.1",
+    "description": "Atualização baseada no commit: c513b08",
+    "changes": [
+      "Melhorias: v3.26.1"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.28.84",
+    "date": "24 de Junho, 2026",
+    "title": "Melhorias: v3.26.0",
+    "description": "Atualização baseada no commit: 50448f7",
+    "changes": [
+      "Melhorias: v3.26.0"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.28.83",
+    "date": "24 de Junho, 2026",
+    "title": "Melhorias: v3.25.0",
+    "description": "Atualização baseada no commit: baf86fe",
+    "changes": [
+      "Melhorias: v3.25.0"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  },
+  {
+    "tag": "v3.28.82",
+    "date": "24 de Junho, 2026",
+    "title": "Melhorias: v3.24.0",
+    "description": "Atualização baseada no commit: 4e57b5d",
+    "changes": [
+      "Melhorias: v3.24.0"
+    ],
+    "type": "patch",
+    "iconName": "Zap",
+    "iconClass": "h-5 w-5 text-indigo-500"
+  }
+]

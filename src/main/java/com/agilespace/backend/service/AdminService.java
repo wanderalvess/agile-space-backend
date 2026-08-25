@@ -168,4 +168,30 @@ public class AdminService {
             return new ArrayList<>();
         }
     }
+
+    @Transactional
+    public void deleteSession(String id, String type) {
+        if (id == null || type == null) return;
+        String tableName;
+        switch (type.toLowerCase()) {
+            case "poker":
+                tableName = "poker_rooms";
+                break;
+            case "retro":
+                tableName = "retro_boards";
+                break;
+            case "health":
+                tableName = "health_check_boards";
+                break;
+            case "brainstorm":
+                tableName = "brainstorming_boards";
+                break;
+            case "sprint_planning":
+                tableName = "sprint_plannings";
+                break;
+            default:
+                throw new IllegalArgumentException("Tipo de sessão inválido: " + type);
+        }
+        jdbcTemplate.update("DELETE FROM " + tableName + " WHERE id = ?", id);
+    }
 }

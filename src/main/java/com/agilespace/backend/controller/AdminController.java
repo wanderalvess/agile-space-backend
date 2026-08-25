@@ -70,4 +70,10 @@ public class AdminController {
     public ResponseEntity<List<UnifiedSessionDto>> getSessions() {
         return ResponseEntity.ok(service.getSessions());
     }
+
+    @DeleteMapping("/sessions/{id}")
+    public ResponseEntity<Void> deleteSession(@PathVariable String id, @RequestParam(required = false) String type) {
+        service.deleteSession(id, type);
+        return ResponseEntity.noContent().build();
+    }
 }

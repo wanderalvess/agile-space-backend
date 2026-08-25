@@ -31,7 +31,7 @@ public class User {
 
     @Column(name = "auth_provider")
     @Builder.Default
-    private String authProvider = "LOCAL"; // "LOCAL", "TOTVS_SSO"
+    private String authProvider = "LOCAL"; // "LOCAL", "SSO"
 
     public String getAuthProvider() {
         return authProvider != null ? authProvider : "LOCAL";
@@ -52,13 +52,13 @@ public class User {
     private String ssoId;
 
     @Column(name = "default_project_id")
-    private String defaultProjectId; // FK lógica para ProjectConfig (ex: "DDWMISSI")
+    private String defaultProjectId; // FK lógica para ProjectConfig
 
     @Column(name = "squad_id")
     private String squadId;
 
     @Column(name = "segment_name")
-    private String segmentName; // Ex: "Distribuição TOTVS Goiânia"
+    private String segmentName; // Ex: "Canal Corporativo"
 
     @Column(name = "tribe_name")
     private String tribeName; // Ex: "Distribuição"

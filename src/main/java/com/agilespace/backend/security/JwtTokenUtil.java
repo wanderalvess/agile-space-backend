@@ -28,7 +28,7 @@ public class JwtTokenUtil {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public JwtTokenUtil(
-            @Value("${app.security.jwt-secret:AgileSpaceMasterSecretKey2026TotvsRetailAndDistributionDefaultJwtSecret#HS256}") String secretKey,
+            @Value("${app.security.jwt-secret:AgileSpaceMasterSecretKey2026EnterpriseProductionDefaultJwtSecret#HS256}") String secretKey,
             @Value("${app.security.jwt-expiration-seconds:86400}") long expirationSeconds) {
         this.secretKey = secretKey;
         this.expirationSeconds = expirationSeconds;

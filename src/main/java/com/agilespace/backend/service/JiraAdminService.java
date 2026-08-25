@@ -357,7 +357,7 @@ public class JiraAdminService {
                         user = new User();
                         user.setId(m.getJiraAccountId());
                         user.setName(m.getDisplayName());
-                        user.setEmail(m.getEmail() != null && !m.getEmail().isBlank() ? m.getEmail() : m.getJiraAccountId() + "@totvs.com.br");
+                        user.setEmail(m.getEmail() != null && !m.getEmail().isBlank() ? m.getEmail() : m.getJiraAccountId() + "@empresa.com");
                         user.setRole(m.getRole()); // Cargo validado pelo usuário
                         user.setSquadId(projectKey);
                         user.setJiraAccountId(m.getJiraAccountId());

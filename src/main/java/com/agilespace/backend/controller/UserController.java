@@ -45,12 +45,17 @@ public class UserController {
 
     // ---------- Endpoints ----------
 
-    /** Lista todos os usuários — restrito: exige header X-Admin-Key correto. */
+    /** Lista todos os usuários — permite administradores autenticados ou requisições com X-Admin-Key válido. */
     @GetMapping
     public ResponseEntity<?> getAllUsers(
+            HttpServletRequest request,
             @RequestHeader(value = "X-Admin-Key", required = false) String adminKeyHeader) {
-        if (adminKey == null || adminKey.isBlank() || !adminKey.equals(adminKeyHeader)) {
-            return forbidden("Acesso restrito. Header X-Admin-Key ausente ou inválido.");
+        String authRole = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        boolean isAdmin = "ADMIN".equalsIgnoreCase(authRole);
+        boolean hasValidAdminKey = adminKey != null && !adminKey.isBlank() && adminKey.equals(adminKeyHeader);
+
+        if (!isAdmin && !hasValidAdminKey) {
+            return forbidden("Acesso restrito a administradores.");
         }
         return ResponseEntity.ok(service.getAllUsers());
     }
@@ -74,7 +79,7 @@ public class UserController {
         if (authUserId == null) {
             return forbidden("Sessão inválida.");
         }
-        boolean isAdmin = "ADMIN".equals(authRole);
+        boolean isAdmin = "ADMIN".equalsIgnoreCase(authRole);
         if (!isAdmin && user.getId() != null && !user.getId().isBlank() && !user.getId().equals(authUserId)) {
             return forbidden("Você só pode salvar o seu próprio perfil.");
         }
