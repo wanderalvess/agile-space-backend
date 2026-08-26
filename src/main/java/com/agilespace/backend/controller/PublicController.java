@@ -1,7 +1,11 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.GlobalAnnouncement;
+import com.agilespace.backend.domain.PasswordResetRequest;
+import com.agilespace.backend.dto.ForgotPasswordRequestDto;
 import com.agilespace.backend.service.AdminService;
+import com.agilespace.backend.service.PasswordResetService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -26,6 +30,7 @@ public class PublicController {
     );
 
     private final AdminService adminService;
+    private final PasswordResetService passwordResetService;
 
     @GetMapping("/system-config")
     public ResponseEntity<Map<String, String>> getSystemConfig() {
@@ -42,5 +47,10 @@ public class PublicController {
     @GetMapping("/announcements")
     public ResponseEntity<List<GlobalAnnouncement>> getAnnouncements() {
         return ResponseEntity.ok(adminService.getAnnouncements());
+    }
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<PasswordResetRequest> forgotPassword(@Valid @RequestBody ForgotPasswordRequestDto request) {
+        return ResponseEntity.ok(passwordResetService.requestReset(request.getEmail()));
     }
 }

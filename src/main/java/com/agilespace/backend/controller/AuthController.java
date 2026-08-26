@@ -1,8 +1,11 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.dto.AuthResponseDto;
+import com.agilespace.backend.dto.ForgotPasswordRequestDto;
+import com.agilespace.backend.domain.PasswordResetRequest;
 import com.agilespace.backend.dto.LoginRequestDto;
 import com.agilespace.backend.dto.RegisterRequestDto;
+import com.agilespace.backend.service.PasswordResetService;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -20,6 +23,7 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     private final AuthService authService;
+    private final PasswordResetService passwordResetService;
 
     /**
      * Login padrão com e-mail corporativo e senha.
@@ -35,6 +39,14 @@ public class AuthController {
     @PostMapping("/register")
     public ResponseEntity<AuthResponseDto> register(@Valid @RequestBody RegisterRequestDto request) {
         return ResponseEntity.ok(authService.register(request));
+    }
+
+    /**
+     * Solicitação de redefinição de senha (evento de auditoria para o gestor aprovar).
+     */
+    @PostMapping("/forgot-password")
+    public ResponseEntity<PasswordResetRequest> forgotPassword(@Valid @RequestBody ForgotPasswordRequestDto request) {
+        return ResponseEntity.ok(passwordResetService.requestReset(request.getEmail()));
     }
 
     /**
