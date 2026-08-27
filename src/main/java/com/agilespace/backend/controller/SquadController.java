@@ -230,6 +230,7 @@ public class SquadController {
             @PathVariable String squadId,
             @Valid @RequestBody SquadPanel panel,
             HttpServletRequest request) {
+        requireSquadWriteAccess(squadId, request);
         String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
         return ResponseEntity.status(HttpStatus.CREATED).body(squadService.createPanel(squadId, userId, panel));
     }
