@@ -192,6 +192,7 @@ public class AuthService {
                 .email(user.getEmail())
                 .name(user.getName())
                 .role(user.getRole())
+                .jobTitle(user.getJobTitle())
                 .authProvider(user.getAuthProvider())
                 .jiraAccountId(user.getJiraAccountId())
                 .avatarSeed(user.getAvatarSeed())

@@ -358,7 +358,7 @@ public class JiraAdminService {
                         user.setId(m.getJiraAccountId());
                         user.setName(m.getDisplayName());
                         user.setEmail(m.getEmail() != null && !m.getEmail().isBlank() ? m.getEmail() : m.getJiraAccountId() + "@empresa.com");
-                        user.setRole(m.getRole()); // Cargo validado pelo usuário
+                        user.setJobTitle(m.getRole()); // Cargo validado pelo usuário (não é tier de autorização)
                         user.setSquadId(projectKey);
                         user.setJiraAccountId(m.getJiraAccountId());
                         user.setAvatarSeed(m.getDisplayName());
@@ -367,9 +367,11 @@ public class JiraAdminService {
                         user.setUpdatedAt(LocalDateTime.now());
                         user = userRepository.save(user);
                     } else {
-                        // Atualiza dados e CARGO validado
+                        // Atualiza dados e cargo validado. NUNCA grava em user.role: esse campo é o tier
+                        // de autorização (ver User.role/UserRole) e sincronizar squad não deve poder
+                        // rebaixar/elevar o acesso admin de alguém a partir de um texto de cargo do Jira.
                         user.setName(m.getDisplayName());
-                        user.setRole(m.getRole()); // Atualiza o cargo na tabela users!
+                        user.setJobTitle(m.getRole());
                         user.setSquadId(projectKey);
                         user.setJiraAccountId(m.getJiraAccountId());
                         if (m.getCapacityHoursPerDay() != null) {

@@ -1,7 +1,10 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.Squad;
+import com.agilespace.backend.repository.UserRepository;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.SquadService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -20,12 +23,21 @@ public class SquadControllerTest {
     @Mock
     private SquadService service;
 
+    @Mock
+    private UserRepository userRepository;
+
     @InjectMocks
     private SquadController controller;
 
     @BeforeEach
     public void setup() {
         MockitoAnnotations.openMocks(this);
+    }
+
+    private HttpServletRequest adminRequest() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE)).thenReturn("ADMIN");
+        return request;
     }
 
     @Test
@@ -52,7 +64,7 @@ public class SquadControllerTest {
         Squad squad = new Squad();
         when(service.saveSquad(squad)).thenReturn(squad);
         
-        ResponseEntity<Squad> response = controller.saveSquad("sq-1", squad);
+        ResponseEntity<Squad> response = controller.saveSquad("sq-1", squad, adminRequest());
         
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals("sq-1", squad.getId());

@@ -30,13 +30,18 @@ public class UserController {
     // ---------- Helpers ----------
 
     /**
-     * Valida que o chamador é o dono do recurso: o header X-Caller-Id deve estar
-     * presente e ser igual ao userId do path.  Evita que um usuário autenticado
-     * acesse/modifique dados de outro simplesmente trocando o path parameter.
+     * Valida que o chamador é o dono do recurso ou ADMIN, usando o userId extraído do JWT
+     * pelo JwtAuthenticationFilter (nunca um header enviado pelo cliente: X-Caller-Id era
+     * apenas um valor arbitrário do request, não validado contra o token, e permitia a
+     * qualquer um se passar por outro usuário só trocando o header).
      */
-    private boolean isOwner(String userId, String callerIdHeader) {
-        if (callerIdHeader == null || callerIdHeader.isBlank()) return false;
-        return callerIdHeader.trim().equals(userId);
+    private boolean isOwnerOrAdmin(String resourceUserId, HttpServletRequest request) {
+        String authUserId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        String authRole = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        if ("ADMIN".equalsIgnoreCase(authRole)) {
+            return true;
+        }
+        return authUserId != null && authUserId.equals(resourceUserId);
     }
 
     private ResponseEntity<?> forbidden(String message) {
@@ -60,8 +65,12 @@ public class UserController {
         return ResponseEntity.ok(service.getAllUsers());
     }
 
+    /** Retorna um usuário — o chamador só pode consultar o próprio perfil, a menos que seja ADMIN. */
     @GetMapping("/{id}")
-    public ResponseEntity<User> getUser(@PathVariable String id) {
+    public ResponseEntity<?> getUser(@PathVariable String id, HttpServletRequest request) {
+        if (!isOwnerOrAdmin(id, request)) {
+            return forbidden("Você só pode consultar o seu próprio perfil.");
+        }
         User user = service.getUser(id);
         if (user == null) {
             return ResponseEntity.notFound().build();
@@ -86,7 +95,10 @@ public class UserController {
         if (user.getId() == null || user.getId().isBlank()) {
             user.setId(authUserId);
         }
-        User saved = service.saveUser(user);
+        User saved = service.saveUser(user, isAdmin);
+        if (saved == null) {
+            return ResponseEntity.notFound().build();
+        }
         return ResponseEntity.ok(saved);
     }
 
@@ -96,12 +108,10 @@ public class UserController {
         return ResponseEntity.ok(squads);
     }
 
-    /** Retorna a config Jira do usuário — exige que X-Caller-Id == userId (dono do recurso). */
+    /** Retorna a config Jira do usuário — exige que o chamador autenticado seja o dono do recurso ou ADMIN. */
     @GetMapping("/{userId}/jira-config")
-    public ResponseEntity<?> getJiraConfig(
-            @PathVariable String userId,
-            @RequestHeader(value = "X-Caller-Id", required = false) String callerIdHeader) {
-        if (!isOwner(userId, callerIdHeader)) {
+    public ResponseEntity<?> getJiraConfig(@PathVariable String userId, HttpServletRequest request) {
+        if (!isOwnerOrAdmin(userId, request)) {
             return forbidden("Acesso negado: você só pode consultar sua própria configuração Jira.");
         }
         UserJiraConfig config = service.getJiraConfig(userId);
@@ -111,13 +121,13 @@ public class UserController {
         return ResponseEntity.ok(config);
     }
 
-    /** Salva a config Jira — exige que X-Caller-Id == userId (dono do recurso). */
+    /** Salva a config Jira — exige que o chamador autenticado seja o dono do recurso ou ADMIN. */
     @PostMapping("/{userId}/jira-config")
     public ResponseEntity<?> saveJiraConfig(
             @PathVariable String userId,
             @RequestBody UserJiraConfig config,
-            @RequestHeader(value = "X-Caller-Id", required = false) String callerIdHeader) {
-        if (!isOwner(userId, callerIdHeader)) {
+            HttpServletRequest request) {
+        if (!isOwnerOrAdmin(userId, request)) {
             return forbidden("Acesso negado: você só pode salvar sua própria configuração Jira.");
         }
         config.setUserId(userId);
@@ -125,24 +135,20 @@ public class UserController {
         return ResponseEntity.ok(saved);
     }
 
-    /** Exclui a config Jira — exige que X-Caller-Id == userId (dono do recurso). */
+    /** Exclui a config Jira — exige que o chamador autenticado seja o dono do recurso ou ADMIN. */
     @DeleteMapping("/{userId}/jira-config")
-    public ResponseEntity<?> deleteJiraConfig(
-            @PathVariable String userId,
-            @RequestHeader(value = "X-Caller-Id", required = false) String callerIdHeader) {
-        if (!isOwner(userId, callerIdHeader)) {
+    public ResponseEntity<?> deleteJiraConfig(@PathVariable String userId, HttpServletRequest request) {
+        if (!isOwnerOrAdmin(userId, request)) {
             return forbidden("Acesso negado: você só pode remover sua própria configuração Jira.");
         }
         service.deleteJiraConfig(userId);
         return ResponseEntity.noContent().build();
     }
 
-    /** Retorna a config TDN do usuário — exige que X-Caller-Id == userId (dono do recurso). */
+    /** Retorna a config TDN do usuário — exige que o chamador autenticado seja o dono do recurso ou ADMIN. */
     @GetMapping("/{userId}/tdn-config")
-    public ResponseEntity<?> getTdnConfig(
-            @PathVariable String userId,
-            @RequestHeader(value = "X-Caller-Id", required = false) String callerIdHeader) {
-        if (!isOwner(userId, callerIdHeader)) {
+    public ResponseEntity<?> getTdnConfig(@PathVariable String userId, HttpServletRequest request) {
+        if (!isOwnerOrAdmin(userId, request)) {
             return forbidden("Acesso negado: você só pode consultar sua própria configuração TDN.");
         }
         UserTdnConfig config = service.getTdnConfig(userId);
@@ -152,13 +158,13 @@ public class UserController {
         return ResponseEntity.ok(config);
     }
 
-    /** Salva a config TDN — exige que X-Caller-Id == userId (dono do recurso). */
+    /** Salva a config TDN — exige que o chamador autenticado seja o dono do recurso ou ADMIN. */
     @PostMapping("/{userId}/tdn-config")
     public ResponseEntity<?> saveTdnConfig(
             @PathVariable String userId,
             @RequestBody UserTdnConfig config,
-            @RequestHeader(value = "X-Caller-Id", required = false) String callerIdHeader) {
-        if (!isOwner(userId, callerIdHeader)) {
+            HttpServletRequest request) {
+        if (!isOwnerOrAdmin(userId, request)) {
             return forbidden("Acesso negado: você só pode salvar sua própria configuração TDN.");
         }
         config.setUserId(userId);
@@ -166,16 +172,13 @@ public class UserController {
         return ResponseEntity.ok(saved);
     }
 
-    /** Exclui a config TDN — exige que X-Caller-Id == userId (dono do recurso). */
+    /** Exclui a config TDN — exige que o chamador autenticado seja o dono do recurso ou ADMIN. */
     @DeleteMapping("/{userId}/tdn-config")
-    public ResponseEntity<?> deleteTdnConfig(
-            @PathVariable String userId,
-            @RequestHeader(value = "X-Caller-Id", required = false) String callerIdHeader) {
-        if (!isOwner(userId, callerIdHeader)) {
+    public ResponseEntity<?> deleteTdnConfig(@PathVariable String userId, HttpServletRequest request) {
+        if (!isOwnerOrAdmin(userId, request)) {
             return forbidden("Acesso negado: você só pode remover sua própria configuração TDN.");
         }
         service.deleteTdnConfig(userId);
         return ResponseEntity.noContent().build();
     }
 }
-

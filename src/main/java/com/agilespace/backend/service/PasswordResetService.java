@@ -33,14 +33,20 @@ public class PasswordResetService {
     private static final String CHAR_UPPER = CHAR_LOWER.toUpperCase();
     private static final String NUMBER = "0123456789";
     private static final String PASSWORD_ALLOW_BASE = CHAR_LOWER + CHAR_UPPER + NUMBER;
+    private static final int TEMP_PASSWORD_LENGTH = 16;
     private static final SecureRandom random = new SecureRandom();
 
+    /**
+     * Registra a solicitação para auditoria/aprovação do gestor. Sempre executa o mesmo
+     * caminho (persiste + audita) independente do e-mail existir, para não permitir que a
+     * resposta do endpoint público seja usada para enumerar contas cadastradas.
+     */
     @Transactional
     public PasswordResetRequest requestReset(String email) {
         String cleanEmail = email.trim().toLowerCase();
         Optional<User> userOpt = userRepository.findByEmail(cleanEmail);
 
-        String userName = userOpt.map(User::getName).orElse(cleanEmail.split("@")[0]);
+        String userName = userOpt.map(User::getName).orElse(null);
 
         PasswordResetRequest resetReq = PasswordResetRequest.builder()
                 .id(UUID.randomUUID().toString())
@@ -114,9 +120,8 @@ public class PasswordResetService {
     }
 
     private String generateTempPassword() {
-        StringBuilder sb = new StringBuilder(8);
-        sb.append("Temp#");
-        for (int i = 0; i < 4; i++) {
+        StringBuilder sb = new StringBuilder(TEMP_PASSWORD_LENGTH);
+        for (int i = 0; i < TEMP_PASSWORD_LENGTH; i++) {
             int rndCharAt = random.nextInt(PASSWORD_ALLOW_BASE.length());
             sb.append(PASSWORD_ALLOW_BASE.charAt(rndCharAt));
         }

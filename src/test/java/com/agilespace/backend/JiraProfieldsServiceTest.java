@@ -128,18 +128,31 @@ public class JiraProfieldsServiceTest {
     }
 
     @Test
-    public void joinProjectDetectsLeadershipRole() {
+    public void joinProjectRejectsLeadershipRole() {
+        when(projectConfigRepository.existsById("PROJ1")).thenReturn(true);
+        when(projectMemberRoleRepository.findByProjectId("PROJ1")).thenReturn(Collections.emptyList());
+
+        User user = User.builder().id("u1").name("User").email("user@empresa.com").jiraAccountId("user.acc").build();
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> service.joinProject("proj1", "Product Owner", user));
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+        verify(projectMemberRoleRepository, never()).save(any(ProjectMemberRole.class));
+    }
+
+    @Test
+    public void joinProjectAcceptsContributorRoleWithoutLeadership() {
         when(projectConfigRepository.existsById("PROJ1")).thenReturn(true);
         when(projectMemberRoleRepository.findByProjectId("PROJ1")).thenReturn(Collections.emptyList());
         when(projectMemberRoleRepository.save(any(ProjectMemberRole.class))).thenAnswer(i -> i.getArgument(0));
 
         User user = User.builder().id("u1").name("User").email("user@empresa.com").jiraAccountId("user.acc").build();
-        service.joinProject("proj1", "Product Owner", user);
+        service.joinProject("proj1", "Developer", user);
 
         ArgumentCaptor<ProjectMemberRole> captor = ArgumentCaptor.forClass(ProjectMemberRole.class);
         verify(projectMemberRoleRepository).save(captor.capture());
-        assertTrue(captor.getValue().isLeadership());
-        assertEquals("PRODUCT_OWNER", captor.getValue().getRoleKey());
+        assertFalse(captor.getValue().isLeadership());
+        assertEquals("DEVELOPER", captor.getValue().getRoleKey());
     }
 
     @Test

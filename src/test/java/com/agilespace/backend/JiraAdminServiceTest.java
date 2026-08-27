@@ -210,7 +210,7 @@ public class JiraAdminServiceTest {
     }
 
     @Test
-    public void confirmSyncUpdatesExistingUserRoleAndCapacity() {
+    public void confirmSyncUpdatesJobTitleAndCapacityWithoutTouchingAuthorizationRole() {
         JiraConfirmSyncRequest request = JiraConfirmSyncRequest.builder()
                 .squadId("proj1")
                 .replaceExisting(false)
@@ -218,7 +218,7 @@ public class JiraAdminServiceTest {
                 .members(Arrays.asList(candidate("acc1", "acc1@empresa.com", true)))
                 .build();
 
-        User existingUser = User.builder().id("acc1").email("acc1@empresa.com").role("Old Role").dailyHours(8).build();
+        User existingUser = User.builder().id("acc1").email("acc1@empresa.com").role("ADMIN").dailyHours(8).build();
 
         when(squadRepository.findById("PROJ1")).thenReturn(Optional.empty());
         when(squadRepository.save(any(Squad.class))).thenAnswer(i -> i.getArgument(0));
@@ -234,7 +234,8 @@ public class JiraAdminServiceTest {
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
         verify(userRepository).save(userCaptor.capture());
         User updated = userCaptor.getValue();
-        assertEquals("Developer", updated.getRole());
+        assertEquals("ADMIN", updated.getRole());
+        assertEquals("Developer", updated.getJobTitle());
         assertEquals(6, updated.getDailyHours());
         assertEquals("PROJ1", updated.getSquadId());
     }

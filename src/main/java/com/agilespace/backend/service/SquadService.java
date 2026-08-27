@@ -164,7 +164,11 @@ public class SquadService {
         }
         SquadMember saved = memberRepository.save(member);
 
-        // Sincroniza tabela central de usuários
+        // Sincroniza tabela central de usuários. NUNCA grava em user.role a partir daqui:
+        // SquadMember.role é texto livre vindo do corpo da requisição (cargo no board),
+        // enquanto User.role é o campo de autorização usado pelo JwtAuthenticationFilter
+        // para liberar /api/admin/**. Deixar esse endpoint (sem checagem de admin) escrever
+        // em User.role permitia que qualquer usuário autenticado se autopromovesse a ADMIN.
         try {
             User user = userRepository.findById(jiraAccountId).orElse(null);
             if (user == null && saved.getEmail() != null && !saved.getEmail().isBlank()) {
@@ -174,9 +178,6 @@ public class SquadService {
                 user = userRepository.findByJiraAccountId(jiraAccountId).orElse(null);
             }
             if (user != null) {
-                if (saved.getRole() != null && !saved.getRole().isBlank()) {
-                    user.setRole(saved.getRole());
-                }
                 if (saved.getDisplayName() != null && !saved.getDisplayName().isBlank()) {
                     user.setName(saved.getDisplayName());
                 }

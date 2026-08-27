@@ -482,9 +482,23 @@ public class JiraProfieldsService {
     }
 
     /**
-     * Vincula o usuário autenticado a um projeto já existente, com o papel que ele escolher —
+     * Papéis autodeclaráveis por qualquer usuário autenticado via join — contribuidor puro,
+     * sem nenhum acesso de governança/liderança. Papel de liderança (ver LEADERSHIP_ROLE_NAMES)
+     * só entra vinculado pelo sync real do Jira Profields ou por um admin — nunca autodeclarado,
+     * porque isLeadership=true aqui já libera governança da squad, e Tribe Lead/Agile Coach/People
+     * Lead especificamente disparam isTransversalLeader (acesso a toda a tribo/segmento) em
+     * UserProjectResolverService. Allowlist (não blocklist) de propósito: uma variante de grafia
+     * de um papel de liderança que escapasse de um blocklist ainda cai fora daqui.
+     */
+    private static final Set<String> SELF_SERVICE_JOIN_ROLE_NAMES = Set.of(
+            "DEVELOPER", "QA", "DESIGNER", "UX", "SME"
+    );
+
+    /**
+     * Vincula o usuário autenticado a um projeto já existente, com um papel de contribuidor —
      * fluxo de auto-atendimento pra quando alguém já configurou o projeto mas o vínculo automático
      * por e-mail não encontrou o usuário (ex: cadastro com e-mail diferente do que está no Jira).
+     * Papel de liderança não é aceito aqui — ver SELF_SERVICE_JOIN_ROLE_NAMES.
      */
     @Transactional
     public void joinProject(String projectKey, String roleName, User user) {
@@ -501,8 +515,12 @@ public class JiraProfieldsService {
         }
 
         String cleanRoleName = roleName.trim();
+        if (!SELF_SERVICE_JOIN_ROLE_NAMES.contains(cleanRoleName.toUpperCase())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN,
+                    "Papéis de liderança não podem ser autodeclarados. Sincronize com o Jira ou peça pra um administrador vincular seu papel.");
+        }
         String roleKey = cleanRoleName.toUpperCase().replace(" ", "_").replaceAll("[^A-Z_]", "");
-        boolean isLeadership = LEADERSHIP_ROLE_NAMES.contains(cleanRoleName.toUpperCase());
 
         ProjectMemberRole member = ProjectMemberRole.builder()
                 .projectId(key)
@@ -512,7 +530,7 @@ public class JiraProfieldsService {
                 .displayName(user.getName())
                 .email(user.getEmail())
                 .userId(user.getId())
-                .isLeadership(isLeadership)
+                .isLeadership(false)
                 .build();
         projectMemberRoleRepository.save(member);
     }

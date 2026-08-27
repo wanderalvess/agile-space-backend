@@ -22,6 +22,7 @@ public class AuthResponseDto {
     private String email;
     private String name;
     private String role;
+    private String jobTitle;
     private String authProvider;
     private String jiraAccountId;
     private String avatarSeed;

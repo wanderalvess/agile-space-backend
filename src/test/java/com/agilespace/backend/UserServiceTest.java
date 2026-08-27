@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Optional;
 
@@ -58,13 +59,113 @@ public class UserServiceTest {
 
     @Test
     public void testSaveUserSetsUpdatedAt() {
-        User user = User.builder().id("user-123").name("Francisco").role("Developer").build();
+        User existing = User.builder().id("user-123").name("Old Name").role("MEMBER").build();
+        User incoming = User.builder().id("user-123").name("Francisco").role("ADMIN").build();
+        when(userRepository.findById("user-123")).thenReturn(Optional.of(existing));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        User saved = service.saveUser(user);
+        User saved = service.saveUser(incoming, false);
 
         assertNotNull(saved.getUpdatedAt());
-        verify(userRepository, times(1)).save(user);
+        assertEquals("Francisco", saved.getName());
+        assertEquals("MEMBER", saved.getRole());
+        verify(userRepository, times(1)).save(existing);
+    }
+
+    @Test
+    public void testSaveUserIgnoresRoleEscalationForNonAdmin() {
+        User existing = User.builder().id("user-123").name("Francisco").role("MEMBER").active(true).build();
+        User incoming = User.builder().id("user-123").name("Francisco").role("ADMIN").active(true).build();
+        when(userRepository.findById("user-123")).thenReturn(Optional.of(existing));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User saved = service.saveUser(incoming, false);
+
+        assertEquals("MEMBER", saved.getRole());
+    }
+
+    @Test
+    public void testSaveUserAppliesRoleChangeForAdmin() {
+        User existing = User.builder().id("user-123").name("Francisco").role("MEMBER").active(true).build();
+        User incoming = User.builder().id("user-123").name("Francisco").role("ADMIN").active(true).build();
+        when(userRepository.findById("user-123")).thenReturn(Optional.of(existing));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User saved = service.saveUser(incoming, true);
+
+        assertEquals("ADMIN", saved.getRole());
+    }
+
+    @Test
+    public void testSaveUserAllowsSquadIdSelfServiceForNonAdmin() {
+        User existing = User.builder().id("user-123").name("Francisco").role("MEMBER").squadId(null).build();
+        User incoming = User.builder().id("user-123").name("Francisco").squadId("DDWMISSI").build();
+        when(userRepository.findById("user-123")).thenReturn(Optional.of(existing));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User saved = service.saveUser(incoming, false);
+
+        assertEquals("DDWMISSI", saved.getSquadId());
+    }
+
+    @Test
+    public void testSaveUserPreservesOmittedFieldsNotSentByClient() {
+        User existing = User.builder().id("user-123").name("Francisco")
+                .jiraAccountId("acc-1").dailyHours(8).build();
+        // Simula o payload real do modal de perfil, que não envia jiraAccountId/dailyHours
+        User incoming = User.builder().id("user-123").name("Francisco Alterado").build();
+        when(userRepository.findById("user-123")).thenReturn(Optional.of(existing));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User saved = service.saveUser(incoming, false);
+
+        assertEquals("Francisco Alterado", saved.getName());
+        assertEquals("acc-1", saved.getJiraAccountId());
+        assertEquals(8, saved.getDailyHours());
+    }
+
+    @Test
+    public void testSaveUserAllowsJobTitleSelfServiceForNonAdmin() {
+        User existing = User.builder().id("user-123").name("Francisco").role("MEMBER").jobTitle(null).build();
+        User incoming = User.builder().id("user-123").name("Francisco").jobTitle("Tech Lead").build();
+        when(userRepository.findById("user-123")).thenReturn(Optional.of(existing));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User saved = service.saveUser(incoming, false);
+
+        assertEquals("Tech Lead", saved.getJobTitle());
+        assertEquals("MEMBER", saved.getRole());
+    }
+
+    @Test
+    public void testSaveUserRejectsInvalidRoleForAdmin() {
+        User existing = User.builder().id("user-123").name("Francisco").role("MEMBER").build();
+        User incoming = User.builder().id("user-123").name("Francisco").role("Tech Lead").build();
+        when(userRepository.findById("user-123")).thenReturn(Optional.of(existing));
+
+        assertThrows(ResponseStatusException.class, () -> service.saveUser(incoming, true));
+    }
+
+    @Test
+    public void testSaveUserNormalizesRoleCaseForAdmin() {
+        User existing = User.builder().id("user-123").name("Francisco").role("MEMBER").build();
+        User incoming = User.builder().id("user-123").name("Francisco").role("admin").build();
+        when(userRepository.findById("user-123")).thenReturn(Optional.of(existing));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User saved = service.saveUser(incoming, true);
+
+        assertEquals("ADMIN", saved.getRole());
+    }
+
+    @Test
+    public void testSaveUserReturnsNullWhenNotFound() {
+        User incoming = User.builder().id("missing").name("Ghost").build();
+        when(userRepository.findById("missing")).thenReturn(Optional.empty());
+
+        User saved = service.saveUser(incoming, false);
+
+        assertNull(saved);
     }
 
     @Test

@@ -29,22 +29,36 @@ public class UserControllerTest {
         MockitoAnnotations.openMocks(this);
     }
 
+    private HttpServletRequest requestAsUser(String userId) {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn(userId);
+        return request;
+    }
+
     @Test
     public void testGetUserFound() {
         when(service.getUser("u1")).thenReturn(new User());
-        
-        ResponseEntity<User> response = controller.getUser("u1");
-        
+
+        ResponseEntity<?> response = controller.getUser("u1", requestAsUser("u1"));
+
         assertEquals(HttpStatus.OK, response.getStatusCode());
     }
 
     @Test
     public void testGetUserNotFound() {
         when(service.getUser("u1")).thenReturn(null);
-        
-        ResponseEntity<User> response = controller.getUser("u1");
-        
+
+        ResponseEntity<?> response = controller.getUser("u1", requestAsUser("u1"));
+
         assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+    }
+
+    @Test
+    public void testGetUserRejectsNonOwnerNonAdmin() {
+        ResponseEntity<?> response = controller.getUser("u1", requestAsUser("someone-else"));
+
+        assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
+        verify(service, never()).getUser(anyString());
     }
 
     @Test
@@ -54,7 +68,7 @@ public class UserControllerTest {
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("u1");
         when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE)).thenReturn("MEMBER");
-        when(service.saveUser(user)).thenReturn(user);
+        when(service.saveUser(user, false)).thenReturn(user);
 
         ResponseEntity<?> response = controller.saveUser(user, request);
 

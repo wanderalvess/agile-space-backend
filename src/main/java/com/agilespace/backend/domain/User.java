@@ -1,5 +1,6 @@
 package com.agilespace.backend.domain;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDateTime;
@@ -26,6 +27,8 @@ public class User {
     @Column(nullable = false)
     private String name;
 
+    // Nunca deve ir em resposta HTTP nenhuma (é o hash PBKDF2 da senha).
+    @JsonIgnore
     @Column(name = "password_hash")
     private String passwordHash;
 
@@ -37,13 +40,20 @@ public class User {
         return authProvider != null ? authProvider : "LOCAL";
     }
 
+    /** Tier de autorização do sistema. Único uso: liberar /api/admin/** (ver JwtAuthenticationFilter).
+     *  Nunca confundir com o cargo de negócio do usuário — isso vive em {@link #jobTitle}. */
     @Column(name = "role")
     @Builder.Default
-    private String role = "MEMBER"; // "ADMIN", "LEAD", "MEMBER"
+    private String role = "MEMBER"; // "ADMIN", "LEAD", "MEMBER" — ver UserRole
 
     public String getRole() {
         return role != null ? role : "MEMBER";
     }
+
+    /** Cargo de negócio autodeclarado (ex: "Tech Lead", "Product Owner"). Campo de auto-serviço,
+     *  sem qualquer papel em autorização — não usar em checagem de acesso. */
+    @Column(name = "job_title")
+    private String jobTitle;
 
     @Column(name = "jira_account_id")
     private String jiraAccountId;

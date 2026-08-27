@@ -1,6 +1,7 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.*;
+import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.SquadService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -9,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.UUID;
@@ -20,6 +22,24 @@ import java.util.UUID;
 public class SquadController {
 
     private final SquadService squadService;
+    private final UserRepository userRepository;
+
+    /**
+     * Só ADMIN/LEAD ou um membro já vinculado a esta squad (User.squadId) pode gravar
+     * dados nela. Antes disso qualquer usuário autenticado podia criar/sobrescrever
+     * dados de qualquer squad só trocando o squadId na URL.
+     */
+    private void requireSquadWriteAccess(String squadId, HttpServletRequest request) {
+        String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        if ("ADMIN".equalsIgnoreCase(role) || "LEAD".equalsIgnoreCase(role)) {
+            return;
+        }
+        String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
+        if (caller == null || caller.getSquadId() == null || !caller.getSquadId().equalsIgnoreCase(squadId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a membros desta squad ou administradores.");
+        }
+    }
 
     // ----- Squad Config -----
     @GetMapping
@@ -35,7 +55,8 @@ public class SquadController {
     }
 
     @PostMapping("/{squadId}")
-    public ResponseEntity<Squad> saveSquad(@PathVariable String squadId, @RequestBody Squad squad) {
+    public ResponseEntity<Squad> saveSquad(@PathVariable String squadId, @RequestBody Squad squad, HttpServletRequest request) {
+        requireSquadWriteAccess(squadId, request);
         squad.setId(squadId);
         return ResponseEntity.ok(squadService.saveSquad(squad));
     }
@@ -49,7 +70,8 @@ public class SquadController {
     }
 
     @PostMapping("/{squadId}/rollup")
-    public ResponseEntity<SquadMetricsRollup> saveRollup(@PathVariable String squadId, @RequestBody SquadMetricsRollup rollup) {
+    public ResponseEntity<SquadMetricsRollup> saveRollup(@PathVariable String squadId, @RequestBody SquadMetricsRollup rollup, HttpServletRequest request) {
+        requireSquadWriteAccess(squadId, request);
         rollup.setSquadId(squadId);
         return ResponseEntity.ok(squadService.saveRollup(rollup));
     }
@@ -81,14 +103,18 @@ public class SquadController {
     @PostMapping("/{squadId}/issues/batch")
     public ResponseEntity<List<SquadIssueSnapshot>> batchUpsertIssues(
             @PathVariable String squadId,
-            @RequestBody List<SquadIssueSnapshot> snapshots) {
+            @RequestBody List<SquadIssueSnapshot> snapshots,
+            HttpServletRequest request) {
+        requireSquadWriteAccess(squadId, request);
         return ResponseEntity.ok(squadService.batchUpsertIssues(squadId, snapshots));
     }
 
     @DeleteMapping("/{squadId}/issues/batch")
     public ResponseEntity<Void> batchDeleteIssues(
             @PathVariable String squadId,
-            @RequestBody List<String> keys) {
+            @RequestBody List<String> keys,
+            HttpServletRequest request) {
+        requireSquadWriteAccess(squadId, request);
         squadService.batchDeleteIssues(squadId, keys);
         return ResponseEntity.noContent().build();
     }
@@ -108,14 +134,18 @@ public class SquadController {
     public ResponseEntity<SquadMember> saveMember(
             @PathVariable String squadId,
             @PathVariable String jiraAccountId,
-            @RequestBody SquadMember member) {
+            @RequestBody SquadMember member,
+            HttpServletRequest request) {
+        requireSquadWriteAccess(squadId, request);
         return ResponseEntity.ok(squadService.saveMember(squadId, jiraAccountId, member));
     }
 
     @DeleteMapping("/{squadId}/members/{jiraAccountId}")
     public ResponseEntity<Void> deleteMember(
             @PathVariable String squadId,
-            @PathVariable String jiraAccountId) {
+            @PathVariable String jiraAccountId,
+            HttpServletRequest request) {
+        requireSquadWriteAccess(squadId, request);
         squadService.deleteMember(squadId, jiraAccountId);
         return ResponseEntity.noContent().build();
     }
@@ -123,7 +153,9 @@ public class SquadController {
     @PostMapping("/{squadId}/members/batch")
     public ResponseEntity<List<SquadMember>> batchUpsertMembers(
             @PathVariable String squadId,
-            @RequestBody List<SquadMember> members) {
+            @RequestBody List<SquadMember> members,
+            HttpServletRequest request) {
+        requireSquadWriteAccess(squadId, request);
         return ResponseEntity.ok(squadService.batchUpsertMembers(squadId, members));
     }
 
@@ -136,7 +168,9 @@ public class SquadController {
     @PostMapping("/{squadId}/member-metrics/batch")
     public ResponseEntity<List<SquadMemberMetric>> batchUpsertMemberMetrics(
             @PathVariable String squadId,
-            @RequestBody List<SquadMemberMetric> metrics) {
+            @RequestBody List<SquadMemberMetric> metrics,
+            HttpServletRequest request) {
+        requireSquadWriteAccess(squadId, request);
         return ResponseEntity.ok(squadService.batchUpsertMemberMetrics(squadId, metrics));
     }
 
@@ -151,7 +185,9 @@ public class SquadController {
     @PostMapping("/{squadId}/daily-snapshots/batch")
     public ResponseEntity<List<SquadDailySnapshot>> batchUpsertDailySnapshots(
             @PathVariable String squadId,
-            @RequestBody List<SquadDailySnapshot> snapshots) {
+            @RequestBody List<SquadDailySnapshot> snapshots,
+            HttpServletRequest request) {
+        requireSquadWriteAccess(squadId, request);
         return ResponseEntity.ok(squadService.batchUpsertDailySnapshots(squadId, snapshots));
     }
 
@@ -166,14 +202,18 @@ public class SquadController {
     @PostMapping("/{squadId}/worklog-cache/batch")
     public ResponseEntity<List<SquadIssueWorklogCache>> batchUpsertWorklogCache(
             @PathVariable String squadId,
-            @RequestBody List<SquadIssueWorklogCache> entries) {
+            @RequestBody List<SquadIssueWorklogCache> entries,
+            HttpServletRequest request) {
+        requireSquadWriteAccess(squadId, request);
         return ResponseEntity.ok(squadService.batchUpsertWorklogCache(squadId, entries));
     }
 
     @DeleteMapping("/{squadId}/worklog-cache/{jiraKey}")
     public ResponseEntity<Void> deleteWorklogCacheEntry(
             @PathVariable String squadId,
-            @PathVariable String jiraKey) {
+            @PathVariable String jiraKey,
+            HttpServletRequest request) {
+        requireSquadWriteAccess(squadId, request);
         squadService.deleteWorklogCacheEntry(squadId, jiraKey);
         return ResponseEntity.noContent().build();
     }

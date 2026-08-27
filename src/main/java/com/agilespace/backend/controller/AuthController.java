@@ -2,7 +2,6 @@ package com.agilespace.backend.controller;
 
 import com.agilespace.backend.dto.AuthResponseDto;
 import com.agilespace.backend.dto.ForgotPasswordRequestDto;
-import com.agilespace.backend.domain.PasswordResetRequest;
 import com.agilespace.backend.dto.LoginRequestDto;
 import com.agilespace.backend.dto.RegisterRequestDto;
 import com.agilespace.backend.service.PasswordResetService;
@@ -14,6 +13,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -43,10 +44,13 @@ public class AuthController {
 
     /**
      * Solicitação de redefinição de senha (evento de auditoria para o gestor aprovar).
+     * Resposta é sempre genérica, independente do e-mail existir ou não, para não
+     * permitir enumeração de contas cadastradas.
      */
     @PostMapping("/forgot-password")
-    public ResponseEntity<PasswordResetRequest> forgotPassword(@Valid @RequestBody ForgotPasswordRequestDto request) {
-        return ResponseEntity.ok(passwordResetService.requestReset(request.getEmail()));
+    public ResponseEntity<Map<String, String>> forgotPassword(@Valid @RequestBody ForgotPasswordRequestDto request) {
+        passwordResetService.requestReset(request.getEmail());
+        return ResponseEntity.ok(Map.of("message", "Se o e-mail estiver cadastrado, uma solicitação de redefinição foi registrada para aprovação."));
     }
 
     /**
