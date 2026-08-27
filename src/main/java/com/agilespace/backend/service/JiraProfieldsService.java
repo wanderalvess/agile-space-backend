@@ -491,7 +491,12 @@ public class JiraProfieldsService {
      * de um papel de liderança que escapasse de um blocklist ainda cai fora daqui.
      */
     private static final Set<String> SELF_SERVICE_JOIN_ROLE_NAMES = Set.of(
-            "DEVELOPER", "QA", "DESIGNER", "UX", "SME"
+            "DEVELOPER", "DESENVOLVEDOR(A)",
+            "QA", "ANALISTA DE QA",
+            "DESIGNER",
+            "UX",
+            "SME",
+            "STAKEHOLDER / OBSERVADOR"
     );
 
     /**

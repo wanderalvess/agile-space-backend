@@ -156,6 +156,20 @@ public class JiraProfieldsServiceTest {
     }
 
     @Test
+    public void joinProjectAcceptsPortugueseContributorSynonym() {
+        when(projectConfigRepository.existsById("PROJ1")).thenReturn(true);
+        when(projectMemberRoleRepository.findByProjectId("PROJ1")).thenReturn(Collections.emptyList());
+        when(projectMemberRoleRepository.save(any(ProjectMemberRole.class))).thenAnswer(i -> i.getArgument(0));
+
+        User user = User.builder().id("u1").name("User").email("user@empresa.com").jiraAccountId("user.acc").build();
+        service.joinProject("proj1", "Desenvolvedor(a)", user);
+
+        ArgumentCaptor<ProjectMemberRole> captor = ArgumentCaptor.forClass(ProjectMemberRole.class);
+        verify(projectMemberRoleRepository).save(captor.capture());
+        assertFalse(captor.getValue().isLeadership());
+    }
+
+    @Test
     public void getAllProjectsMapsRepositoryResults() {
         ProjectConfig config = ProjectConfig.builder().id("PROJ1").name("Projeto Um").build();
         when(projectConfigRepository.findAllByOrderBySegmentNameAscNameAsc()).thenReturn(Arrays.asList(config));
