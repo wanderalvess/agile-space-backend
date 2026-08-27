@@ -72,6 +72,64 @@ O projeto segue os princípios de Arquitetura em Camadas (Layered Architecture):
 
 ---
 
+## 🐳 Rodando com Docker
+
+A stack completa (backend + frontend + PostgreSQL) sobe com um único comando, isolada de qualquer banco ou container que já exista na máquina — é o mesmo processo usado para a instalação limpa em VM.
+
+### Pré-requisitos
+- Docker Desktop (ou Docker Engine + Compose) instalado.
+- Repositório [`agile-space-frontend`](https://github.com/wanderalvess/agile-space-frontend) clonado **no mesmo diretório pai** que este repositório (o `docker-compose.yml` referencia `../agile-space-frontend` como contexto de build do frontend):
+  ```
+  algum-diretorio/
+  ├── agile-space-backend/   (este repo, contém o docker-compose.yml)
+  └── agile-space-frontend/
+  ```
+
+### Subir a stack
+
+```bash
+docker compose up -d --build
+```
+
+Isso cria:
+- **`agile-space-db`** — PostgreSQL 17 dedicado, banco `espacoagil`, volume nomeado `agile-space-db-data` (dados persistem entre restarts do container).
+- **`agile-space-backend`** — API Spring Boot, porta `8002`. O schema é criado automaticamente pelo Hibernate (`ddl-auto: update`) na primeira subida — não precisa rodar migração manual.
+- **`agile-space-frontend`** — Next.js standalone, porta `9002`.
+
+Rede e volume ficam isolados sob o prefixo `agile-space-backend_*` — não reaproveita nem interfere em containers de outros projetos na mesma máquina.
+
+### Verificar
+
+```bash
+docker compose ps
+curl http://localhost:8002/v3/api-docs   # backend
+curl http://localhost:9002               # frontend
+```
+
+Acesse `http://localhost:9002` no navegador — a tela de login/cadastro aparece direto. Como o banco começa vazio, use a aba **Cadastrar** para criar o primeiro usuário.
+
+### Variáveis de ambiente
+
+As credenciais do PostgreSQL usadas pelo `docker-compose.yml` (`postgres`/`postgres`, banco `espacoagil`) são valores de desenvolvimento, iguais aos defaults do `application.yml`. Para um ambiente real, sobrescreva via `environment:` no compose ou um arquivo `.env` — nunca commite credenciais reais. As variáveis obrigatórias em produção (`APP_ENCRYPTION_SECRET`, `APP_ADMIN_KEY`, etc.) continuam valendo — ver seção [Guia de Deploy em Produção](#-guia-de-deploy-em-produção) abaixo.
+
+### Rebuildar após mudança de código
+
+Containers Docker não têm hot-reload — qualquer alteração no `src` do backend ou frontend exige rebuild da imagem correspondente:
+
+```bash
+docker compose up -d --build backend    # só o backend
+docker compose up -d --build frontend   # só o frontend
+```
+
+### Parar / limpar
+
+```bash
+docker compose down          # para os containers, mantém o volume do banco
+docker compose down -v       # para e apaga também os dados do banco
+```
+
+---
+
 ## 📖 Documentação da API (Swagger / OpenAPI)
 
 Com a aplicação em execução, a documentação interativa e os endpoints podem ser acessados em:
