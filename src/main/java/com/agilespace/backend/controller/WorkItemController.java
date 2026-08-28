@@ -2,6 +2,7 @@ package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.WorkItem;
 import com.agilespace.backend.service.WorkItemService;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import lombok.RequiredArgsConstructor;
@@ -14,7 +15,7 @@ public class WorkItemController {
 
     private final WorkItemService workItemService;
 
-    public record EstimateRequest(Double points_estimated) {}
+    public record EstimateRequest(@JsonProperty("points_estimated") Double points_estimated) {}
 
     @PutMapping("/{squadId}/{jiraKey}/estimate")
     public ResponseEntity<Void> estimateWorkItem(
@@ -33,7 +34,7 @@ public class WorkItemController {
         return ResponseEntity.ok(workItems);
     }
 
-    public record CommitRequest(String sprint_id) {}
+    public record CommitRequest(@JsonProperty("sprint_id") String sprint_id) {}
 
     @PutMapping("/{squadId}/{jiraKey}/commit")
     public ResponseEntity<Void> commitWorkItem(
@@ -44,7 +45,7 @@ public class WorkItemController {
         return ResponseEntity.ok().build();
     }
 
-    public record ShowcaseDecisionRequest(String status, String feedback) {}
+    public record ShowcaseDecisionRequest(@JsonProperty("status") String status, @JsonProperty("feedback") String feedback) {}
 
     @PutMapping("/{squadId}/{jiraKey}/showcase-decision")
     public ResponseEntity<Void> showcaseDecision(
@@ -73,3 +74,4 @@ public class WorkItemController {
         return ResponseEntity.ok(workItemService.getBacklogEstimated(squadId));
     }
 }
+

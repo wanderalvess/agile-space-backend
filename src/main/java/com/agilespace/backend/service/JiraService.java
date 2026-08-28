@@ -190,4 +190,45 @@ public class JiraService {
                     .body("{\"error\": \"Erro ao buscar dados do usuário no Jira: " + e.getMessage() + "\"}");
         }
     }
+
+    public ResponseEntity<String> getGreenhopperWorkData(String domain, String token, Long rapidViewId, String selectedProjectKey) {
+        if (rapidViewId == null) {
+            return ResponseEntity.badRequest().body("{\"error\": \"rapidViewId é obrigatório.\"}");
+        }
+        String cleanDomain = domain.trim().replace("https://", "").replace("http://", "");
+        URI jiraUri;
+        try {
+            String urlStr = "https://" + cleanDomain + "/rest/greenhopper/1.0/xboard/work/allData.json?rapidViewId=" + rapidViewId;
+            if (selectedProjectKey != null && !selectedProjectKey.trim().isEmpty()) {
+                urlStr += "&selectedProjectKey=" + java.net.URLEncoder.encode(selectedProjectKey.trim(), java.nio.charset.StandardCharsets.UTF_8);
+            }
+            jiraUri = new URI(urlStr);
+        } catch (Exception e) {
+            log.error("Failed to construct Greenhopper URI", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("{\"error\": \"Erro ao construir URL do Greenhopper: " + e.getMessage() + "\"}");
+        }
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", "Bearer " + token.trim());
+        headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+        headers.set("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7");
+
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+        try {
+            log.info("Fetching Greenhopper work data from URI: {}", jiraUri);
+            ResponseEntity<String> response = restTemplate.exchange(jiraUri, HttpMethod.GET, entity, String.class);
+            return ResponseEntity.ok(response.getBody());
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            log.error("Greenhopper work data failed with status: {}, body: {}", e.getStatusCode(), e.getResponseBodyAsString());
+            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+        } catch (Exception e) {
+            log.error("Greenhopper work data failed", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("{\"error\": \"Erro ao buscar dados do quadro Greenhopper: " + e.getMessage() + "\"}");
+        }
+    }
 }

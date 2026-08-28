@@ -29,4 +29,17 @@ public class JiraController {
         }
         return jiraService.getMyself(domain, token);
     }
+
+    @PostMapping("/greenhopper/work-data")
+    public ResponseEntity<String> getGreenhopperWorkData(@RequestBody com.agilespace.backend.dto.JiraGreenhopperWorkRequest request) {
+        if (request.getDomain() == null || request.getToken() == null || request.getRapidViewId() == null) {
+            return ResponseEntity.badRequest().body("{\"error\": \"Domain, Token e RapidViewId são obrigatórios.\"}");
+        }
+        return jiraService.getGreenhopperWorkData(
+            request.getDomain(),
+            request.getToken(),
+            request.getRapidViewId(),
+            request.getSelectedProjectKey()
+        );
+    }
 }

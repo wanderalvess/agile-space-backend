@@ -26,6 +26,9 @@ public class WorkItemService {
                 .createdAt(LocalDateTime.now())
                 .build());
 
+        if (item.getStatus() == null || item.getStatus().isBlank()) {
+            item.setStatus("backlog");
+        }
         item.setPointsEstimated(pointsEstimated);
         item.setUpdatedAt(LocalDateTime.now());
         workItemRepository.save(item);
