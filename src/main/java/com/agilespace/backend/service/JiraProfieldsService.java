@@ -75,6 +75,17 @@ public class JiraProfieldsService {
      */
     @Transactional
     public ProjectDetailDto syncProjectFromProfields(String domain, String projectKey, String token) {
+        return syncProjectFromProfields(domain, projectKey, token, null);
+    }
+
+    /**
+     * Sobrecarga que recebe quem disparou a sincronização. Garante que esse usuário sempre saia
+     * com um vínculo no projeto (fallback Agile Master) mesmo que seu e-mail não bata com nenhum
+     * membro retornado pelo Profields — sem isso ele fica sem projeto associado e trava no
+     * onboarding, já que o sync não sabe reconciliar "quem está criando" com "quem o Jira retornou".
+     */
+    @Transactional
+    public ProjectDetailDto syncProjectFromProfields(String domain, String projectKey, String token, User creator) {
         if (token == null || token.isBlank()) {
             throw new org.springframework.web.server.ResponseStatusException(
                     HttpStatus.BAD_REQUEST, "Token do Jira é obrigatório para sincronizar o projeto");
@@ -128,7 +139,22 @@ public class JiraProfieldsService {
                 existingUser.ifPresent(u -> m.setUserId(u.getId()));
             }
         }
-        
+
+        if (creator != null && members.stream().noneMatch(m -> creator.getId().equals(m.getUserId()))) {
+            log.warn("Usuário {} ({}) disparou o sync do projeto {} mas não bateu com nenhum membro retornado pelo Profields — vinculando como Agile Master fallback pra não travar o onboarding.",
+                    creator.getId(), creator.getEmail(), cleanKey);
+            members.add(ProjectMemberRole.builder()
+                    .projectId(cleanKey)
+                    .roleName("Agile Master")
+                    .roleKey("AGILE_MASTER")
+                    .jiraAccountId(creator.getJiraAccountId())
+                    .displayName(creator.getName())
+                    .email(creator.getEmail())
+                    .userId(creator.getId())
+                    .isLeadership(true)
+                    .build());
+        }
+
         members = projectMemberRoleRepository.saveAll(members);
         projectMemberRoleRepository.flush(); // Força o insert imediato
 

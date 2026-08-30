@@ -101,8 +101,10 @@ public class ProjectController {
     public ResponseEntity<ProjectDetailDto> syncProject(
             @PathVariable String projectKey,
             @RequestParam(required = false) String domain,
-            @RequestHeader(value = "X-Jira-Token", required = false) String token) {
-        ProjectDetailDto synced = jiraProfieldsService.syncProjectFromProfields(domain, projectKey, token);
+            @RequestHeader(value = "X-Jira-Token", required = false) String token,
+            HttpServletRequest httpRequest) {
+        User user = currentUser(httpRequest);
+        ProjectDetailDto synced = jiraProfieldsService.syncProjectFromProfields(domain, projectKey, token, user);
         return ResponseEntity.ok(synced);
     }
 
