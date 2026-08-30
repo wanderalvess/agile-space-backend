@@ -1,7 +1,9 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.SprintPlanning;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.SprintPlanningService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -12,7 +14,6 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/sprint-plannings")
 @RequiredArgsConstructor
-@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class SprintPlanningController {
 
     private final SprintPlanningService sprintPlanningService;
@@ -35,8 +36,9 @@ public class SprintPlanningController {
     }
 
     @PostMapping
-    public ResponseEntity<SprintPlanning> saveOrUpdatePlanner(@RequestBody SprintPlanning planner) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(sprintPlanningService.saveOrUpdatePlanner(planner));
+    public ResponseEntity<SprintPlanning> saveOrUpdatePlanner(@RequestBody SprintPlanning planner, HttpServletRequest request) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        return ResponseEntity.status(HttpStatus.CREATED).body(sprintPlanningService.saveOrUpdatePlanner(planner, callerId));
     }
 
     @DeleteMapping("/{id}")

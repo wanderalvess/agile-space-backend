@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.springframework.data.domain.Pageable;
 
 import java.util.Arrays;
 import java.util.List;
@@ -42,8 +43,9 @@ public class RetroServiceTest {
 
     @Test
     public void testListBoards() {
-        when(boardRepository.findAll()).thenReturn(Arrays.asList(new RetroBoard()));
-        List<RetroBoard> list = service.listBoards();
+        when(boardRepository.findAll(any(Pageable.class)))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(Arrays.asList(new RetroBoard())));
+        List<RetroBoard> list = service.listBoards(200);
         assertEquals(1, list.size());
     }
 
@@ -126,7 +128,7 @@ public class RetroServiceTest {
         when(cardRepository.findById("card-999")).thenReturn(Optional.of(card));
         doNothing().when(cardRepository).deleteById("card-999");
 
-        service.deleteCard("card-999");
+        service.deleteCard("retro-123", "card-999");
 
         verify(cardRepository, times(1)).deleteById("card-999");
         verify(webSocketHandler, times(1)).broadcastEvent(eq("retro-123"), eq("CARD_DELETED"), any());

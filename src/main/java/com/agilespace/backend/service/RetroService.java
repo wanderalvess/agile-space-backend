@@ -9,8 +9,11 @@ import com.agilespace.backend.repository.RetroParticipantRepository;
 import com.agilespace.backend.websocket.RetroWebSocketHandler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Map;
@@ -28,8 +31,9 @@ public class RetroService {
 
     // --- Board Logic ---
     @Transactional(readOnly = true)
-    public List<RetroBoard> listBoards() {
-        return boardRepository.findAll();
+    public List<RetroBoard> listBoards(int limit) {
+        int safeLimit = limit > 0 ? limit : 1000;
+        return boardRepository.findAll(PageRequest.of(0, safeLimit)).getContent();
     }
 
     @Transactional(readOnly = true)
@@ -74,16 +78,28 @@ public class RetroService {
 
     @Transactional
     public RetroCard saveOrUpdateCard(RetroCard card) {
+        if (card.getId() != null) {
+            cardRepository.findById(card.getId()).ifPresent(existing -> {
+                if (!existing.getBoardId().equals(card.getBoardId())) {
+                    throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                            "Cartão pertence a outro board.");
+                }
+            });
+        }
         RetroCard saved = cardRepository.save(card);
         webSocketHandler.broadcastEvent(card.getBoardId(), "CARD_SAVED", saved);
         return saved;
     }
 
     @Transactional
-    public void deleteCard(String cardId) {
+    public void deleteCard(String boardId, String cardId) {
         Optional<RetroCard> cardOpt = cardRepository.findById(cardId);
         if (cardOpt.isPresent()) {
             RetroCard card = cardOpt.get();
+            if (!card.getBoardId().equals(boardId)) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                        "Cartão não pertence a este board.");
+            }
             cardRepository.deleteById(cardId);
             webSocketHandler.broadcastEvent(card.getBoardId(), "CARD_DELETED", Map.of("cardId", cardId));
         }

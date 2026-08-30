@@ -43,7 +43,7 @@ public class SprintPlanningServiceTest {
         SprintPlanning planning = SprintPlanning.builder().title("Sprint 13").build();
         when(repository.save(planning)).thenReturn(planning);
 
-        SprintPlanning saved = service.saveOrUpdatePlanner(planning);
+        SprintPlanning saved = service.saveOrUpdatePlanner(planning, "user-1");
 
         assertEquals("Sprint 13", saved.getTitle());
         verify(repository, times(1)).save(planning);

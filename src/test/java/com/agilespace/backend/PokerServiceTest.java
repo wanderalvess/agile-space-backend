@@ -59,7 +59,7 @@ public class PokerServiceTest {
         PokerRoom room = PokerRoom.builder().id("room-123").title("Planning Poker Sprint 1").build();
         when(roomRepository.save(room)).thenReturn(room);
 
-        PokerRoom saved = service.saveOrUpdateRoom(room);
+        PokerRoom saved = service.saveOrUpdateRoom(room, "user-456", "MEMBER");
 
         assertEquals("Planning Poker Sprint 1", saved.getTitle());
         verify(webSocketHandler, times(1)).broadcastEvent(eq("room-123"), eq("ROOM_UPDATED"), any());
@@ -68,8 +68,9 @@ public class PokerServiceTest {
 
     @Test
     public void testListRooms() {
-        when(roomRepository.findAll()).thenReturn(Arrays.asList(new PokerRoom()));
-        List<PokerRoom> result = service.listRooms();
+        when(roomRepository.findAll(any(Pageable.class)))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(Arrays.asList(new PokerRoom())));
+        List<PokerRoom> result = service.listRooms(200);
         assertEquals(1, result.size());
     }
 
@@ -132,7 +133,7 @@ public class PokerServiceTest {
 
         when(voteRepository.save(any(PokerVote.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        PokerVote saved = service.saveVote(vote);
+        PokerVote saved = service.saveVote(vote, "user-456");
 
         assertEquals("room-123_user-456", saved.getId());
         verify(webSocketHandler, times(1)).broadcastEvent(eq("room-123"), eq("VOTE_SAVED"), any());
@@ -147,7 +148,11 @@ public class PokerServiceTest {
 
     @Test
     public void testClearVotes() {
-        service.clearVotes("r1");
+        PokerRoom room = PokerRoom.builder().id("r1").creatorId("u1").build();
+        when(roomRepository.findById("r1")).thenReturn(Optional.of(room));
+
+        service.clearVotes("r1", "u1", "MEMBER");
+
         verify(voteRepository).deleteByRoomId("r1");
         verify(webSocketHandler).broadcastEvent(eq("r1"), eq("VOTES_CLEARED"), any());
     }
@@ -179,7 +184,11 @@ public class PokerServiceTest {
 
     @Test
     public void testClearRounds() {
-        service.clearRounds("r1");
+        PokerRoom room = PokerRoom.builder().id("r1").creatorId("u1").build();
+        when(roomRepository.findById("r1")).thenReturn(Optional.of(room));
+
+        service.clearRounds("r1", "u1", "MEMBER");
+
         verify(roundRepository).deleteByRoomId("r1");
         verify(webSocketHandler).broadcastEvent(eq("r1"), eq("ROUNDS_CLEARED"), any());
     }

@@ -12,8 +12,10 @@ import com.agilespace.backend.websocket.PokerWebSocketHandler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Map;
@@ -37,15 +39,46 @@ public class PokerService {
     }
 
     @Transactional
-    public PokerRoom saveOrUpdateRoom(PokerRoom room) {
+    public PokerRoom saveOrUpdateRoom(PokerRoom room, String callerId, String callerRole) {
+        Optional<PokerRoom> existing = room.getId() != null ? roomRepository.findById(room.getId()) : Optional.empty();
+        if (existing.isPresent()) {
+            requireRoomParticipant(existing.get(), callerId, callerRole);
+        } else {
+            room.setCreatorId(callerId);
+        }
         PokerRoom saved = roomRepository.save(room);
         webSocketHandler.broadcastEvent(saved.getId(), "ROOM_UPDATED", saved);
         return saved;
     }
 
+    private boolean isPrivilegedRole(String role) {
+        return "ADMIN".equalsIgnoreCase(role) || "LEAD".equalsIgnoreCase(role);
+    }
+
+    /**
+     * Facilitador é transferível (ex.: host cai e outro participante assume), então o gate
+     * aqui é "já entrou na sala" (creatorId, participante com join registrado, ou ADMIN/LEAD) —
+     * não "só o criador original". Isso fecha o buraco real (outsider que nunca entrou na sala
+     * mexendo via roomId adivinhado) sem travar o claim-facilitator do frontend.
+     */
+    private void requireRoomParticipant(PokerRoom room, String callerId, String callerRole) {
+        if (isPrivilegedRole(callerRole)) {
+            return;
+        }
+        if (callerId != null && callerId.equals(room.getCreatorId())) {
+            return;
+        }
+        if (callerId != null && participantRepository.existsById(room.getId() + "_" + callerId)) {
+            return;
+        }
+        throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                "Apenas participantes da sala podem executar esta ação.");
+    }
+
     @Transactional(readOnly = true)
-    public List<PokerRoom> listRooms() {
-        return roomRepository.findAll();
+    public List<PokerRoom> listRooms(int limit) {
+        int safeLimit = limit > 0 ? limit : 1000;
+        return roomRepository.findAll(PageRequest.of(0, safeLimit)).getContent();
     }
 
     // --- Participants Logic ---
@@ -85,7 +118,10 @@ public class PokerService {
     }
 
     @Transactional
-    public PokerVote saveVote(PokerVote vote) {
+    public PokerVote saveVote(PokerVote vote, String callerId) {
+        if (callerId == null || !callerId.equals(vote.getParticipantId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só é possível registrar o próprio voto.");
+        }
         String id = vote.getRoomId() + "_" + vote.getParticipantId();
         vote.setId(id);
         PokerVote saved = voteRepository.save(vote);
@@ -100,7 +136,10 @@ public class PokerService {
     }
 
     @Transactional
-    public void clearVotes(String roomId) {
+    public void clearVotes(String roomId, String callerId, String callerRole) {
+        PokerRoom room = roomRepository.findById(roomId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sala não encontrada"));
+        requireRoomParticipant(room, callerId, callerRole);
         voteRepository.deleteByRoomId(roomId);
         webSocketHandler.broadcastEvent(roomId, "VOTES_CLEARED", Map.of());
     }
@@ -125,7 +164,10 @@ public class PokerService {
     }
 
     @Transactional
-    public void clearRounds(String roomId) {
+    public void clearRounds(String roomId, String callerId, String callerRole) {
+        PokerRoom room = roomRepository.findById(roomId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sala não encontrada"));
+        requireRoomParticipant(room, callerId, callerRole);
         roundRepository.deleteByRoomId(roomId);
         webSocketHandler.broadcastEvent(roomId, "ROUNDS_CLEARED", Map.of());
     }

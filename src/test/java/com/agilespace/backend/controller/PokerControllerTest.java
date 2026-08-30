@@ -3,7 +3,9 @@ package com.agilespace.backend.controller;
 import com.agilespace.backend.domain.PokerRoom;
 import com.agilespace.backend.domain.PokerParticipant;
 import com.agilespace.backend.domain.PokerVote;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.PokerService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -56,20 +58,26 @@ public class PokerControllerTest {
     @Test
     public void testSaveVote() {
         PokerVote vote = new PokerVote();
-        when(service.saveVote(vote)).thenReturn(vote);
-        
-        ResponseEntity<PokerVote> response = controller.saveVote("room-1", vote);
-        
+        vote.setParticipantId("user-1");
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("user-1");
+        when(service.saveVote(vote, "user-1")).thenReturn(vote);
+
+        ResponseEntity<PokerVote> response = controller.saveVote("room-1", vote, request);
+
         assertEquals(HttpStatus.CREATED, response.getStatusCode());
         assertEquals("room-1", vote.getRoomId());
     }
 
     @Test
     public void testClearVotes() {
-        doNothing().when(service).clearVotes("room-1");
-        
-        ResponseEntity<Void> response = controller.clearVotes("room-1");
-        
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("user-1");
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE)).thenReturn("MEMBER");
+        doNothing().when(service).clearVotes("room-1", "user-1", "MEMBER");
+
+        ResponseEntity<Void> response = controller.clearVotes("room-1", request);
+
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
     }
 }

@@ -15,15 +15,15 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/retros")
 @RequiredArgsConstructor
-@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class RetroController {
 
     private final RetroService retroService;
 
     // --- Board Endpoints ---
     @GetMapping
-    public ResponseEntity<List<RetroBoard>> listBoards() {
-        return ResponseEntity.ok(retroService.listBoards());
+    public ResponseEntity<List<RetroBoard>> listBoards(
+            @RequestParam(value = "limit", required = false, defaultValue = "1000") int limit) {
+        return ResponseEntity.ok(retroService.listBoards(limit));
     }
 
     @GetMapping("/{id}")
@@ -78,7 +78,7 @@ public class RetroController {
     public ResponseEntity<Void> deleteCard(
             @PathVariable("id") String boardId,
             @PathVariable("cardId") String cardId) {
-        retroService.deleteCard(cardId);
+        retroService.deleteCard(boardId, cardId);
         return ResponseEntity.noContent().build();
     }
 

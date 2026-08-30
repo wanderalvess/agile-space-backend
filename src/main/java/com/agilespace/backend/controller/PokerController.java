@@ -4,7 +4,9 @@ import com.agilespace.backend.domain.PokerRoom;
 import com.agilespace.backend.domain.PokerParticipant;
 import com.agilespace.backend.domain.PokerVote;
 import com.agilespace.backend.domain.PokerRound;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.PokerService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -16,7 +18,6 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/poker")
 @RequiredArgsConstructor
-@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class PokerController {
 
     private final PokerService pokerService;
@@ -30,13 +31,16 @@ public class PokerController {
     }
 
     @PostMapping
-    public ResponseEntity<PokerRoom> saveOrUpdateRoom(@RequestBody PokerRoom room) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(pokerService.saveOrUpdateRoom(room));
+    public ResponseEntity<PokerRoom> saveOrUpdateRoom(@RequestBody PokerRoom room, HttpServletRequest request) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        String callerRole = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        return ResponseEntity.status(HttpStatus.CREATED).body(pokerService.saveOrUpdateRoom(room, callerId, callerRole));
     }
 
     @GetMapping
-    public ResponseEntity<List<PokerRoom>> listRooms() {
-        return ResponseEntity.ok(pokerService.listRooms());
+    public ResponseEntity<List<PokerRoom>> listRooms(
+            @RequestParam(value = "limit", required = false, defaultValue = "1000") int limit) {
+        return ResponseEntity.ok(pokerService.listRooms(limit));
     }
 
     // --- Participants Endpoints ---
@@ -78,9 +82,11 @@ public class PokerController {
     @PostMapping("/{roomId}/votes")
     public ResponseEntity<PokerVote> saveVote(
             @PathVariable("roomId") String roomId,
-            @RequestBody PokerVote vote) {
+            @RequestBody PokerVote vote,
+            HttpServletRequest request) {
         vote.setRoomId(roomId);
-        return ResponseEntity.status(HttpStatus.CREATED).body(pokerService.saveVote(vote));
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        return ResponseEntity.status(HttpStatus.CREATED).body(pokerService.saveVote(vote, callerId));
     }
 
     @DeleteMapping("/{roomId}/votes/{userId}")
@@ -92,8 +98,10 @@ public class PokerController {
     }
 
     @DeleteMapping("/{roomId}/votes")
-    public ResponseEntity<Void> clearVotes(@PathVariable("roomId") String roomId) {
-        pokerService.clearVotes(roomId);
+    public ResponseEntity<Void> clearVotes(@PathVariable("roomId") String roomId, HttpServletRequest request) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        String callerRole = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        pokerService.clearVotes(roomId, callerId, callerRole);
         return ResponseEntity.noContent().build();
     }
 
@@ -114,8 +122,10 @@ public class PokerController {
     }
 
     @DeleteMapping("/{roomId}/rounds")
-    public ResponseEntity<Void> clearRounds(@PathVariable("roomId") String roomId) {
-        pokerService.clearRounds(roomId);
+    public ResponseEntity<Void> clearRounds(@PathVariable("roomId") String roomId, HttpServletRequest request) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        String callerRole = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        pokerService.clearRounds(roomId, callerId, callerRole);
         return ResponseEntity.noContent().build();
     }
 

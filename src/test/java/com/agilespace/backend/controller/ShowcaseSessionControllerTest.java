@@ -1,7 +1,9 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.ShowcaseSession;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.ShowcaseSessionService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -60,10 +62,12 @@ public class ShowcaseSessionControllerTest {
     @Test
     public void testSaveSession() {
         ShowcaseSession session = new ShowcaseSession();
-        when(service.saveSession(session)).thenReturn(session);
-        
-        ResponseEntity<ShowcaseSession> response = controller.saveSession(session);
-        
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("user-1");
+        when(service.saveSession(session, "user-1")).thenReturn(session);
+
+        ResponseEntity<ShowcaseSession> response = controller.saveSession(session, request);
+
         assertEquals(HttpStatus.OK, response.getStatusCode());
     }
 }

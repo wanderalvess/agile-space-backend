@@ -71,7 +71,7 @@ public class ShowcaseSessionServiceTest {
 
         when(repository.save(any(ShowcaseSession.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        ShowcaseSession saved = service.saveSession(session);
+        ShowcaseSession saved = service.saveSession(session, "user-1");
 
         assertNotNull(saved.getId());
         assertNotNull(saved.getCreatedAt());

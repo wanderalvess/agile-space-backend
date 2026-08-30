@@ -24,9 +24,17 @@ public class SprintPlanningService {
     }
 
     @Transactional
-    public SprintPlanning saveOrUpdatePlanner(SprintPlanning planner) {
-        if (planner.getId() == null || planner.getId().trim().isEmpty()) {
+    public SprintPlanning saveOrUpdatePlanner(SprintPlanning planner, String callerId) {
+        if (planner.getId() != null && !planner.getId().trim().isEmpty()) {
+            sprintPlanningRepository.findById(planner.getId()).ifPresent(existing -> {
+                planner.setCreatedBy(existing.getCreatedBy() != null ? existing.getCreatedBy() : callerId);
+                planner.setCreatedAt(existing.getCreatedAt());
+            });
+        } else {
             planner.setId(UUID.randomUUID().toString());
+        }
+        if (planner.getCreatedBy() == null || planner.getCreatedBy().trim().isEmpty()) {
+            planner.setCreatedBy(callerId);
         }
         if (planner.getCreatedAt() == null || planner.getCreatedAt().trim().isEmpty()) {
             planner.setCreatedAt(new java.util.Date().toString());

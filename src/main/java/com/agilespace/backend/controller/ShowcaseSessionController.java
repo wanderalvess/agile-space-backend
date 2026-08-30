@@ -1,7 +1,9 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.ShowcaseSession;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.ShowcaseSessionService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -30,8 +32,9 @@ public class ShowcaseSessionController {
     }
 
     @PostMapping
-    public ResponseEntity<ShowcaseSession> saveSession(@RequestBody ShowcaseSession session) {
-        ShowcaseSession saved = service.saveSession(session);
+    public ResponseEntity<ShowcaseSession> saveSession(@RequestBody ShowcaseSession session, HttpServletRequest request) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        ShowcaseSession saved = service.saveSession(session, callerId);
         return ResponseEntity.ok(saved);
     }
 }

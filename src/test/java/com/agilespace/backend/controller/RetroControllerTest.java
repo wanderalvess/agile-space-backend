@@ -76,8 +76,8 @@ public class RetroControllerTest {
 
     @Test
     public void testDeleteCard() {
-        doNothing().when(service).deleteCard("card1");
-        
+        doNothing().when(service).deleteCard("123", "card1");
+
         ResponseEntity<Void> response = controller.deleteCard("123", "card1");
         
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());

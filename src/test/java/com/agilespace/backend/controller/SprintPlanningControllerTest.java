@@ -1,7 +1,9 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.SprintPlanning;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.SprintPlanningService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -41,10 +43,12 @@ public class SprintPlanningControllerTest {
     @Test
     public void testSaveOrUpdatePlanner() {
         SprintPlanning planning = new SprintPlanning();
-        when(service.saveOrUpdatePlanner(planning)).thenReturn(planning);
-        
-        ResponseEntity<SprintPlanning> response = controller.saveOrUpdatePlanner(planning);
-        
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("user-1");
+        when(service.saveOrUpdatePlanner(planning, "user-1")).thenReturn(planning);
+
+        ResponseEntity<SprintPlanning> response = controller.saveOrUpdatePlanner(planning, request);
+
         assertEquals(HttpStatus.CREATED, response.getStatusCode());
     }
 
