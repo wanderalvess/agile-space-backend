@@ -98,12 +98,15 @@ Isso cria:
 
 Rede e volume ficam isolados sob o prefixo `agile-space-backend_*` — não reaproveita nem interfere em containers de outros projetos na mesma máquina.
 
+Os três serviços têm `healthcheck` no compose (`db` via `pg_isready`, `backend` via `/actuator/health`, `frontend` via `/`), e `frontend` só inicia depois que `backend` estiver `healthy` — evita a race do frontend subir antes da API terminar de bootar (o Spring Boot leva de 15 a 50s a depender da máquina).
+
 ### Verificar
 
 ```bash
-docker compose ps
-curl http://localhost:8002/v3/api-docs   # backend
-curl http://localhost:9002               # frontend
+docker compose ps                        # os 3 devem aparecer "healthy" após ~1min
+curl http://localhost:8002/actuator/health  # {"status":"UP"}
+curl http://localhost:8002/v3/api-docs      # backend
+curl http://localhost:9002                  # frontend
 ```
 
 Acesse `http://localhost:9002` no navegador — a tela de login/cadastro aparece direto. Como o banco começa vazio, use a aba **Cadastrar** para criar o primeiro usuário.
@@ -136,6 +139,14 @@ Com a aplicação em execução, a documentação interativa e os endpoints pode
 
 - **Swagger UI (Interface Interativa):** [http://localhost:8002/swagger-ui.html](http://localhost:8002/swagger-ui.html)
 - **OpenAPI Spec (JSON):** [http://localhost:8002/v3/api-docs](http://localhost:8002/v3/api-docs)
+
+---
+
+## 🩺 Observabilidade
+
+- **Health check:** `GET /actuator/health` (Spring Boot Actuator) — retorna `{"status":"UP"}`, incluindo verificação de conectividade com o PostgreSQL. Sem autenticação (rota fora de `/api/**`, não passa pelo `JwtAuthenticationFilter`), por isso só expõe `status` (`management.endpoint.health.show-details: never` em `application.yml`) — não vaza detalhe de infra.
+- Nenhum outro endpoint do Actuator está exposto (`management.endpoints.web.exposure.include: health` restringe explicitamente). Para habilitar métricas (`/actuator/metrics`, `/actuator/prometheus`), adicione o endpoint à lista de exposição e o `micrometer-registry-prometheus` no `pom.xml`.
+- **Logs:** só stdout, coletado via `docker logs <container>` — sem agregação centralizada (Loki/ELK) nem rotação configurada no compose ainda.
 
 ---
 
