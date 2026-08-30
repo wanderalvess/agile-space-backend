@@ -312,7 +312,9 @@ public class AppReleaseService {
                 continue;
             }
 
-            LocalDateTime releaseTime = baseTime.minusSeconds((long) (dtos.size() - 1 - i) * 60);
+            // dtos chegam do mais novo para o mais antigo: o indice 0 fica com o createdAt mais
+            // recente para que findAllByOrderByCreatedAtDesc devolva o changelog na ordem original.
+            LocalDateTime releaseTime = baseTime.minusSeconds((long) i * 60);
 
             AppRelease release = AppRelease.builder()
                     .id(UUID.randomUUID().toString())
