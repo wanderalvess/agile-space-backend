@@ -5,8 +5,10 @@ import com.agilespace.backend.domain.SupportTicketReply;
 import com.agilespace.backend.repository.SupportTicketReplyRepository;
 import com.agilespace.backend.repository.SupportTicketRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -18,6 +20,22 @@ public class SupportTicketService {
 
     private final SupportTicketRepository ticketRepository;
     private final SupportTicketReplyRepository replyRepository;
+
+    /**
+     * Um chamado só pode ser lido/respondido pelo próprio solicitante ou por um ADMIN.
+     * Antes disso qualquer usuário autenticado lia e respondia chamado alheio adivinhando o id.
+     */
+    private SupportTicket requireTicketAccess(UUID ticketId, String callerId, boolean isAdmin) {
+        SupportTicket ticket = ticketRepository.findById(ticketId)
+                .orElseThrow(() -> new IllegalArgumentException("Support ticket not found with id: " + ticketId));
+        if (isAdmin) {
+            return ticket;
+        }
+        if (callerId == null || !callerId.equals(ticket.getRequesterId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito ao solicitante do chamado ou a administradores.");
+        }
+        return ticket;
+    }
 
     @Transactional(readOnly = true)
     public List<SupportTicket> listMyTickets(String requesterId) {
@@ -54,8 +72,7 @@ public class SupportTicketService {
 
     @Transactional
     public SupportTicketReply addReply(UUID ticketId, String authorId, String authorName, boolean isAdmin, String message) {
-        SupportTicket ticket = ticketRepository.findById(ticketId)
-                .orElseThrow(() -> new IllegalArgumentException("Support ticket not found with id: " + ticketId));
+        SupportTicket ticket = requireTicketAccess(ticketId, authorId, isAdmin);
 
         SupportTicketReply reply = SupportTicketReply.builder()
                 .ticketId(ticketId)
@@ -73,7 +90,8 @@ public class SupportTicketService {
     }
 
     @Transactional(readOnly = true)
-    public List<SupportTicketReply> getReplies(UUID ticketId) {
+    public List<SupportTicketReply> getReplies(UUID ticketId, String callerId, boolean isAdmin) {
+        requireTicketAccess(ticketId, callerId, isAdmin);
         return replyRepository.findByTicketIdOrderByCreatedAtAsc(ticketId);
     }
 
