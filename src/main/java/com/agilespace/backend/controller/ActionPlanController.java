@@ -2,12 +2,15 @@ package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.ActionPlan;
 import com.agilespace.backend.domain.ActionPlanTask;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.ActionPlanService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.UUID;
@@ -19,6 +22,33 @@ import java.util.UUID;
 public class ActionPlanController {
 
     private final ActionPlanService actionPlanService;
+
+    /**
+     * Board público (padrão): qualquer autenticado edita. Board privado: só criador,
+     * participante já adicionado ou ADMIN. Antes disso qualquer usuário autenticado
+     * editava/apagava tarefa de qualquer board trocando o taskId.
+     */
+    private void requireBoardAccess(UUID boardId, HttpServletRequest request) {
+        String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        if ("ADMIN".equalsIgnoreCase(role)) {
+            return;
+        }
+        ActionPlan board;
+        try {
+            board = actionPlanService.getBoardById(boardId);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Action Plan not found with id: " + boardId);
+        }
+        if (Boolean.TRUE.equals(board.getIsPublic())) {
+            return;
+        }
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        boolean isCreator = callerId != null && callerId.equals(board.getCreatorId());
+        boolean isParticipant = callerId != null && board.getParticipantIds().contains(callerId);
+        if (!isCreator && !isParticipant) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a participantes deste board.");
+        }
+    }
 
     @PostMapping
     public ResponseEntity<ActionPlan> createBoard(@Valid @RequestBody ActionPlan board) {
@@ -65,8 +95,10 @@ public class ActionPlanController {
     @PutMapping("/tasks/{taskId}")
     public ResponseEntity<ActionPlanTask> updateTask(
             @PathVariable("taskId") UUID taskId,
-            @Valid @RequestBody ActionPlanTask task) {
+            @Valid @RequestBody ActionPlanTask task,
+            HttpServletRequest request) {
         try {
+            requireBoardAccess(actionPlanService.getTaskBoardId(taskId), request);
             return ResponseEntity.ok(actionPlanService.updateTask(taskId, task));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
@@ -74,8 +106,9 @@ public class ActionPlanController {
     }
 
     @DeleteMapping("/tasks/{taskId}")
-    public ResponseEntity<Void> deleteTask(@PathVariable("taskId") UUID taskId) {
+    public ResponseEntity<Void> deleteTask(@PathVariable("taskId") UUID taskId, HttpServletRequest request) {
         try {
+            requireBoardAccess(actionPlanService.getTaskBoardId(taskId), request);
             actionPlanService.deleteTask(taskId);
             return ResponseEntity.noContent().build();
         } catch (IllegalArgumentException e) {

@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -21,6 +22,21 @@ import java.util.List;
 public class PokerController {
 
     private final PokerService pokerService;
+
+    /**
+     * Só o próprio usuário (ou um ADMIN) mexe no seu heartbeat/participação/voto.
+     * Antes disso qualquer usuário autenticado agia como outro trocando o userId na URL.
+     */
+    private static void requireSelfOrAdmin(String userId, HttpServletRequest request) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        if ("ADMIN".equalsIgnoreCase(role)) {
+            return;
+        }
+        if (callerId == null || !callerId.equals(userId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito ao próprio usuário.");
+        }
+    }
 
     // --- Room Endpoints ---
     @GetMapping("/{id}")
@@ -60,7 +76,9 @@ public class PokerController {
     @PostMapping("/{roomId}/heartbeat/{userId}")
     public ResponseEntity<Void> sendHeartbeat(
             @PathVariable("roomId") String roomId,
-            @PathVariable("userId") String userId) {
+            @PathVariable("userId") String userId,
+            HttpServletRequest request) {
+        requireSelfOrAdmin(userId, request);
         pokerService.updateHeartbeat(roomId, userId);
         return ResponseEntity.ok().build();
     }
@@ -68,7 +86,9 @@ public class PokerController {
     @DeleteMapping("/{roomId}/participants/{userId}")
     public ResponseEntity<Void> leaveRoom(
             @PathVariable("roomId") String roomId,
-            @PathVariable("userId") String userId) {
+            @PathVariable("userId") String userId,
+            HttpServletRequest request) {
+        requireSelfOrAdmin(userId, request);
         pokerService.leaveRoom(roomId, userId);
         return ResponseEntity.noContent().build();
     }
@@ -92,7 +112,9 @@ public class PokerController {
     @DeleteMapping("/{roomId}/votes/{userId}")
     public ResponseEntity<Void> removeVote(
             @PathVariable("roomId") String roomId,
-            @PathVariable("userId") String userId) {
+            @PathVariable("userId") String userId,
+            HttpServletRequest request) {
+        requireSelfOrAdmin(userId, request);
         pokerService.removeVote(roomId, userId);
         return ResponseEntity.noContent().build();
     }

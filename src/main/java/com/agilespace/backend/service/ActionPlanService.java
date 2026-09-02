@@ -51,6 +51,13 @@ public class ActionPlanService {
         return taskRepository.save(task);
     }
 
+    @Transactional(readOnly = true)
+    public UUID getTaskBoardId(UUID taskId) {
+        return taskRepository.findById(taskId)
+                .map(ActionPlanTask::getBoardId)
+                .orElseThrow(() -> new IllegalArgumentException("Task not found with id: " + taskId));
+    }
+
     @Transactional
     public ActionPlanTask updateTask(UUID taskId, ActionPlanTask updated) {
         ActionPlanTask existing = taskRepository.findById(taskId)

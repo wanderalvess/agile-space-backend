@@ -1,7 +1,9 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.BrainstormingBoard;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.BrainstormingService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -59,10 +61,12 @@ public class BrainstormingControllerTest {
 
     @Test
     public void testDeleteBoard() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE)).thenReturn("ADMIN");
         doNothing().when(service).deleteBoard("123");
-        
-        ResponseEntity<Void> response = controller.deleteBoard("123");
-        
+
+        ResponseEntity<Void> response = controller.deleteBoard("123", request);
+
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
         verify(service, times(1)).deleteBoard("123");
     }

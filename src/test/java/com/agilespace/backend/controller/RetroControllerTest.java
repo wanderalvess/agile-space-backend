@@ -3,7 +3,9 @@ package com.agilespace.backend.controller;
 import com.agilespace.backend.domain.RetroBoard;
 import com.agilespace.backend.domain.RetroParticipant;
 import com.agilespace.backend.domain.RetroCard;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.RetroService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -76,10 +78,12 @@ public class RetroControllerTest {
 
     @Test
     public void testDeleteCard() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE)).thenReturn("ADMIN");
         doNothing().when(service).deleteCard("123", "card1");
 
-        ResponseEntity<Void> response = controller.deleteCard("123", "card1");
-        
+        ResponseEntity<Void> response = controller.deleteCard("123", "card1", request);
+
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
     }
 }
