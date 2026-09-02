@@ -86,6 +86,39 @@ public class JiraProfieldsService {
      */
     @Transactional
     public ProjectDetailDto syncProjectFromProfields(String domain, String projectKey, String token, User creator) {
+        ProfieldsSnapshot snapshot = fetchProfieldsSnapshot(domain, projectKey, token, creator);
+        String cleanKey = snapshot.project().getId();
+
+        // Salva Projeto
+        ProjectConfig project = projectConfigRepository.save(snapshot.project());
+
+        // Atualiza Membros
+        projectMemberRoleRepository.deleteByProjectId(cleanKey);
+        projectMemberRoleRepository.flush(); // Garante que a exclusão ocorreu antes do insert
+
+        List<ProjectMemberRole> members = projectMemberRoleRepository.saveAll(snapshot.members());
+        projectMemberRoleRepository.flush(); // Força o insert imediato
+
+        return toDetailDto(project, members);
+    }
+
+    /**
+     * Dry-run do sync: consulta o Profields, monta projeto + membros (inclusive vínculo com usuários
+     * já cadastrados e fallback Agile Master do criador) e devolve o DTO SEM gravar nada.
+     * Usado pelo onboarding pra o usuário conferir o que vai entrar antes de confirmar.
+     */
+    @Transactional(readOnly = true)
+    public ProjectDetailDto previewProjectFromProfields(String domain, String projectKey, String token, User creator) {
+        ProfieldsSnapshot snapshot = fetchProfieldsSnapshot(domain, projectKey, token, creator);
+        return toDetailDto(snapshot.project(), snapshot.members());
+    }
+
+    private record ProfieldsSnapshot(ProjectConfig project, List<ProjectMemberRole> members) {}
+
+    /**
+     * Busca o projeto no Profields e monta as entidades em memória. Não persiste.
+     */
+    private ProfieldsSnapshot fetchProfieldsSnapshot(String domain, String projectKey, String token, User creator) {
         if (token == null || token.isBlank()) {
             throw new org.springframework.web.server.ResponseStatusException(
                     HttpStatus.BAD_REQUEST, "Token do Jira é obrigatório para sincronizar o projeto");
@@ -96,7 +129,7 @@ public class JiraProfieldsService {
                 : "jira.empresa.com.br";
         String cleanKey = projectKey.trim().toUpperCase();
 
-        log.info("Iniciando sincronização Profields para projeto {} no domínio {}", cleanKey, cleanDomain);
+        log.info("Consultando Profields para projeto {} no domínio {}", cleanKey, cleanDomain);
 
         JsonNode rootNode;
         try {
@@ -117,20 +150,13 @@ public class JiraProfieldsService {
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
         } catch (Exception e) {
-            log.warn("Falha ao sincronizar projeto {} com o Profields: {}", cleanKey, e.getMessage());
+            log.warn("Falha ao consultar projeto {} no Profields: {}", cleanKey, e.getMessage());
             throw new org.springframework.web.server.ResponseStatusException(
                     HttpStatus.BAD_GATEWAY, "Não foi possível obter dados do Profields para o projeto " + cleanKey + ": " + e.getMessage(), e);
         }
 
         ProjectConfig project = parseProfieldsJson(cleanKey, rootNode);
         List<ProjectMemberRole> members = parseProfieldsMembers(cleanKey, rootNode);
-
-        // Salva Projeto
-        project = projectConfigRepository.save(project);
-
-        // Atualiza Membros
-        projectMemberRoleRepository.deleteByProjectId(cleanKey);
-        projectMemberRoleRepository.flush(); // Garante que a exclusão ocorreu antes do insert
 
         for (ProjectMemberRole m : members) {
             // Tenta vincular com usuário do banco se já existir
@@ -155,10 +181,7 @@ public class JiraProfieldsService {
                     .build());
         }
 
-        members = projectMemberRoleRepository.saveAll(members);
-        projectMemberRoleRepository.flush(); // Força o insert imediato
-
-        return toDetailDto(project, members);
+        return new ProfieldsSnapshot(project, members);
     }
 
     /**

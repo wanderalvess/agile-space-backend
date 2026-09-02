@@ -109,6 +109,20 @@ public class ProjectController {
     }
 
     /**
+     * Dry-run do sync Profields: devolve o que SERIA importado sem gravar nada.
+     */
+    @PostMapping("/sync/{projectKey}/preview")
+    public ResponseEntity<ProjectDetailDto> previewSyncProject(
+            @PathVariable String projectKey,
+            @RequestParam(required = false) String domain,
+            @RequestHeader(value = "X-Jira-Token", required = false) String token,
+            HttpServletRequest httpRequest) {
+        User user = currentUser(httpRequest);
+        ProjectDetailDto preview = jiraProfieldsService.previewProjectFromProfields(domain, projectKey, token, user);
+        return ResponseEntity.ok(preview);
+    }
+
+    /**
      * Resolve os projetos e cargos acessíveis para um usuário.
      */
     @GetMapping("/user/{identifier}")
