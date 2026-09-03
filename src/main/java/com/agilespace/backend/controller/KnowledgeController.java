@@ -48,6 +48,22 @@ public class KnowledgeController {
         return listDocuments(query, tags, null, pageable);
     }
 
+    @PostMapping("/search/semantic")
+    public ResponseEntity<Page<KnowledgeDocument>> semanticSearch(
+            @RequestBody Map<String, Object> body,
+            @PageableDefault(size = 10) Pageable pageable) {
+        @SuppressWarnings("unchecked")
+        List<Double> rawEmbedding = (List<Double>) body.get("embedding");
+        if (rawEmbedding == null || rawEmbedding.isEmpty()) {
+            return ResponseEntity.badRequest().build();
+        }
+        float[] queryEmbedding = new float[rawEmbedding.size()];
+        for (int i = 0; i < rawEmbedding.size(); i++) {
+            queryEmbedding[i] = rawEmbedding.get(i).floatValue();
+        }
+        return ResponseEntity.ok(knowledgeService.semanticSearch(queryEmbedding, pageable));
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<KnowledgeDocument> getDocumentById(@PathVariable("id") UUID id) {
         try {

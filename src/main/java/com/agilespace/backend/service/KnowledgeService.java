@@ -44,6 +44,14 @@ public class KnowledgeService {
             "este", "esta", "esse", "essa", "aquele", "aquela", "tem", "temos", "e", "ou"
     );
 
+    // Embeddings já saem normalizados do pipeline (transformers.js, normalize: true),
+    // então dot product == cosine similarity — evita recalcular norma a cada comparação.
+    // Valor calibrado observando scores reais (MiniLM multilingue comprime a faixa de cosine
+    // similarity — sinônimo genuíno ficou ~0.23, não os 0.7+ que se poderia esperar
+    // ingenuamente). Abaixo disso o resultado é ruído, não relevância real. Recalibrar
+    // se a base de conhecimento real mostrar muito falso positivo/negativo em produção.
+    private static final float MIN_SIMILARITY = 0.2f;
+
     // Overload preservado para compatibilidade de origem com chamadas existentes sem filtro de status.
     @Transactional(readOnly = true)
     public Page<KnowledgeDocument> listDocuments(String query, Set<String> tags, Pageable pageable) {
@@ -104,6 +112,34 @@ public class KnowledgeService {
     }
 
     @Transactional(readOnly = true)
+    public Page<KnowledgeDocument> semanticSearch(float[] queryEmbedding, Pageable pageable) {
+        List<KnowledgeDocument> allDocs = knowledgeRepository.findByStatusNot("deleted", Pageable.unpaged()).getContent();
+
+        List<java.util.AbstractMap.SimpleEntry<KnowledgeDocument, Float>> scored = allDocs.stream()
+                .filter(doc -> doc.getEmbedding() != null && doc.getEmbedding().length == queryEmbedding.length)
+                .map(doc -> new java.util.AbstractMap.SimpleEntry<>(doc, dotProduct(doc.getEmbedding(), queryEmbedding)))
+                .filter(entry -> entry.getValue() >= MIN_SIMILARITY)
+                .sorted((a, b) -> Float.compare(b.getValue(), a.getValue()))
+                .collect(Collectors.toList());
+
+        int start = (int) pageable.getOffset();
+        int end = Math.min(start + pageable.getPageSize(), scored.size());
+        List<KnowledgeDocument> pageContent = start < scored.size()
+                ? scored.subList(start, end).stream().map(java.util.AbstractMap.SimpleEntry::getKey).collect(Collectors.toList())
+                : List.of();
+
+        return new PageImpl<>(pageContent, pageable, scored.size());
+    }
+
+    private static float dotProduct(float[] a, float[] b) {
+        float sum = 0f;
+        for (int i = 0; i < a.length; i++) {
+            sum += a[i] * b[i];
+        }
+        return sum;
+    }
+
+    @Transactional(readOnly = true)
     public KnowledgeDocument getDocumentById(UUID id) {
         return knowledgeRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Document not found with id: " + id));
@@ -128,6 +164,9 @@ public class KnowledgeService {
                 existing.setTags(doc.getTags());
                 existing.setByteSize(doc.getByteSize());
                 existing.setUpdatedBy(doc.getAuthorId());
+                if (doc.getEmbedding() != null) {
+                    existing.setEmbedding(doc.getEmbedding());
+                }
                 return knowledgeRepository.save(existing);
             }
         }
@@ -154,6 +193,9 @@ public class KnowledgeService {
         existing.setTags(updatedDoc.getTags());
         existing.setByteSize(updatedDoc.getByteSize());
         existing.setUpdatedBy(updatedDoc.getUpdatedBy());
+        if (updatedDoc.getEmbedding() != null) {
+            existing.setEmbedding(updatedDoc.getEmbedding());
+        }
         return knowledgeRepository.save(existing);
     }
 
