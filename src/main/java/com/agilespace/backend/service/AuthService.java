@@ -55,8 +55,14 @@ public class AuthService {
         // Se o usuário ainda não tiver um defaultProjectId e possuir projetos associados, define o primeiro
         if (user.getDefaultProjectId() == null && !access.getProjects().isEmpty()) {
             user.setDefaultProjectId(access.getProjects().get(0).getProjectId());
+            if (user.getSquadId() == null || user.getSquadId().isBlank()) {
+                user.setSquadId(access.getProjects().get(0).getProjectId());
+            }
             userRepository.save(user);
             access = userProjectResolverService.resolveUserAccess(user);
+        } else if ((user.getSquadId() == null || user.getSquadId().isBlank()) && user.getDefaultProjectId() != null) {
+            user.setSquadId(user.getDefaultProjectId());
+            userRepository.save(user);
         }
 
         return buildAuthResponse(user, access);
@@ -103,6 +109,7 @@ public class AuthService {
                 .role("MEMBER")
                 .jiraAccountId(request.getJiraAccountId() != null ? request.getJiraAccountId().trim() : null)
                 .defaultProjectId(defaultProject)
+                .squadId(defaultProject)
                 .segmentName(segment)
                 .tribeName(tribe)
                 .active(true)
@@ -149,6 +156,7 @@ public class AuthService {
         }
 
         user.setDefaultProjectId(newProjectId);
+        user.setSquadId(newProjectId);
         user = userRepository.save(user);
 
         UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(user);

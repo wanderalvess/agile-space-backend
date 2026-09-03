@@ -22,11 +22,19 @@ public class WorkItemController {
     private final WorkItemService workItemService;
     private final UserRepository userRepository;
 
+    private static final java.util.Set<String> LEADERSHIP_JOB_TITLES = java.util.Set.of(
+            "tech lead", "scrum master", "agile master", "product owner",
+            "people lead", "tribe lead", "agile coach", "sme", "admin", "lead"
+    );
+
+    private boolean isLeadershipJobTitle(String jobTitle) {
+        if (jobTitle == null || jobTitle.isBlank()) return false;
+        return LEADERSHIP_JOB_TITLES.contains(jobTitle.trim().toLowerCase());
+    }
+
     /**
-     * Só ADMIN/LEAD ou um membro já vinculado a esta squad (User.squadId) pode gravar
-     * work_items dela. Antes disso qualquer usuário autenticado podia estimar, comprometer
-     * em sprint ou dar veredito de showcase em itens de qualquer squad trocando o squadId
-     * na URL. Mesma regra de SquadController.requireSquadWriteAccess.
+     * Só ADMIN/LEAD ou um membro já vinculado a esta squad (User.squadId, defaultProjectId, etc.)
+     * pode gravar work_items dela. Mesma regra de SquadController.requireSquadWriteAccess.
      */
     private void requireSquadWriteAccess(String squadId, HttpServletRequest request) {
         String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
@@ -35,7 +43,43 @@ public class WorkItemController {
         }
         String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
         User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
-        if (caller == null || caller.getSquadId() == null || !caller.getSquadId().equalsIgnoreCase(squadId)) {
+        if (caller == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a membros desta squad ou administradores.");
+        }
+
+        // 0. Papel administrativo no banco
+        if ("ADMIN".equalsIgnoreCase(caller.getRole()) || "LEAD".equalsIgnoreCase(caller.getRole())) {
+            return;
+        }
+
+        // 0.1 Cargos de liderança/governança
+        if (isLeadershipJobTitle(caller.getJobTitle())) {
+            return;
+        }
+
+        // 1. Checagem direta por squadId ou defaultProjectId
+        boolean matches = (caller.getSquadId() != null && caller.getSquadId().equalsIgnoreCase(squadId))
+                || (caller.getDefaultProjectId() != null && caller.getDefaultProjectId().equalsIgnoreCase(squadId));
+
+        // 2. Tratamento de alias DDWMISSI <-> MISSI
+        if (!matches && ("DDWMISSI".equalsIgnoreCase(squadId) || "MISSI".equalsIgnoreCase(squadId))) {
+            matches = ("DDWMISSI".equalsIgnoreCase(caller.getSquadId()) || "MISSI".equalsIgnoreCase(caller.getSquadId()))
+                    || ("DDWMISSI".equalsIgnoreCase(caller.getDefaultProjectId()) || "MISSI".equalsIgnoreCase(caller.getDefaultProjectId()));
+        }
+
+        // 3. Auto-vinculação caso não possua squad
+        boolean hasNoSquad = caller.getSquadId() == null || caller.getSquadId().isBlank() || "Sem Time".equalsIgnoreCase(caller.getSquadId().trim());
+        boolean hasNoProject = caller.getDefaultProjectId() == null || caller.getDefaultProjectId().isBlank() || "Sem Time".equalsIgnoreCase(caller.getDefaultProjectId().trim());
+        if (!matches && hasNoSquad) {
+            caller.setSquadId(squadId);
+            if (hasNoProject) {
+                caller.setDefaultProjectId(squadId);
+            }
+            userRepository.save(caller);
+            matches = true;
+        }
+
+        if (!matches) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a membros desta squad ou administradores.");
         }
     }

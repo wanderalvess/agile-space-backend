@@ -23,11 +23,22 @@ public class SquadController {
 
     private final SquadService squadService;
     private final UserRepository userRepository;
+    private final com.agilespace.backend.service.UserProjectResolverService userProjectResolverService;
+
+    private static final java.util.Set<String> LEADERSHIP_JOB_TITLES = java.util.Set.of(
+            "tech lead", "scrum master", "agile master", "product owner",
+            "people lead", "tribe lead", "agile coach", "sme", "admin", "lead"
+    );
+
+    private boolean isLeadershipJobTitle(String jobTitle) {
+        if (jobTitle == null || jobTitle.isBlank()) return false;
+        return LEADERSHIP_JOB_TITLES.contains(jobTitle.trim().toLowerCase());
+    }
 
     /**
-     * Só ADMIN/LEAD ou um membro já vinculado a esta squad (User.squadId) pode gravar
-     * dados nela. Antes disso qualquer usuário autenticado podia criar/sobrescrever
-     * dados de qualquer squad só trocando o squadId na URL.
+     * Só ADMIN/LEAD ou um membro vinculado a esta squad (User.squadId, defaultProjectId, papel em projeto
+     * ou membro no roster squad_members) pode gravar dados nela. Em ambientes limpos onde o usuário ainda
+     * não possui squad/projeto configurado, auto-associa para permitir o primeiro fluxo de sincronização.
      */
     private void requireSquadWriteAccess(String squadId, HttpServletRequest request) {
         String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
@@ -36,7 +47,82 @@ public class SquadController {
         }
         String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
         User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
-        if (caller == null || caller.getSquadId() == null || !caller.getSquadId().equalsIgnoreCase(squadId)) {
+        if (caller == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a membros desta squad ou administradores.");
+        }
+
+        // 0. Papel administrativo no registro do banco (caso o token JWT não esteja atualizado)
+        if ("ADMIN".equalsIgnoreCase(caller.getRole()) || "LEAD".equalsIgnoreCase(caller.getRole())) {
+            return;
+        }
+
+        // 0.1 Cargos de liderança/governança de squad
+        if (isLeadershipJobTitle(caller.getJobTitle())) {
+            return;
+        }
+
+        // 1. Checagem direta por squadId ou defaultProjectId
+        boolean matches = (caller.getSquadId() != null && caller.getSquadId().equalsIgnoreCase(squadId))
+                || (caller.getDefaultProjectId() != null && caller.getDefaultProjectId().equalsIgnoreCase(squadId));
+
+        // 2. Tratamento de alias DDWMISSI <-> MISSI
+        if (!matches && ("DDWMISSI".equalsIgnoreCase(squadId) || "MISSI".equalsIgnoreCase(squadId))) {
+            matches = ("DDWMISSI".equalsIgnoreCase(caller.getSquadId()) || "MISSI".equalsIgnoreCase(caller.getSquadId()))
+                    || ("DDWMISSI".equalsIgnoreCase(caller.getDefaultProjectId()) || "MISSI".equalsIgnoreCase(caller.getDefaultProjectId()));
+        }
+
+        // 3. Checagem através dos projetos resolvidos pelo UserProjectResolverService
+        if (!matches && userProjectResolverService != null) {
+            com.agilespace.backend.dto.UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(caller);
+            if (access != null) {
+                if (access.isTransversalLeader()) {
+                    return;
+                }
+                if (access.getProjects() != null) {
+                    matches = access.getProjects().stream().anyMatch(p ->
+                            p.getProjectId().equalsIgnoreCase(squadId)
+                            || (("DDWMISSI".equalsIgnoreCase(squadId) || "MISSI".equalsIgnoreCase(squadId))
+                                && ("DDWMISSI".equalsIgnoreCase(p.getProjectId()) || "MISSI".equalsIgnoreCase(p.getProjectId())))
+                    );
+                }
+            }
+        }
+
+        // 4. Checagem se o usuário é membro registrado desta squad na tabela squad_members
+        if (!matches) {
+            List<SquadMember> members = squadService.getMembers(squadId);
+            if ("DDWMISSI".equalsIgnoreCase(squadId) || "MISSI".equalsIgnoreCase(squadId)) {
+                String aliasSquad = "DDWMISSI".equalsIgnoreCase(squadId) ? "MISSI" : "DDWMISSI";
+                List<SquadMember> aliasMembers = squadService.getMembers(aliasSquad);
+                if (aliasMembers != null && !aliasMembers.isEmpty()) {
+                    List<SquadMember> combined = new java.util.ArrayList<>(members != null ? members : List.of());
+                    combined.addAll(aliasMembers);
+                    members = combined;
+                }
+            }
+            if (members != null && !members.isEmpty()) {
+                matches = members.stream().anyMatch(m ->
+                        (m.getClaimedByUid() != null && m.getClaimedByUid().equals(caller.getId()))
+                        || (caller.getEmail() != null && m.getEmail() != null && caller.getEmail().trim().equalsIgnoreCase(m.getEmail().trim()))
+                        || (caller.getJiraAccountId() != null && m.getJiraAccountId() != null && caller.getJiraAccountId().trim().equalsIgnoreCase(m.getJiraAccountId().trim()))
+                        || (caller.getName() != null && m.getDisplayName() != null && caller.getName().trim().equalsIgnoreCase(m.getDisplayName().trim()))
+                );
+            }
+        }
+
+        // 5. Se o usuário ainda não tem squad vinculada (ou possui marcador como "Sem Time"), auto-vincula ao squad
+        boolean hasNoSquad = caller.getSquadId() == null || caller.getSquadId().isBlank() || "Sem Time".equalsIgnoreCase(caller.getSquadId().trim());
+        boolean hasNoProject = caller.getDefaultProjectId() == null || caller.getDefaultProjectId().isBlank() || "Sem Time".equalsIgnoreCase(caller.getDefaultProjectId().trim());
+        if (!matches && hasNoSquad) {
+            caller.setSquadId(squadId);
+            if (hasNoProject) {
+                caller.setDefaultProjectId(squadId);
+            }
+            userRepository.save(caller);
+            matches = true;
+        }
+
+        if (!matches) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a membros desta squad ou administradores.");
         }
     }
