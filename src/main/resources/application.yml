@@ -13,6 +13,21 @@ spring:
     properties:
       hibernate:
         format_sql: false
+  ai:
+    mcp:
+      server:
+        # Servidor MCP embutido, protegido por ApiKeyAuthenticationFilter (mesma
+        # chave X-Api-Key usada em /api/v1/**). Endpoints fixados sob /mcp/**,
+        # dentro do path que o filtro já intercepta (ver shouldNotFilter lá).
+        name: agile-space-mcp-server
+        version: 1.0.0
+        type: SYNC
+        sse-endpoint: /mcp/sse
+        sse-message-endpoint: /mcp/message
+        instructions: >
+          Servidor MCP do Espaço Ágil: ferramentas de leitura/importação da base
+          de conhecimento, leitura de dados de squad e criação de sessão de poker.
+          Requer header X-Api-Key igual ao usado em /api/v1/**.
 
 server:
   port: ${PORT:8002}

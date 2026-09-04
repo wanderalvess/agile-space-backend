@@ -22,10 +22,11 @@ import java.util.HexFormat;
 import java.util.Optional;
 
 /**
- * Exige uma API key válida (header X-Api-Key) em /api/v1/** — a API pública
- * de leitura da Base de Conhecimento, pensada pra chamada de máquina/serviço
- * (ex: servidor MCP), não sessão de usuário logado. /api/v1 está isento do
- * JwtAuthenticationFilter (ver PUBLIC_PATHS lá) justamente pra cair aqui
+ * Exige uma API key válida (header X-Api-Key) em /api/v1/** e /mcp/** — a API
+ * pública de leitura da Base de Conhecimento e o servidor MCP, pensados pra
+ * chamada de máquina/serviço, não sessão de usuário logado. Nenhum dos dois
+ * passa pelo JwtAuthenticationFilter (/api/v1 está em PUBLIC_PATHS lá; /mcp
+ * nem começa com /api/ então já é ignorado por ele) justamente pra cair aqui
  * em vez de exigir Bearer JWT.
  */
 @Component
@@ -42,7 +43,8 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
         if (HttpMethod.OPTIONS.matches(request.getMethod())) {
             return true;
         }
-        return !request.getRequestURI().startsWith("/api/v1/");
+        String uri = request.getRequestURI();
+        return !(uri.startsWith("/api/v1/") || uri.startsWith("/mcp"));
     }
 
     @Override
