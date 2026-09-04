@@ -34,7 +34,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/api/auth/login",
             "/api/auth/register",
             "/api/auth/forgot-password",
-            "/api/public"
+            "/api/public",
+            // API pública com API key própria (ApiKeyAuthenticationFilter), não JWT de sessão.
+            "/api/v1"
     );
 
     private final JwtTokenUtil jwtTokenUtil;
