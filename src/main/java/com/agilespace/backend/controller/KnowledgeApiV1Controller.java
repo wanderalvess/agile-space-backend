@@ -6,13 +6,15 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.UUID;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
 
 /**
- * API pública de leitura da Base de Conhecimento, autenticada por API key
+ * API pública de leitura e criação da Base de Conhecimento, autenticada por API key
  * (ApiKeyAuthenticationFilter, header X-Api-Key) em vez de JWT de sessão —
  * pensada pra chamada de máquina/serviço (ex: servidor MCP). Reaproveita o
  * KnowledgeService existente (mesma lógica de busca por texto do endpoint
@@ -41,5 +43,47 @@ public class KnowledgeApiV1Controller {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }
+    }
+
+    @PostMapping
+    public ResponseEntity<KnowledgeDocument> createDocument(@RequestBody Map<String, Object> payload) {
+        String title = (String) payload.get("title");
+        if (title == null || title.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        String content = payload.get("content") != null ? (String) payload.get("content") : "";
+        String category = payload.get("category") != null ? (String) payload.get("category") : "Geral";
+
+        Set<String> tagSet = new HashSet<>();
+        Object tagsObj = payload.get("tags");
+        if (tagsObj instanceof List<?> list) {
+            for (Object t : list) {
+                if (t != null && !t.toString().isBlank()) {
+                    tagSet.add(t.toString().trim());
+                }
+            }
+        } else if (tagsObj instanceof String str) {
+            for (String t : str.split(",")) {
+                if (!t.trim().isEmpty()) {
+                    tagSet.add(t.trim());
+                }
+            }
+        }
+
+        KnowledgeDocument doc = KnowledgeDocument.builder()
+                .title(title.trim())
+                .content(content)
+                .category(category)
+                .fullPath(category)
+                .status("published")
+                .authorId("mcp-server")
+                .tags(tagSet)
+                .byteSize((long) content.getBytes(StandardCharsets.UTF_8).length)
+                .views(0)
+                .build();
+
+        KnowledgeDocument saved = knowledgeService.saveOrUpdateDocument(doc);
+        return ResponseEntity.status(HttpStatus.CREATED).body(saved);
     }
 }
