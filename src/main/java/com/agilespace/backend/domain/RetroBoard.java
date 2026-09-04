@@ -3,6 +3,7 @@ package com.agilespace.backend.domain;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -42,6 +43,12 @@ public class RetroBoard {
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;
+
+    // Carimbado a cada escrita real no board (voto, card, revelação...) — usado como
+    // proxy de "tempo de uso" (updatedAt - createdAt) na aba executiva do /admin.
+    // Nenhum job/sync toca essa tabela em background, então é sinal de atividade real.
+    @UpdateTimestamp
+    private LocalDateTime updatedAt;
 
     @Column(length = 50)
     private String templateKey;

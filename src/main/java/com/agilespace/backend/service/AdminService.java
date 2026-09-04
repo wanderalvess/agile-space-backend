@@ -124,7 +124,44 @@ public class AdminService {
                 + healthCheckBoardsCount + brainstormingBoardsCount + showcaseCount);
         stats.put("totalParticipations", countTotalParticipations());
 
+        Map<String, Object> duration = computeAverageSessionDuration();
+        stats.put("avgSessionDurationMinutes", duration.get("avgMinutes"));
+        stats.put("sessionDurationSampleSize", duration.get("sampleSize"));
+
         return stats;
+    }
+
+    /**
+     * Tempo médio de uso (minutos) = média de (updated_at - created_at) das cerimônias
+     * que têm timestamp de atividade real: retro_boards e showcase_sessions (as únicas
+     * com @UpdateTimestamp hoje — poker/health/brainstorm ainda guardam created_at como
+     * String solta, sem coluna de última atividade, ver histórico de auditoria). Filtra
+     * duração entre 1 min e 7 dias pra cortar ruído (sessão criada e nunca mais tocada
+     * cai fora, não deveria contar como "1 semana de uso"). updated_at só populado a
+     * partir de agora (coluna nova) — enquanto não houver atividade real pós-deploy,
+     * sampleSize vem 0 e o frontend mostra "Em breve" em vez de inventar minuto zero.
+     */
+    private Map<String, Object> computeAverageSessionDuration() {
+        String sql =
+                "SELECT AVG(duration_minutes) AS avg_minutes, COUNT(*) AS sample_size FROM (" +
+                "  SELECT EXTRACT(EPOCH FROM (updated_at - created_at)) / 60 AS duration_minutes " +
+                "  FROM retro_boards WHERE updated_at IS NOT NULL AND updated_at > created_at " +
+                "  UNION ALL " +
+                "  SELECT EXTRACT(EPOCH FROM (updated_at - created_at)) / 60 " +
+                "  FROM showcase_sessions WHERE updated_at IS NOT NULL AND updated_at > created_at " +
+                ") d WHERE duration_minutes BETWEEN 1 AND 10080";
+
+        Map<String, Object> result = new HashMap<>();
+        try {
+            jdbcTemplate.queryForMap(sql).forEach((k, v) -> {
+                if ("avg_minutes".equals(k)) result.put("avgMinutes", v == null ? null : ((Number) v).doubleValue());
+                if ("sample_size".equals(k)) result.put("sampleSize", ((Number) v).longValue());
+            });
+        } catch (Exception e) {
+            result.put("avgMinutes", null);
+            result.put("sampleSize", 0L);
+        }
+        return result;
     }
 
     /**
