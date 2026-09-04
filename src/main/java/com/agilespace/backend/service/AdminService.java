@@ -118,7 +118,37 @@ public class AdminService {
         stats.put("totalBrainstormingBoards", brainstormingBoardsCount);
         stats.put("totalDailyCheckins", dailyCheckinsCount);
 
+        // Total de cerimônias em grupo (exclui foco/daily/kanban, que são individuais,
+        // não "sessões" com participantes) — número que o admin usa pra "uso do sistema".
+        stats.put("totalSessions", pokerRoomsCount + retroBoardsCount + sprintPlanningsCount
+                + healthCheckBoardsCount + brainstormingBoardsCount + showcaseCount);
+        stats.put("totalParticipations", countTotalParticipations());
+
         return stats;
+    }
+
+    /**
+     * Soma o tamanho do array de participantes/membros em cada tipo de cerimônia que
+     * de fato rastreia isso. retro_boards fica de fora: a entidade RetroBoard não tem
+     * nenhuma coluna de participantes hoje (getSessions() já hardcoda 0 pra esse tipo),
+     * então incluir daria uma soma artificialmente baixa sem deixar isso óbvio — melhor
+     * omitir do que fingir que é zero de verdade.
+     */
+    private long countTotalParticipations() {
+        String sql =
+                "SELECT " +
+                "  COALESCE((SELECT SUM(jsonb_array_length(participant_ids)) FROM poker_rooms WHERE jsonb_typeof(participant_ids) = 'array'), 0) + " +
+                "  COALESCE((SELECT SUM(jsonb_array_length(participant_ids)) FROM health_check_boards WHERE jsonb_typeof(participant_ids) = 'array'), 0) + " +
+                "  COALESCE((SELECT SUM(jsonb_array_length(participant_ids)) FROM brainstorming_boards WHERE jsonb_typeof(participant_ids) = 'array'), 0) + " +
+                "  COALESCE((SELECT SUM(jsonb_array_length(members)) FROM sprint_plannings WHERE jsonb_typeof(members) = 'array'), 0) + " +
+                "  COALESCE((SELECT SUM(jsonb_array_length(members)) FROM showcase_sessions WHERE jsonb_typeof(members) = 'array'), 0) " +
+                "AS total";
+        try {
+            Long total = jdbcTemplate.queryForObject(sql, Long.class);
+            return total != null ? total : 0L;
+        } catch (Exception e) {
+            return 0L;
+        }
     }
 
     private long countTableRows(String tableName) {
