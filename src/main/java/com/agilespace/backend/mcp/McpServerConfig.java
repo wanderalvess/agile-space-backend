@@ -6,9 +6,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Registra os componentes @Tool (McpKnowledgeTools, McpSquadTools, McpPokerTools) como
- * ToolCallbackProvider — a auto-configuração do spring-ai-starter-mcp-server-webmvc
- * descobre esse bean e expõe cada método anotado como uma ferramenta MCP.
+ * Registra os componentes @Tool (McpKnowledgeTools, McpSquadTools, McpPokerTools,
+ * McpPromptHubTools) como ToolCallbackProvider — a auto-configuração do
+ * spring-ai-starter-mcp-server-webmvc descobre esse bean e expõe cada método
+ * anotado como uma ferramenta MCP.
  */
 @Configuration
 public class McpServerConfig {
@@ -17,9 +18,10 @@ public class McpServerConfig {
     public ToolCallbackProvider agileSpaceMcpTools(
             McpKnowledgeTools knowledgeTools,
             McpSquadTools squadTools,
-            McpPokerTools pokerTools) {
+            McpPokerTools pokerTools,
+            McpPromptHubTools promptHubTools) {
         return MethodToolCallbackProvider.builder()
-                .toolObjects(knowledgeTools, squadTools, pokerTools)
+                .toolObjects(knowledgeTools, squadTools, pokerTools, promptHubTools)
                 .build();
     }
 }
