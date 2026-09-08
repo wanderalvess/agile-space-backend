@@ -42,9 +42,13 @@ build/
 
 ### Environment & Secrets ###
 .env
-.env.*
+.env.*.local
+.env.local
 *.pem
 *.key
+
+### Keep environment example template (not actual secrets)
+!.env.example
 
 ### Claude Code (local dev tooling, machine-specific) ###
 .claude/
