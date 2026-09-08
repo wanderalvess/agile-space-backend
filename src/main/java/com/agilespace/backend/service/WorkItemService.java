@@ -13,6 +13,7 @@ import java.util.List;
 public class WorkItemService {
 
     private final WorkItemRepository workItemRepository;
+    private final com.agilespace.backend.repository.SquadRepository squadRepository;
 
     @Transactional
     public void estimateWorkItem(String squadId, String jiraKey, Double pointsEstimated) {
@@ -76,7 +77,30 @@ public class WorkItemService {
     }
 
     public java.util.Map<String, Object> getSprintStats(String squadId, String sprintId) {
-        List<WorkItem> items = workItemRepository.findBySquadIdAndSprintId(squadId, sprintId);
+        List<WorkItem> items;
+        if (sprintId == null || sprintId.isBlank() || "active".equalsIgnoreCase(sprintId.trim())) {
+            // Verifica se a squad possui uma activeSprintId cadastrada
+            String activeSprint = squadRepository.findById(squadId)
+                    .map(com.agilespace.backend.domain.Squad::getActiveSprintId)
+                    .filter(s -> !s.isBlank())
+                    .orElse(null);
+
+            if (activeSprint != null) {
+                items = workItemRepository.findBySquadIdAndSprintId(squadId, activeSprint);
+            } else {
+                items = java.util.Collections.emptyList();
+            }
+
+            // Fallback: se nenhum item estiver amarrado ao ID exato, busca todos os itens ativos (não-backlog) da squad
+            if (items.isEmpty()) {
+                items = workItemRepository.findBySquadId(squadId).stream()
+                        .filter(w -> w.getStatus() != null && !"backlog".equalsIgnoreCase(w.getStatus()))
+                        .toList();
+            }
+        } else {
+            items = workItemRepository.findBySquadIdAndSprintId(squadId, sprintId);
+        }
+
         double velocityReal = 0;
         double previsto = 0;
         int carryOvers = 0;

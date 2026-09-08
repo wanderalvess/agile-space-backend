@@ -1,6 +1,7 @@
 package com.agilespace.backend.service;
 
 import com.agilespace.backend.domain.WorkItem;
+import com.agilespace.backend.repository.SquadRepository;
 import com.agilespace.backend.repository.WorkItemRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,6 +24,9 @@ public class WorkItemServiceTest {
 
     @Mock
     private WorkItemRepository workItemRepository;
+
+    @Mock
+    private SquadRepository squadRepository;
 
     @InjectMocks
     private WorkItemService service;
@@ -245,6 +249,38 @@ public class WorkItemServiceTest {
         assertEquals(0.0, stats.get("velocityReal"));
         assertEquals(0.0, stats.get("previsto"));
         assertEquals(0, stats.get("carryOvers"));
+    }
+
+    @Test
+    public void testGetSprintStatsWithActiveSprintIdResolvesSquadActiveSprint() {
+        com.agilespace.backend.domain.Squad squad = new com.agilespace.backend.domain.Squad();
+        squad.setId("SQ1");
+        squad.setActiveSprintId("SPRINT-99");
+        when(squadRepository.findById("SQ1")).thenReturn(Optional.of(squad));
+        when(workItemRepository.findBySquadIdAndSprintId("SQ1", "SPRINT-99")).thenReturn(List.of(
+                item("DDW-1", "delivered", 8.0),
+                item("DDW-2", "committed", 3.0)));
+
+        Map<String, Object> stats = service.getSprintStats("SQ1", "active");
+
+        assertEquals(8.0, stats.get("velocityReal"));
+        assertEquals(11.0, stats.get("previsto"));
+        assertEquals(0, stats.get("carryOvers"));
+    }
+
+    @Test
+    public void testGetSprintStatsWithActiveSprintFallbackToActiveWorkItems() {
+        when(squadRepository.findById("SQ1")).thenReturn(Optional.empty());
+        when(workItemRepository.findBySquadId("SQ1")).thenReturn(List.of(
+                item("DDW-1", "delivered", 5.0),
+                item("DDW-2", "backlog", 13.0),
+                item("DDW-3", "carried_over", 2.0)));
+
+        Map<String, Object> stats = service.getSprintStats("SQ1", "active");
+
+        assertEquals(5.0, stats.get("velocityReal"));
+        assertEquals(7.0, stats.get("previsto"));
+        assertEquals(1, stats.get("carryOvers"));
     }
 
     // ---------- getAssignedWorkItems ----------

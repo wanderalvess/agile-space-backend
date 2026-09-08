@@ -2,10 +2,12 @@ package com.agilespace.backend.service;
 
 import com.agilespace.backend.domain.ProjectConfig;
 import com.agilespace.backend.domain.ProjectMemberRole;
+import com.agilespace.backend.domain.SquadMember;
 import com.agilespace.backend.domain.User;
 import com.agilespace.backend.dto.*;
 import com.agilespace.backend.repository.ProjectConfigRepository;
 import com.agilespace.backend.repository.ProjectMemberRoleRepository;
+import com.agilespace.backend.repository.SquadMemberRepository;
 import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.security.JwtTokenUtil;
 import com.agilespace.backend.security.PasswordUtil;
@@ -28,6 +30,7 @@ public class AuthService {
     private final UserRepository userRepository;
     private final ProjectConfigRepository projectConfigRepository;
     private final ProjectMemberRoleRepository projectMemberRoleRepository;
+    private final SquadMemberRepository squadMemberRepository;
     private final UserProjectResolverService userProjectResolverService;
     private final JwtTokenUtil jwtTokenUtil;
 
@@ -63,6 +66,20 @@ public class AuthService {
         } else if ((user.getSquadId() == null || user.getSquadId().isBlank()) && user.getDefaultProjectId() != null) {
             user.setSquadId(user.getDefaultProjectId());
             userRepository.save(user);
+        } else if (user.getSquadId() == null || user.getSquadId().isBlank()) {
+            List<SquadMember> matchedMembers = squadMemberRepository.findByUserIdentifier(cleanEmail);
+            if (!matchedMembers.isEmpty()) {
+                user.setDefaultProjectId(matchedMembers.get(0).getSquadId());
+                user.setSquadId(matchedMembers.get(0).getSquadId());
+                userRepository.save(user);
+                for (SquadMember sm : matchedMembers) {
+                    if (sm.getClaimedByUid() == null) {
+                        sm.setClaimedByUid(user.getId());
+                        squadMemberRepository.save(sm);
+                    }
+                }
+                access = userProjectResolverService.resolveUserAccess(user);
+            }
         }
 
         return buildAuthResponse(user, access);
@@ -84,6 +101,7 @@ public class AuthService {
 
         // Busca se a pessoa já possui papéis atribuídos no Profields
         List<ProjectMemberRole> roles = projectMemberRoleRepository.findByEmailIgnoreCase(cleanEmail);
+        List<SquadMember> squadMembers = squadMemberRepository.findByUserIdentifier(cleanEmail);
         String defaultProject = request.getDefaultProjectId();
         String segment = request.getSegmentName();
         String tribe = request.getTribeName();
@@ -97,6 +115,11 @@ public class AuthService {
             if (optProject.isPresent()) {
                 if (segment == null || segment.isBlank()) segment = optProject.get().getSegmentName();
                 if (tribe == null || tribe.isBlank()) tribe = optProject.get().getTribeName();
+            }
+        } else if (!squadMembers.isEmpty()) {
+            SquadMember primarySquadMember = squadMembers.get(0);
+            if (defaultProject == null || defaultProject.isBlank()) {
+                defaultProject = primarySquadMember.getSquadId();
             }
         }
 
@@ -122,6 +145,12 @@ public class AuthService {
         for (ProjectMemberRole r : roles) {
             r.setUserId(user.getId());
             projectMemberRoleRepository.save(r);
+        }
+
+        // Auto-vincula squad_members com o id do usuário recém-registrado
+        for (SquadMember sm : squadMembers) {
+            sm.setClaimedByUid(user.getId());
+            squadMemberRepository.save(sm);
         }
 
         UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(user);

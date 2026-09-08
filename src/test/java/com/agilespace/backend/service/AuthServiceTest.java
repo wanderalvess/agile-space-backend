@@ -9,6 +9,7 @@ import com.agilespace.backend.dto.RegisterRequestDto;
 import com.agilespace.backend.dto.UserProjectAccessDto;
 import com.agilespace.backend.repository.ProjectConfigRepository;
 import com.agilespace.backend.repository.ProjectMemberRoleRepository;
+import com.agilespace.backend.repository.SquadMemberRepository;
 import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.security.JwtTokenUtil;
 import com.agilespace.backend.security.PasswordUtil;
@@ -42,6 +43,9 @@ public class AuthServiceTest {
 
     @Mock
     private ProjectMemberRoleRepository projectMemberRoleRepository;
+
+    @Mock
+    private SquadMemberRepository squadMemberRepository;
 
     @Mock
     private UserProjectResolverService userProjectResolverService;
