@@ -21,6 +21,7 @@ public class WorkItemController {
 
     private final WorkItemService workItemService;
     private final UserRepository userRepository;
+    private final com.agilespace.backend.repository.ProjectMemberRoleRepository projectMemberRoleRepository;
 
     private static final java.util.Set<String> LEADERSHIP_JOB_TITLES = java.util.Set.of(
             "tech lead", "scrum master", "agile master", "product owner",
@@ -30,6 +31,22 @@ public class WorkItemController {
     private boolean isLeadershipJobTitle(String jobTitle) {
         if (jobTitle == null || jobTitle.isBlank()) return false;
         return LEADERSHIP_JOB_TITLES.contains(jobTitle.trim().toLowerCase());
+    }
+
+    private String resolveSquad(String squadId, String jiraKey) {
+        String cleanSquad = squadId != null ? squadId.trim() : "";
+        if (cleanSquad.isBlank() || "Squad Geral".equalsIgnoreCase(cleanSquad) || "Geral".equalsIgnoreCase(cleanSquad) || "Sem Time".equalsIgnoreCase(cleanSquad)) {
+            if (jiraKey != null && jiraKey.contains("-")) {
+                String prefix = jiraKey.split("-")[0].trim().toUpperCase();
+                if (!prefix.isBlank()) {
+                    return prefix;
+                }
+            }
+        }
+        if ("MISSI".equalsIgnoreCase(cleanSquad)) {
+            return "DDWMISSI";
+        }
+        return cleanSquad;
     }
 
     /**
@@ -67,6 +84,17 @@ public class WorkItemController {
                     || ("DDWMISSI".equalsIgnoreCase(caller.getDefaultProjectId()) || "MISSI".equalsIgnoreCase(caller.getDefaultProjectId()));
         }
 
+        // 2.1 Checagem via papéis de membros de projeto (Profields / ProjectMemberRole)
+        if (!matches && caller.getEmail() != null && !caller.getEmail().isBlank()) {
+            matches = projectMemberRoleRepository.findByEmailIgnoreCase(caller.getEmail().trim())
+                    .stream()
+                    .anyMatch(r -> r.getProjectId() != null && (
+                            r.getProjectId().equalsIgnoreCase(squadId) ||
+                            ("DDWMISSI".equalsIgnoreCase(squadId) && "MISSI".equalsIgnoreCase(r.getProjectId())) ||
+                            ("MISSI".equalsIgnoreCase(squadId) && "DDWMISSI".equalsIgnoreCase(r.getProjectId()))
+                    ));
+        }
+
         // 3. Auto-vinculação caso não possua squad
         boolean hasNoSquad = caller.getSquadId() == null || caller.getSquadId().isBlank() || "Sem Time".equalsIgnoreCase(caller.getSquadId().trim());
         boolean hasNoProject = caller.getDefaultProjectId() == null || caller.getDefaultProjectId().isBlank() || "Sem Time".equalsIgnoreCase(caller.getDefaultProjectId().trim());
@@ -92,8 +120,9 @@ public class WorkItemController {
             @PathVariable String jiraKey,
             @RequestBody EstimateRequest request,
             HttpServletRequest httpRequest) {
-        requireSquadWriteAccess(squadId, httpRequest);
-        workItemService.estimateWorkItem(squadId, jiraKey, request.points_estimated());
+        String resolvedSquad = resolveSquad(squadId, jiraKey);
+        requireSquadWriteAccess(resolvedSquad, httpRequest);
+        workItemService.estimateWorkItem(resolvedSquad, jiraKey, request.points_estimated());
         return ResponseEntity.ok().build();
     }
 
@@ -101,7 +130,8 @@ public class WorkItemController {
     public ResponseEntity<List<WorkItem>> getAssignedWorkItems(
             @PathVariable String squadId,
             @PathVariable String accountId) {
-        List<WorkItem> workItems = workItemService.getAssignedWorkItems(squadId, accountId);
+        String resolvedSquad = resolveSquad(squadId, null);
+        List<WorkItem> workItems = workItemService.getAssignedWorkItems(resolvedSquad, accountId);
         return ResponseEntity.ok(workItems);
     }
 
@@ -113,8 +143,9 @@ public class WorkItemController {
             @PathVariable String jiraKey,
             @RequestBody CommitRequest request,
             HttpServletRequest httpRequest) {
-        requireSquadWriteAccess(squadId, httpRequest);
-        workItemService.commitWorkItem(squadId, jiraKey, request.sprint_id());
+        String resolvedSquad = resolveSquad(squadId, jiraKey);
+        requireSquadWriteAccess(resolvedSquad, httpRequest);
+        workItemService.commitWorkItem(resolvedSquad, jiraKey, request.sprint_id());
         return ResponseEntity.ok().build();
     }
 
@@ -126,8 +157,9 @@ public class WorkItemController {
             @PathVariable String jiraKey,
             @RequestBody ShowcaseDecisionRequest request,
             HttpServletRequest httpRequest) {
-        requireSquadWriteAccess(squadId, httpRequest);
-        workItemService.showcaseDecision(squadId, jiraKey, request.status(), request.feedback());
+        String resolvedSquad = resolveSquad(squadId, jiraKey);
+        requireSquadWriteAccess(resolvedSquad, httpRequest);
+        workItemService.showcaseDecision(resolvedSquad, jiraKey, request.status(), request.feedback());
         return ResponseEntity.ok().build();
     }
 
@@ -135,18 +167,21 @@ public class WorkItemController {
     public ResponseEntity<java.util.Map<String, Object>> getSprintStats(
             @PathVariable String squadId,
             @PathVariable String sprintId) {
-        return ResponseEntity.ok(workItemService.getSprintStats(squadId, sprintId));
+        String resolvedSquad = resolveSquad(squadId, null);
+        return ResponseEntity.ok(workItemService.getSprintStats(resolvedSquad, sprintId));
     }
 
     @GetMapping("/{squadId}")
     public ResponseEntity<List<WorkItem>> getWorkItemsBySquad(@PathVariable String squadId) {
-        return ResponseEntity.ok(workItemService.getWorkItemsBySquadId(squadId));
+        String resolvedSquad = resolveSquad(squadId, null);
+        return ResponseEntity.ok(workItemService.getWorkItemsBySquadId(resolvedSquad));
     }
 
     @GetMapping("/{squadId}/backlog-estimated")
     public ResponseEntity<List<WorkItem>> getBacklogEstimated(
             @PathVariable String squadId) {
-        return ResponseEntity.ok(workItemService.getBacklogEstimated(squadId));
+        String resolvedSquad = resolveSquad(squadId, null);
+        return ResponseEntity.ok(workItemService.getBacklogEstimated(resolvedSquad));
     }
 }
 

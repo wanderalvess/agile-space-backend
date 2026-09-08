@@ -35,6 +35,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/api/auth/register",
             "/api/auth/forgot-password",
             "/api/public",
+            // Execução pública da transformação JOLT no motor Java Bazaarvoice
+            "/api/jolt/transform",
+            "/api/jolt/engine-info",
             // API pública com API key própria (ApiKeyAuthenticationFilter), não JWT de sessão.
             "/api/v1"
     );
