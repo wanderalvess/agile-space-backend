@@ -1,8 +1,11 @@
 package com.agilespace.backend.controller;
 
+import com.agilespace.backend.domain.ApiKeyScope;
 import com.agilespace.backend.domain.Prompt;
 import com.agilespace.backend.domain.PromptCollection;
+import com.agilespace.backend.security.ApiKeyAccess;
 import com.agilespace.backend.service.PromptService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.hibernate.Hibernate;
 import org.springframework.data.domain.Page;
@@ -34,12 +37,15 @@ public class PromptHubApiV1Controller {
     public ResponseEntity<Page<Prompt>> listItems(
             @RequestParam(value = "q", required = false) String query,
             @RequestParam(value = "authorId", required = false) String authorId,
-            @PageableDefault(size = 20) Pageable pageable) {
+            @PageableDefault(size = 20) Pageable pageable,
+            HttpServletRequest request) {
+        ApiKeyAccess.requireScope(request, ApiKeyScope.PROMPTHUB_READ);
         return ResponseEntity.ok(promptService.listPublicPrompts(query, authorId, pageable));
     }
 
     @GetMapping("/items/{id}")
-    public ResponseEntity<Prompt> getItem(@PathVariable("id") UUID id) {
+    public ResponseEntity<Prompt> getItem(@PathVariable("id") UUID id, HttpServletRequest request) {
+        ApiKeyAccess.requireScope(request, ApiKeyScope.PROMPTHUB_READ);
         try {
             Prompt prompt = promptService.getPromptById(id);
             // Não distingue inexistente de privado (404 nos dois casos) — evita confirmar
@@ -57,7 +63,9 @@ public class PromptHubApiV1Controller {
     @Transactional(readOnly = true)
     public ResponseEntity<Page<PromptCollection>> listCollections(
             @RequestParam(value = "ownerId", required = false) String ownerId,
-            @PageableDefault(size = 20) Pageable pageable) {
+            @PageableDefault(size = 20) Pageable pageable,
+            HttpServletRequest request) {
+        ApiKeyAccess.requireScope(request, ApiKeyScope.PROMPTHUB_READ);
         Page<PromptCollection> result = promptService.listCollections("public", ownerId, pageable);
         // Mesmo filtro de item privado do getCollection abaixo — a coleção em si já é
         // pública, mas cada uma carrega seus próprios items via @ManyToMany, e sem esse
@@ -72,7 +80,8 @@ public class PromptHubApiV1Controller {
 
     @GetMapping("/collections/{id}")
     @Transactional(readOnly = true)
-    public ResponseEntity<PromptCollection> getCollection(@PathVariable("id") UUID id) {
+    public ResponseEntity<PromptCollection> getCollection(@PathVariable("id") UUID id, HttpServletRequest request) {
+        ApiKeyAccess.requireScope(request, ApiKeyScope.PROMPTHUB_READ);
         try {
             PromptCollection collection = promptService.getCollectionById(id);
             if (!"public".equals(collection.getVisibility())) {

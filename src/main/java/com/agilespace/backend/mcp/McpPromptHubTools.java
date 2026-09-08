@@ -1,10 +1,12 @@
 package com.agilespace.backend.mcp;
 
+import com.agilespace.backend.domain.ApiKeyScope;
 import com.agilespace.backend.domain.Prompt;
 import com.agilespace.backend.domain.PromptCollection;
 import com.agilespace.backend.service.PromptService;
 import lombok.RequiredArgsConstructor;
 import org.hibernate.Hibernate;
+import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.data.domain.Page;
@@ -32,7 +34,9 @@ public class McpPromptHubTools {
             @ToolParam(description = "Termo de busca livre (título/descrição/conteúdo); vazio lista os mais recentes públicos", required = false) String query,
             @ToolParam(description = "Filtra por id do autor, opcional", required = false) String authorId,
             @ToolParam(description = "Página, 0-based (padrão 0)", required = false) Integer page,
-            @ToolParam(description = "Tamanho da página (padrão 20)", required = false) Integer size) {
+            @ToolParam(description = "Tamanho da página (padrão 20)", required = false) Integer size,
+            ToolContext toolContext) {
+        ApiKeyContext.from(toolContext).requireScope(ApiKeyScope.PROMPTHUB_READ);
         int p = page != null ? page : 0;
         int s = size != null ? size : 20;
         // Page<T> não é suportado como retorno de @Tool pelo Spring AI (vira "functional
@@ -45,7 +49,8 @@ public class McpPromptHubTools {
     }
 
     @Tool(description = "Busca um prompt/iniciativa do Prompt Hub pelo id")
-    public Prompt getPrompt(@ToolParam(description = "UUID do prompt") String id) {
+    public Prompt getPrompt(@ToolParam(description = "UUID do prompt") String id, ToolContext toolContext) {
+        ApiKeyContext.from(toolContext).requireScope(ApiKeyScope.PROMPTHUB_READ);
         // Não distingue inexistente de privado — mesma mensagem de erro nos dois casos,
         // pra não confirmar pra quem tem só a API key que um id privado existe.
         Prompt prompt = promptService.getPromptById(UUID.fromString(id));
@@ -60,7 +65,9 @@ public class McpPromptHubTools {
     public CollectionPage listPromptCollections(
             @ToolParam(description = "Filtra por id do dono, opcional", required = false) String ownerId,
             @ToolParam(description = "Página, 0-based (padrão 0)", required = false) Integer page,
-            @ToolParam(description = "Tamanho da página (padrão 20)", required = false) Integer size) {
+            @ToolParam(description = "Tamanho da página (padrão 20)", required = false) Integer size,
+            ToolContext toolContext) {
+        ApiKeyContext.from(toolContext).requireScope(ApiKeyScope.PROMPTHUB_READ);
         int p = page != null ? page : 0;
         int s = size != null ? size : 20;
         // Visibilidade sempre fixa em "public" — antes aceitava um parâmetro livre
@@ -83,7 +90,8 @@ public class McpPromptHubTools {
 
     @Tool(description = "Busca uma coleção pública do Prompt Hub pelo id, com os itens (prompts públicos) embutidos")
     @Transactional(readOnly = true)
-    public PromptCollection getPromptCollection(@ToolParam(description = "UUID da coleção") String id) {
+    public PromptCollection getPromptCollection(@ToolParam(description = "UUID da coleção") String id, ToolContext toolContext) {
+        ApiKeyContext.from(toolContext).requireScope(ApiKeyScope.PROMPTHUB_READ);
         // items é @ManyToMany lazy; a serialização do resultado do @Tool roda fora da
         // sessão Hibernate original (mesmo achado do McpSquadTools sobre thread-local
         // perdido no transporte SSE), então forçamos o fetch aqui dentro, ainda com a

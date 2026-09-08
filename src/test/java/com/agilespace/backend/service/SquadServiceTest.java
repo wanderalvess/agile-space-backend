@@ -19,6 +19,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -73,7 +74,11 @@ class SquadServiceTest {
 
             assertNotNull(saved);
             assertEquals("squad-alpha", saved.getId());
-            verify(squadRepository).save(sampleSquad);
+            assertEquals("ALPHA", saved.getJiraProjectKey());
+            // saveSquad faz merge num target novo/existente, nunca salva a instância recebida
+            // por referência (mesmo padrão de SquadService.saveMember) — verificar por
+            // conteúdo, não por identidade de objeto.
+            verify(squadRepository).save(argThat(s -> "squad-alpha".equals(s.getId()) && "ALPHA".equals(s.getJiraProjectKey())));
         }
     }
 
@@ -173,7 +178,6 @@ class SquadServiceTest {
             SquadMember existing = SquadMember.builder()
                     .displayName("Nome Antigo")
                     .capacityHoursPerDay(8.0)
-                    .avatarUrl("http://avatar.png")
                     .build();
             SquadMember update = SquadMember.builder().displayName("Nome Novo").build();
 
@@ -184,7 +188,6 @@ class SquadServiceTest {
 
             assertEquals("Nome Novo", saved.getDisplayName());
             assertEquals(8.0, saved.getCapacityHoursPerDay(), "Capacidade existente deve ser mantida");
-            assertEquals("http://avatar.png", saved.getAvatarUrl(), "Avatar existente deve ser mantido");
         }
     }
 

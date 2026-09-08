@@ -57,7 +57,7 @@ class PokerServiceTest {
                 .id("room-123")
                 .title("Planning Poker Sprint 45")
                 .creatorId("user-creator")
-                .votingSystem("fibonacci")
+                .deckType("fibonacci")
                 .build();
     }
 
@@ -292,9 +292,8 @@ class PokerServiceTest {
         void shouldSaveRoundAndGenerateId() {
             PokerRound round = PokerRound.builder()
                     .roomId("room-123")
-                    .itemTitle("Card AS-101 Implementar OAuth")
-                    .finalEstimate("5")
-                    .consensusReached(true)
+                    .topic("Card AS-101 Implementar OAuth")
+                    .devPoints("5")
                     .build();
 
             when(roundRepository.save(any(PokerRound.class))).thenAnswer(i -> i.getArgument(0));
@@ -303,7 +302,7 @@ class PokerServiceTest {
 
             assertNotNull(saved.getId());
             assertEquals("room-123", saved.getRoomId());
-            assertEquals("5", saved.getFinalEstimate());
+            assertEquals("5", saved.getDevPoints());
             verify(roundRepository).save(round);
             verify(webSocketHandler).broadcastEvent(eq("room-123"), eq("ROUND_SAVED"), eq(saved));
         }

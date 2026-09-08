@@ -68,7 +68,7 @@ class DailyFlowServiceTest {
             UserWorklog log = UserWorklog.builder()
                     .userId("user-123")
                     .title("Desenvolvimento de testes automatizados")
-                    .duration(120)
+                    .durationMinutes(120)
                     .build();
 
             when(worklogRepository.save(any(UserWorklog.class))).thenAnswer(i -> i.getArgument(0));
@@ -77,7 +77,7 @@ class DailyFlowServiceTest {
 
             assertNotNull(saved.getId());
             assertEquals("Desenvolvimento de testes automatizados", saved.getTitle());
-            assertEquals(120, saved.getDuration());
+            assertEquals(120, saved.getDurationMinutes());
             verify(worklogRepository).save(log);
         }
 

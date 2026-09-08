@@ -1,8 +1,10 @@
 package com.agilespace.backend.mcp;
 
+import com.agilespace.backend.domain.ApiKeyScope;
 import com.agilespace.backend.domain.KnowledgeDocument;
 import com.agilespace.backend.service.KnowledgeService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.data.domain.Page;
@@ -30,7 +32,9 @@ public class McpKnowledgeTools {
     public DocumentPage listDocuments(
             @ToolParam(description = "Termo de busca livre (título/conteúdo/categoria); vazio lista os mais recentes", required = false) String query,
             @ToolParam(description = "Página, 0-based (padrão 0)", required = false) Integer page,
-            @ToolParam(description = "Tamanho da página (padrão 20)", required = false) Integer size) {
+            @ToolParam(description = "Tamanho da página (padrão 20)", required = false) Integer size,
+            ToolContext toolContext) {
+        ApiKeyContext.from(toolContext).requireScope(ApiKeyScope.KNOWLEDGE_READ);
         int p = page != null ? page : 0;
         int s = size != null ? size : 20;
         // Page<T> não é suportado como retorno de @Tool pelo Spring AI (é tratado como
@@ -44,7 +48,10 @@ public class McpKnowledgeTools {
     }
 
     @Tool(description = "Busca um documento da base de conhecimento pelo id")
-    public KnowledgeDocument getDocument(@ToolParam(description = "UUID do documento") String id) {
+    public KnowledgeDocument getDocument(
+            @ToolParam(description = "UUID do documento") String id,
+            ToolContext toolContext) {
+        ApiKeyContext.from(toolContext).requireScope(ApiKeyScope.KNOWLEDGE_READ);
         return knowledgeService.getDocumentById(UUID.fromString(id));
     }
 
@@ -53,12 +60,15 @@ public class McpKnowledgeTools {
             @ToolParam(description = "Título do documento") String title,
             @ToolParam(description = "Conteúdo do documento (texto ou HTML)") String content,
             @ToolParam(description = "Categoria opcional", required = false) String category,
-            @ToolParam(description = "Tags separadas por vírgula, opcional", required = false) String tags) {
+            @ToolParam(description = "Tags separadas por vírgula, opcional", required = false) String tags,
+            ToolContext toolContext) {
+        ApiKeyContext ctx = ApiKeyContext.from(toolContext);
+        ctx.requireScope(ApiKeyScope.KNOWLEDGE_WRITE);
         KnowledgeDocument doc = KnowledgeDocument.builder()
                 .title(title)
                 .content(content)
                 .category(category)
-                .authorId(McpRequestContext.callerId())
+                .authorId(ctx.ownerUserIdOrFallback("mcp-server"))
                 .status("published")
                 .tags(parseTags(tags))
                 .byteSize((long) content.getBytes(StandardCharsets.UTF_8).length)

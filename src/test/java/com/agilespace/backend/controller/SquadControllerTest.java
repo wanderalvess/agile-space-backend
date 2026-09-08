@@ -94,7 +94,9 @@ public class SquadControllerTest {
         assertThrows(ResponseStatusException.class,
                 () -> controller.saveSquad("sq-1", new Squad(), memberRequest("user-1")));
 
-        verifyNoInteractions(service);
+        // requireSquadWriteAccess consulta squadService.getMembers como último fallback
+        // (checagem por squad_members) antes de negar — interação esperada, não um bug.
+        verify(service).getMembers("sq-1");
     }
 
     @Test
@@ -107,7 +109,9 @@ public class SquadControllerTest {
         assertThrows(ResponseStatusException.class,
                 () -> controller.createPanel("sq-1", new SquadPanel(), memberRequest("user-1")));
 
-        verifyNoInteractions(service);
+        // requireSquadWriteAccess consulta squadService.getMembers como último fallback
+        // (checagem por squad_members) antes de negar — interação esperada, não um bug.
+        verify(service).getMembers("sq-1");
     }
 
     @Test

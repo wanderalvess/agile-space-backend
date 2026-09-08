@@ -1,9 +1,11 @@
 package com.agilespace.backend.mcp;
 
+import com.agilespace.backend.domain.ApiKeyScope;
 import com.agilespace.backend.domain.PokerRoom;
 import com.agilespace.backend.domain.PokerRound;
 import com.agilespace.backend.service.PokerService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.data.domain.Page;
@@ -16,9 +18,9 @@ import java.util.UUID;
 /**
  * Ferramentas MCP do Scrum Poker: criação de sessão (escrita) e busca de estimativas
  * já rodadas (leitura). Reaproveita o PokerService existente — como não existe sessão
- * JWT numa chamada MCP, o creatorId da sala é sintetizado a partir do ownerUserId da
- * API key (ver McpRequestContext). callerRole fixo "ADMIN" só importa no caminho de
- * update de sala já existente (requireRoomParticipant); criação nova não passa por ali.
+ * JWT numa chamada MCP, o creatorId da sala é o ownerUserId da API key (ver
+ * ApiKeyContext). callerRole fixo "ADMIN" só importa no caminho de update de sala já
+ * existente (requireRoomParticipant); criação nova não passa por ali.
  */
 @Component
 @RequiredArgsConstructor
@@ -34,7 +36,10 @@ public class McpPokerTools {
     public PokerRoom createPokerSession(
             @ToolParam(description = "Título da sessão") String title,
             @ToolParam(description = "Tipo de baralho: fibonacci, tshirt, etc. (padrão fibonacci)", required = false) String deckType,
-            @ToolParam(description = "Modo: sync ou async (padrão sync)", required = false) String mode) {
+            @ToolParam(description = "Modo: sync ou async (padrão sync)", required = false) String mode,
+            ToolContext toolContext) {
+        ApiKeyContext ctx = ApiKeyContext.from(toolContext);
+        ctx.requireScope(ApiKeyScope.POKER_WRITE);
         PokerRoom room = PokerRoom.builder()
                 .id(UUID.randomUUID().toString())
                 .title(title)
@@ -44,7 +49,7 @@ public class McpPokerTools {
                 .participantsCount(0)
                 .createdAt(Instant.now().toString())
                 .build();
-        return pokerService.saveOrUpdateRoom(room, McpRequestContext.callerId(), CALLER_ROLE);
+        return pokerService.saveOrUpdateRoom(room, ctx.ownerUserIdOrFallback("mcp-server"), CALLER_ROLE);
     }
 
     @Tool(description = "Busca estimativas de rodadas de planning poker já feitas, por texto livre (tópico/nota) — " +
@@ -52,7 +57,9 @@ public class McpPokerTools {
     public PokerEstimatePage searchPokerEstimates(
             @ToolParam(description = "Termo de busca livre (tópico ou nota da rodada)") String query,
             @ToolParam(description = "Página, 0-based (padrão 0)", required = false) Integer page,
-            @ToolParam(description = "Tamanho da página (padrão 20)", required = false) Integer size) {
+            @ToolParam(description = "Tamanho da página (padrão 20)", required = false) Integer size,
+            ToolContext toolContext) {
+        ApiKeyContext.from(toolContext).requireScope(ApiKeyScope.POKER_READ);
         int p = page != null ? page : 0;
         int s = size != null ? size : 20;
         // Page<T> não é suportado como retorno de @Tool pelo Spring AI — achatamos pro record abaixo,

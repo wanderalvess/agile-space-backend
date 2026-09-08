@@ -2,6 +2,7 @@ package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.User;
 import com.agilespace.backend.domain.WorkItem;
+import com.agilespace.backend.repository.ProjectMemberRoleRepository;
 import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.WorkItemService;
@@ -35,6 +36,9 @@ class WorkItemControllerTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private ProjectMemberRoleRepository projectMemberRoleRepository;
+
     @InjectMocks
     private WorkItemController controller;
 
@@ -56,6 +60,9 @@ class WorkItemControllerTest {
     private HttpServletRequest memberOfAnotherSquad() {
         User caller = User.builder().id("u2").email("outro@empresa.com.br").squadId("SQ-OUTRA").build();
         lenient().when(userRepository.findById("u2")).thenReturn(Optional.of(caller));
+        // requireSquadWriteAccess consulta ProjectMemberRoleRepository como fallback
+        // (passo 2.1) antes de decidir — sem papel de projeto pra essa squad.
+        lenient().when(projectMemberRoleRepository.findByEmailIgnoreCase("outro@empresa.com.br")).thenReturn(List.of());
         return requestAs("u2", "MEMBER");
     }
 
@@ -157,15 +164,23 @@ class WorkItemControllerTest {
         }
 
         @Test
-        @DisplayName("Deve rejeitar com HTTP 403 usuário que ainda não possui squad vinculada")
-        void shouldRejectUserWithoutSquad() {
+        @DisplayName("Deve auto-vincular usuário sem squad à squad do work item e permitir a escrita")
+        void shouldAutoLinkUserWithoutSquadAndAllow() {
+            // requireSquadWriteAccess (passo 3, "Auto-vinculação caso não possua squad") vincula
+            // implicitamente quem ainda não tem squadId/defaultProjectId à squad que está tentando
+            // escrever, em vez de rejeitar — mesma regra replicada em SquadController. Não é a
+            // ausência de checagem; é a checagem decidindo permitir e reivindicar a squad.
             User caller = User.builder().id("u3").email("sem.squad@empresa.com.br").build();
             when(userRepository.findById("u3")).thenReturn(Optional.of(caller));
+            lenient().when(projectMemberRoleRepository.findByEmailIgnoreCase("sem.squad@empresa.com.br")).thenReturn(List.of());
 
-            ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> controller.estimateWorkItem(
-                    "SQ1", "DDW-1", new WorkItemController.EstimateRequest(8.0), requestAs("u3", "MEMBER")));
+            ResponseEntity<Void> response = controller.estimateWorkItem(
+                    "SQ1", "DDW-1", new WorkItemController.EstimateRequest(8.0), requestAs("u3", "MEMBER"));
 
-            assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+            assertEquals(HttpStatus.OK, response.getStatusCode());
+            assertEquals("SQ1", caller.getSquadId());
+            verify(userRepository).save(caller);
+            verify(workItemService).estimateWorkItem("SQ1", "DDW-1", 8.0);
         }
 
         @Test

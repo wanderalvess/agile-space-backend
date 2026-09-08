@@ -2,6 +2,7 @@ package com.agilespace.backend.service;
 
 import com.agilespace.backend.domain.RetroBoard;
 import com.agilespace.backend.domain.RetroCard;
+import com.agilespace.backend.domain.RetroColumnDef;
 import com.agilespace.backend.domain.RetroParticipant;
 import com.agilespace.backend.repository.RetroBoardRepository;
 import com.agilespace.backend.repository.RetroCardRepository;
@@ -56,7 +57,10 @@ class RetroServiceTest {
         sampleBoard = RetroBoard.builder()
                 .id("retro-123")
                 .title("Retrospectiva Sprint 45")
-                .columns(Arrays.asList("O que correu bem", "O que pode melhorar", "Ações"))
+                .columns(Arrays.asList(
+                        RetroColumnDef.builder().title("O que correu bem").columnOrder(0).build(),
+                        RetroColumnDef.builder().title("O que pode melhorar").columnOrder(1).build(),
+                        RetroColumnDef.builder().title("Ações").columnOrder(2).build()))
                 .build();
     }
 

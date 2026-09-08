@@ -89,7 +89,7 @@ class BrainstormingServiceTest {
         @Test
         @DisplayName("Deve salvar ideia e transmitir evento IDEA_SAVED")
         void shouldSaveIdeaAndBroadcast() {
-            BrainstormingIdea idea = BrainstormingIdea.builder().boardId("b1").text("Migrar para microserviços").build();
+            BrainstormingIdea idea = BrainstormingIdea.builder().boardId("b1").content("Migrar para microserviços").build();
             when(ideaRepository.save(any())).thenAnswer(i -> i.getArgument(0));
 
             BrainstormingIdea saved = service.saveOrUpdateIdea(idea);
