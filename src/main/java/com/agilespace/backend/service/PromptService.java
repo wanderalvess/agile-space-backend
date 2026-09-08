@@ -36,6 +36,23 @@ public class PromptService {
         return promptRepository.findByVisibility("public", pageable);
     }
 
+    /**
+     * Mesma listagem, mas SEMPRE restrita a visibility="public" — inclusive no filtro
+     * por authorId (listPrompts acima não faz essa restrição ali, então não serve pra
+     * chamador externo/API key: um authorId vazaria os prompts privados desse autor).
+     * Usado pelo Prompt Hub exposto a máquina/serviço (PromptHubApiV1Controller, MCP).
+     */
+    @Transactional(readOnly = true)
+    public Page<Prompt> listPublicPrompts(String query, String authorId, Pageable pageable) {
+        if (query != null && !query.trim().isEmpty()) {
+            return promptRepository.searchPublic(query, "public", pageable);
+        }
+        if (authorId != null && !authorId.trim().isEmpty()) {
+            return promptRepository.findByAuthorIdAndVisibility(authorId, "public", pageable);
+        }
+        return promptRepository.findByVisibility("public", pageable);
+    }
+
     @Transactional(readOnly = true)
     public Prompt getPromptById(UUID id) {
         return promptRepository.findById(id)
