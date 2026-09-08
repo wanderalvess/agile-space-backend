@@ -1,7 +1,9 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.ApiKey;
+import com.agilespace.backend.domain.ApiKeyScope;
 import com.agilespace.backend.repository.ApiKeyRepository;
+import com.agilespace.backend.security.ApiKeyHashing;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -9,27 +11,32 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
 import java.time.LocalDateTime;
-import java.util.HexFormat;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
- * CRUD de API keys da Base de Conhecimento — /api/admin/** já exige
- * role=ADMIN/LEAD via JwtAuthenticationFilter, nenhum gate extra necessário
- * aqui. A chave crua só existe na resposta do POST (uma vez); só o hash
- * SHA-256 é persistido (ver ApiKeyAuthenticationFilter, que valida do mesmo jeito).
+ * CRUD de API keys pra ADMIN/LEAD — /api/admin/** já exige esse papel via
+ * JwtAuthenticationFilter, nenhum gate extra necessário aqui. Visão global:
+ * lista/revoga as chaves de todo mundo, não só as próprias (diferente de
+ * ApiKeyController, o self-service em /api/api-keys). A chave crua só existe
+ * na resposta do POST (uma vez); só o hash SHA-256 é persistido (ver
+ * ApiKeyAuthenticationFilter, que valida do mesmo jeito).
+ *
+ * Chave criada por aqui sempre ganha todos os escopos e nenhuma squad (mesmo
+ * acesso total de sempre) — mas agora de forma explícita (ownerRole + scopes),
+ * não mais via ownerRole null. Chave com ownerRole null significa hoje "criada
+ * antes deste campo existir" (ver ApiKey.hasFullAccessGrandfathered) — uma
+ * chave nova cair nesse mesmo bucket por omissão era o gap real, não a semântica
+ * pretendida.
  */
 @RestController
 @RequestMapping("/api/admin/api-keys")
 @RequiredArgsConstructor
 public class ApiKeyAdminController {
-
-    private static final SecureRandom RANDOM = new SecureRandom();
 
     private final ApiKeyRepository apiKeyRepository;
 
@@ -45,21 +52,21 @@ public class ApiKeyAdminController {
             return ResponseEntity.badRequest().build();
         }
 
-        byte[] bytes = new byte[32];
-        RANDOM.nextBytes(bytes);
-        String rawKey = "ask_" + HexFormat.of().formatHex(bytes);
-        String keyHash = sha256Hex(rawKey);
+        String rawKey = ApiKeyHashing.generateRawKey();
 
         ApiKey saved = apiKeyRepository.save(ApiKey.builder()
                 .name(name.trim())
-                .keyHash(keyHash)
+                .keyHash(ApiKeyHashing.sha256Hex(rawKey))
                 .ownerUserId((String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID))
+                .ownerRole((String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE))
+                .scopes(Arrays.stream(ApiKeyScope.values()).map(Enum::name).collect(Collectors.toSet()))
                 .build());
 
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                 "id", saved.getId(),
                 "name", saved.getName(),
                 "rawKey", rawKey,
+                "scopes", saved.getScopes(),
                 "createdAt", saved.getCreatedAt()
         ));
     }
@@ -71,14 +78,5 @@ public class ApiKeyAdminController {
             apiKeyRepository.save(key);
             return ResponseEntity.ok().<Void>build();
         }).orElseGet(() -> ResponseEntity.notFound().build());
-    }
-
-    private static String sha256Hex(String value) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return HexFormat.of().formatHex(digest.digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
     }
 }
