@@ -163,7 +163,7 @@ public class JoltJavaEngineService {
                 if ("custom-decode".equalsIgnoreCase(String.valueOf(op)) || "custom-totvs".equalsIgnoreCase(String.valueOf(op))) {
                     Object subSpec = opMap.get("spec");
                     if (subSpec instanceof Map<?, ?> fieldMap && input instanceof Map<?, ?> inputMap) {
-                        return decodeBase64InMap(new LinkedHashMap<>(inputMap), (Map<String, Object>) fieldMap);
+                        return decodeBase64InMap(new LinkedHashMap<String, Object>((Map<String, Object>) inputMap), (Map<String, Object>) fieldMap);
                     }
                 }
             }

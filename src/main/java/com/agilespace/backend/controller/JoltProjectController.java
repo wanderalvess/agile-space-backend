@@ -45,7 +45,7 @@ public class JoltProjectController {
     ) {
         User user = resolveUser(request);
         String userId = user != null ? user.getId() : "anonymous";
-        String squadId = user != null ? user.getActiveSquadId() : null;
+        String squadId = user != null ? user.getSquadId() : null;
 
         List<JoltProjectDto> list = joltProjectService.listProjects(userId, squadId, search);
         return ResponseEntity.ok(list);
