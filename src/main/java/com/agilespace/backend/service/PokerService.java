@@ -163,6 +163,11 @@ public class PokerService {
         return saved;
     }
 
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<PokerRound> searchRounds(String query, org.springframework.data.domain.Pageable pageable) {
+        return roundRepository.searchByTopicOrNote(query, pageable);
+    }
+
     @Transactional
     public void clearRounds(String roomId, String callerId, String callerRole) {
         PokerRoom room = roomRepository.findById(roomId)
