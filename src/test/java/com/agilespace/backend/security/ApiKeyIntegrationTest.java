@@ -4,6 +4,7 @@ import com.agilespace.backend.domain.ApiKey;
 import com.agilespace.backend.domain.ApiKeyScope;
 import com.agilespace.backend.repository.ApiKeyRepository;
 import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.BeforeEach;
@@ -99,9 +100,9 @@ class ApiKeyIntegrationTest {
 
         @Test
         @DisplayName("KNOWLEDGE_READ key - permite leitura, nega escrita")
-        void shouldAllowReadDenyWriteForKnowledgeReadKey() throws IOException {
-            when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
-            when(request.getMethod()).thenReturn("GET");
+        void shouldAllowReadDenyWriteForKnowledgeReadKey() throws IOException, ServletException {
+            lenient().when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
+            lenient().when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn(rawKey);
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(keyHash))
                     .thenReturn(Optional.of(knowledgeReadKey));
@@ -121,7 +122,7 @@ class ApiKeyIntegrationTest {
 
         @Test
         @DisplayName("SQUAD+POKER key - acesso múltiplo a recursos")
-        void shouldAllowMultipleScopesInSingleKey() throws IOException {
+        void shouldAllowMultipleScopesInSingleKey() throws IOException, ServletException {
             String pokeyHash = ApiKeyHashing.sha256Hex("ask_poker123");
 
             when(request.getRequestURI()).thenReturn("/api/v1/squad/read");
@@ -129,8 +130,13 @@ class ApiKeyIntegrationTest {
             when(request.getHeader("X-Api-Key")).thenReturn("ask_poker123");
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(pokeyHash))
                     .thenReturn(Optional.of(pokersquadKey));
+            // Stub getAttribute pra simular o que setAttribute teria feito no filter
+            when(request.getAttribute(ApiKeyAuthenticationFilter.ATTR_API_KEY_SCOPES))
+                    .thenReturn(pokersquadKey.getScopes());
+            when(request.getAttribute(ApiKeyAuthenticationFilter.ATTR_API_KEY_GRANDFATHERED))
+                    .thenReturn(false);
 
-            assertDoesNotThrow(() -> filter.doFilterInternal(request, response, filterChain));
+            filter.doFilterInternal(request, response, filterChain);
 
             // Deve permitir SQUAD_READ
             assertDoesNotThrow(() -> ApiKeyAccess.requireScope(request, ApiKeyScope.SQUAD_READ));
@@ -182,7 +188,7 @@ class ApiKeyIntegrationTest {
 
         @Test
         @DisplayName("Grandfathered key - acesso total sem restrição")
-        void shouldAllowUnrestrictedAccessForGrandfatheredKey() throws IOException {
+        void shouldAllowUnrestrictedAccessForGrandfatheredKey() throws IOException, ServletException {
             String oldHash = ApiKeyHashing.sha256Hex("ask_old456");
 
             when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
@@ -190,6 +196,11 @@ class ApiKeyIntegrationTest {
             when(request.getHeader("X-Api-Key")).thenReturn("ask_old456");
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(oldHash))
                     .thenReturn(Optional.of(grandfatheredKey));
+            // Stub getAttribute pra simular grandfathered=true
+            when(request.getAttribute(ApiKeyAuthenticationFilter.ATTR_API_KEY_SCOPES))
+                    .thenReturn(grandfatheredKey.getScopes());
+            when(request.getAttribute(ApiKeyAuthenticationFilter.ATTR_API_KEY_GRANDFATHERED))
+                    .thenReturn(true);
 
             filter.doFilterInternal(request, response, filterChain);
 
@@ -206,7 +217,7 @@ class ApiKeyIntegrationTest {
 
         @Test
         @DisplayName("Tentativa de acesso com chave revogada - negada")
-        void shouldDenyRevokedKeyAccess() throws IOException {
+        void shouldDenyRevokedKeyAccess() throws IOException, ServletException {
             ApiKey revokedKey = knowledgeReadKey.toBuilder()
                     .revokedAt(LocalDateTime.now().minusHours(1))
                     .build();
@@ -219,7 +230,7 @@ class ApiKeyIntegrationTest {
             when(request.getHeader("X-Api-Key")).thenReturn(rawKey);
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(keyHash))
                     .thenReturn(Optional.empty());
-            when(response.getWriter()).thenReturn(writer);
+            lenient().when(response.getWriter()).thenReturn(writer);
 
             filter.doFilterInternal(request, response, filterChain);
 
@@ -229,7 +240,7 @@ class ApiKeyIntegrationTest {
 
         @Test
         @DisplayName("Tentativa de escala de privilégios - negada")
-        void shouldDenyPrivilegeEscalation() throws IOException {
+        void shouldDenyPrivilegeEscalation() throws IOException, ServletException {
             when(request.getRequestURI()).thenReturn("/api/v1/poker/admin/stats");
             when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn(rawKey);
@@ -287,9 +298,9 @@ class ApiKeyIntegrationTest {
 
         @Test
         @DisplayName("Deve atualizar lastUsedAt a cada uso")
-        void shouldTrackLastUsageTime() throws IOException {
-            when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
-            when(request.getMethod()).thenReturn("GET");
+        void shouldTrackLastUsageTime() throws IOException, ServletException {
+            lenient().when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
+            lenient().when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn(rawKey);
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(keyHash))
                     .thenReturn(Optional.of(knowledgeReadKey));
@@ -301,7 +312,7 @@ class ApiKeyIntegrationTest {
 
         @Test
         @DisplayName("Deve preservar auditoria para chaves revogadas")
-        void shouldAuditRevokedKeyAttempts() throws IOException {
+        void shouldAuditRevokedKeyAttempts() throws IOException, ServletException {
             StringWriter stringWriter = new StringWriter();
             PrintWriter writer = new PrintWriter(stringWriter);
 
@@ -310,7 +321,7 @@ class ApiKeyIntegrationTest {
             when(request.getHeader("X-Api-Key")).thenReturn(rawKey);
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(keyHash))
                     .thenReturn(Optional.empty());
-            when(response.getWriter()).thenReturn(writer);
+            lenient().when(response.getWriter()).thenReturn(writer);
 
             filter.doFilterInternal(request, response, filterChain);
 

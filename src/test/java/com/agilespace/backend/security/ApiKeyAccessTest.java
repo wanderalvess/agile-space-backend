@@ -15,7 +15,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("ApiKeyAccess - Enforcement de Escopos em Endpoints REST")
@@ -34,7 +34,7 @@ class ApiKeyAccessTest {
             Set<String> scopes = Set.of("KNOWLEDGE_READ", "SQUAD_READ");
             when(request.getAttribute(ApiKeyAuthenticationFilter.ATTR_API_KEY_SCOPES))
                     .thenReturn(scopes);
-            when(request.getAttribute(ApiKeyAuthenticationFilter.ATTR_API_KEY_GRANDFATHERED))
+            lenient().when(request.getAttribute(ApiKeyAuthenticationFilter.ATTR_API_KEY_GRANDFATHERED))
                     .thenReturn(false);
 
             assertDoesNotThrow(() ->

@@ -16,7 +16,7 @@ import org.springframework.web.servlet.function.ServerRequest;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("ApiKeyTransportContextExtractor - Extração de Contexto para MCP")

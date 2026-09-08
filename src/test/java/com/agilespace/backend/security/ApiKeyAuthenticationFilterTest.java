@@ -79,8 +79,8 @@ class ApiKeyAuthenticationFilterTest {
         @Test
         @DisplayName("Deve permitir requisição com chave válida e não-revogada")
         void shouldAllowValidKey() throws ServletException, IOException {
-            when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
-            when(request.getMethod()).thenReturn("GET");
+            lenient().when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
+            lenient().when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn(rawKey);
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(keyHash))
                     .thenReturn(Optional.of(validApiKey));
@@ -163,8 +163,8 @@ class ApiKeyAuthenticationFilterTest {
         @Test
         @DisplayName("Deve setar atributos de escopo na requisição")
         void shouldSetScopeAttributes() throws ServletException, IOException {
-            when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
-            when(request.getMethod()).thenReturn("GET");
+            lenient().when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
+            lenient().when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn(rawKey);
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(keyHash))
                     .thenReturn(Optional.of(validApiKey));
@@ -183,8 +183,8 @@ class ApiKeyAuthenticationFilterTest {
         @Test
         @DisplayName("Deve setar ownerUserId correto")
         void shouldSetCorrectOwnerId() throws ServletException, IOException {
-            when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
-            when(request.getMethod()).thenReturn("GET");
+            lenient().when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
+            lenient().when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn(rawKey);
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(keyHash))
                     .thenReturn(Optional.of(validApiKey));
@@ -200,8 +200,8 @@ class ApiKeyAuthenticationFilterTest {
         @Test
         @DisplayName("Deve setar scopes na requisição")
         void shouldSetScopes() throws ServletException, IOException {
-            when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
-            when(request.getMethod()).thenReturn("GET");
+            lenient().when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
+            lenient().when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn(rawKey);
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(keyHash))
                     .thenReturn(Optional.of(validApiKey));
@@ -223,8 +223,8 @@ class ApiKeyAuthenticationFilterTest {
         @Test
         @DisplayName("Deve setar grandfathered=false pra chave com ownerRole")
         void shouldSetGrandfatheredFalseWithOwnerRole() throws ServletException, IOException {
-            when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
-            when(request.getMethod()).thenReturn("GET");
+            lenient().when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
+            lenient().when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn(rawKey);
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(keyHash))
                     .thenReturn(Optional.of(validApiKey));
@@ -309,8 +309,8 @@ class ApiKeyAuthenticationFilterTest {
         @Test
         @DisplayName("Deve atualizar lastUsedAt ao usar chave")
         void shouldUpdateLastUsedAt() throws ServletException, IOException {
-            when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
-            when(request.getMethod()).thenReturn("GET");
+            lenient().when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
+            lenient().when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn(rawKey);
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(keyHash))
                     .thenReturn(Optional.of(validApiKey));
