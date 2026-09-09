@@ -10,7 +10,8 @@ spring:
     enabled: true
     clean-disabled: true
     locations: classpath:db/migration
-    baseline-on-migrate: false
+    baseline-on-migrate: true
+    baseline-version: "0"
 
 server:
   error:
@@ -31,3 +32,7 @@ springdoc:
     enabled: false
   api-docs:
     enabled: false
+
+app:
+  security:
+    encryption-key: ${APP_ENCRYPTION_SECRET}

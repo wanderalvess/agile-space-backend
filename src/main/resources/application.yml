@@ -8,14 +8,16 @@ spring:
   jpa:
     database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
-      ddl-auto: validate
+      ddl-auto: ${DDL_AUTO:update}
     show-sql: false
     properties:
       hibernate:
         format_sql: false
   flyway:
+    enabled: true
     locations: classpath:db/migration
-    baseline-on-migrate: false
+    baseline-on-migrate: true
+    baseline-version: "0"
   ai:
     mcp:
       server:
@@ -61,7 +63,7 @@ app:
     # Obrigatório em produção. Defina a variável de ambiente APP_ENCRYPTION_SECRET.
     # Em dev local, pode usar um valor padrão. Em produção, nunca use fallback hardcoded.
     # Gerar com: openssl rand -base64 32
-    encryption-key: ${APP_ENCRYPTION_SECRET}
+    encryption-key: ${APP_ENCRYPTION_SECRET:AgileSpaceDevMasterKey2026LocalOnly#AES}
     # Chave de acesso admin para o endpoint GET /api/users (listagem de usuários).
     # Defina APP_ADMIN_KEY no ambiente (ou deixe vazio pra desabilitar endpoint).
     admin-key: ${APP_ADMIN_KEY:}
