@@ -125,8 +125,8 @@ class ApiKeyIntegrationTest {
         void shouldAllowMultipleScopesInSingleKey() throws IOException, ServletException {
             String pokeyHash = ApiKeyHashing.sha256Hex("ask_poker123");
 
-            when(request.getRequestURI()).thenReturn("/api/v1/squad/read");
-            when(request.getMethod()).thenReturn("GET");
+            lenient().when(request.getRequestURI()).thenReturn("/api/v1/squad/read");
+            lenient().when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn("ask_poker123");
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(pokeyHash))
                     .thenReturn(Optional.of(pokersquadKey));
@@ -164,8 +164,8 @@ class ApiKeyIntegrationTest {
         void shouldAllowAccessToCorrectSquad() throws IOException {
             String pokerHash = ApiKeyHashing.sha256Hex("ask_poker123");
 
-            when(request.getRequestURI()).thenReturn("/api/v1/squad/squad-123");
-            when(request.getMethod()).thenReturn("GET");
+            lenient().when(request.getRequestURI()).thenReturn("/api/v1/squad/squad-123");
+            lenient().when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn("ask_poker123");
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(pokerHash))
                     .thenReturn(Optional.of(pokersquadKey));
@@ -191,13 +191,13 @@ class ApiKeyIntegrationTest {
         void shouldAllowUnrestrictedAccessForGrandfatheredKey() throws IOException, ServletException {
             String oldHash = ApiKeyHashing.sha256Hex("ask_old456");
 
-            when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
-            when(request.getMethod()).thenReturn("GET");
+            lenient().when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
+            lenient().when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn("ask_old456");
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(oldHash))
                     .thenReturn(Optional.of(grandfatheredKey));
             // Stub getAttribute pra simular grandfathered=true
-            when(request.getAttribute(ApiKeyAuthenticationFilter.ATTR_API_KEY_SCOPES))
+            lenient().when(request.getAttribute(ApiKeyAuthenticationFilter.ATTR_API_KEY_SCOPES))
                     .thenReturn(grandfatheredKey.getScopes());
             when(request.getAttribute(ApiKeyAuthenticationFilter.ATTR_API_KEY_GRANDFATHERED))
                     .thenReturn(true);
@@ -225,8 +225,8 @@ class ApiKeyIntegrationTest {
             StringWriter stringWriter = new StringWriter();
             PrintWriter writer = new PrintWriter(stringWriter);
 
-            when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
-            when(request.getMethod()).thenReturn("GET");
+            lenient().when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
+            lenient().when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn(rawKey);
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(keyHash))
                     .thenReturn(Optional.empty());
@@ -241,8 +241,8 @@ class ApiKeyIntegrationTest {
         @Test
         @DisplayName("Tentativa de escala de privilégios - negada")
         void shouldDenyPrivilegeEscalation() throws IOException, ServletException {
-            when(request.getRequestURI()).thenReturn("/api/v1/poker/admin/stats");
-            when(request.getMethod()).thenReturn("GET");
+            lenient().when(request.getRequestURI()).thenReturn("/api/v1/poker/admin/stats");
+            lenient().when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn(rawKey);
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(keyHash))
                     .thenReturn(Optional.of(knowledgeReadKey)); // apenas KNOWLEDGE_READ
@@ -266,8 +266,8 @@ class ApiKeyIntegrationTest {
                     .squadId("squad-123")
                     .build();
 
-            when(request.getRequestURI()).thenReturn("/api/v1/squad/squad-999");
-            when(request.getMethod()).thenReturn("GET");
+            lenient().when(request.getRequestURI()).thenReturn("/api/v1/squad/squad-999");
+            lenient().when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn("ask_poker123");
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(pokerHash))
                     .thenReturn(Optional.of(restrictedToSquad123));
@@ -316,8 +316,8 @@ class ApiKeyIntegrationTest {
             StringWriter stringWriter = new StringWriter();
             PrintWriter writer = new PrintWriter(stringWriter);
 
-            when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
-            when(request.getMethod()).thenReturn("GET");
+            lenient().when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
+            lenient().when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn(rawKey);
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(keyHash))
                     .thenReturn(Optional.empty());

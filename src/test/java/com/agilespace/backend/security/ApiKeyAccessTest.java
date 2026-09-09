@@ -80,7 +80,7 @@ class ApiKeyAccessTest {
         @Test
         @DisplayName("Deve permitir com escopo se chave é grandfathered")
         void shouldAllowGrandfatheredKeyAnyScope() {
-            when(request.getAttribute(ApiKeyAuthenticationFilter.ATTR_API_KEY_SCOPES))
+            lenient().when(request.getAttribute(ApiKeyAuthenticationFilter.ATTR_API_KEY_SCOPES))
                     .thenReturn(Set.of());
             when(request.getAttribute(ApiKeyAuthenticationFilter.ATTR_API_KEY_GRANDFATHERED))
                     .thenReturn(true);
@@ -167,7 +167,7 @@ class ApiKeyAccessTest {
         @Test
         @DisplayName("Deve permitir se scopes é null mas é grandfathered")
         void shouldAllowWhenScopesNullButGrandfathered() {
-            when(request.getAttribute(ApiKeyAuthenticationFilter.ATTR_API_KEY_SCOPES))
+            lenient().when(request.getAttribute(ApiKeyAuthenticationFilter.ATTR_API_KEY_SCOPES))
                     .thenReturn(null);
             when(request.getAttribute(ApiKeyAuthenticationFilter.ATTR_API_KEY_GRANDFATHERED))
                     .thenReturn(true);

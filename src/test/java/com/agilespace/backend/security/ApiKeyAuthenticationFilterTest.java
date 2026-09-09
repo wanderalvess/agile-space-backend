@@ -97,8 +97,8 @@ class ApiKeyAuthenticationFilterTest {
             StringWriter stringWriter = new StringWriter();
             PrintWriter writer = new PrintWriter(stringWriter);
 
-            when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
-            when(request.getMethod()).thenReturn("GET");
+            lenient().when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
+            lenient().when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn(null);
             when(response.getWriter()).thenReturn(writer);
 
@@ -115,8 +115,8 @@ class ApiKeyAuthenticationFilterTest {
             StringWriter stringWriter = new StringWriter();
             PrintWriter writer = new PrintWriter(stringWriter);
 
-            when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
-            when(request.getMethod()).thenReturn("GET");
+            lenient().when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
+            lenient().when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn(rawKey);
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(keyHash))
                     .thenReturn(Optional.empty());
@@ -142,8 +142,8 @@ class ApiKeyAuthenticationFilterTest {
                     .revokedAt(LocalDateTime.now().minusDays(1))
                     .build();
 
-            when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
-            when(request.getMethod()).thenReturn("GET");
+            lenient().when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
+            lenient().when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn(rawKey);
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(keyHash))
                     .thenReturn(Optional.empty());
@@ -250,8 +250,8 @@ class ApiKeyAuthenticationFilterTest {
                     .createdAt(LocalDateTime.now())
                     .build();
 
-            when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
-            when(request.getMethod()).thenReturn("GET");
+            lenient().when(request.getRequestURI()).thenReturn("/api/v1/knowledge/search");
+            lenient().when(request.getMethod()).thenReturn("GET");
             when(request.getHeader("X-Api-Key")).thenReturn(rawKey);
             when(apiKeyRepository.findByKeyHashAndRevokedAtIsNull(keyHash))
                     .thenReturn(Optional.of(oldKey));
