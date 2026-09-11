@@ -61,7 +61,19 @@ public class RetroController {
     // --- Board Endpoints ---
     @GetMapping
     public ResponseEntity<List<RetroBoard>> listBoards(
-            @RequestParam(value = "limit", required = false, defaultValue = "1000") int limit) {
+            @RequestParam(value = "limit", required = false, defaultValue = "1000") int limit,
+            @RequestParam(value = "sprintId", required = false) String sprintId,
+            @RequestParam(value = "team", required = false) String team,
+            @RequestParam(value = "squadId", required = false) String squadId) {
+        if (sprintId != null && !sprintId.isBlank()) {
+            return ResponseEntity.ok(retroService.listBoardsBySprintId(sprintId));
+        }
+        if (squadId != null && !squadId.isBlank()) {
+            return ResponseEntity.ok(retroService.listBoardsBySquadId(squadId));
+        }
+        if (team != null && !team.isBlank()) {
+            return ResponseEntity.ok(retroService.listBoardsByTeam(team));
+        }
         return ResponseEntity.ok(retroService.listBoards(limit));
     }
 

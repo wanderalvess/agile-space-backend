@@ -77,6 +77,28 @@ public class RetroControllerTest {
     }
 
     @Test
+    public void testListBoardsBySprintId() {
+        RetroBoard board = new RetroBoard();
+        when(service.listBoardsBySprintId("SPRINT-1")).thenReturn(Arrays.asList(board));
+
+        ResponseEntity<List<RetroBoard>> response = controller.listBoards(1000, "SPRINT-1", null, null);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(1, response.getBody().size());
+        verify(service, never()).listBoards(anyInt());
+    }
+
+    @Test
+    public void testListBoardsWithoutSprintIdFallsBackToLegacy() {
+        when(service.listBoards(1000)).thenReturn(Arrays.asList(new RetroBoard()));
+
+        ResponseEntity<List<RetroBoard>> response = controller.listBoards(1000, null, null, null);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        verify(service, never()).listBoardsBySprintId(anyString());
+    }
+
+    @Test
     public void testDeleteCard() {
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE)).thenReturn("ADMIN");

@@ -78,6 +78,34 @@ public class E2EAgileCycleTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.velocityReal").value(5.0))
                 .andExpect(jsonPath("$.previsto").value(5.0));
+
+        // 7. Retro: Criar board ligado à sprint e buscar por sprintId
+        mockMvc.perform(post("/api/retros")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"id\": \"retro-e2e-1\", \"creatorId\": \"test-user-id\", \"title\": \"Retro Sprint 1\", \"sprintId\": \"SPRINT-1\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.sprintId").value("SPRINT-1"));
+
+        mockMvc.perform(get("/api/retros")
+                .header("Authorization", "Bearer " + token)
+                .param("sprintId", "SPRINT-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value("retro-e2e-1"));
+
+        // 8. Action Plan: Criar board ligado à sprint e buscar por sprintId
+        mockMvc.perform(post("/api/action-plans")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"creatorId\": \"test-user-id\", \"title\": \"Ação Sprint 1\", \"sprintId\": \"SPRINT-1\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.sprintId").value("SPRINT-1"));
+
+        mockMvc.perform(get("/api/action-plans")
+                .header("Authorization", "Bearer " + token)
+                .param("sprintId", "SPRINT-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].sprintId").value("SPRINT-1"));
     }
 }
 

@@ -37,6 +37,21 @@ public class RetroService {
     }
 
     @Transactional(readOnly = true)
+    public List<RetroBoard> listBoardsBySprintId(String sprintId) {
+        return boardRepository.findBySprintIdOrderByCreatedAtDesc(sprintId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<RetroBoard> listBoardsByTeam(String team) {
+        return boardRepository.findByTeamOrderByCreatedAtDesc(team);
+    }
+
+    @Transactional(readOnly = true)
+    public List<RetroBoard> listBoardsBySquadId(String squadId) {
+        return boardRepository.findBySquadIdOrderByCreatedAtDesc(squadId);
+    }
+
+    @Transactional(readOnly = true)
     public Optional<RetroBoard> getBoard(String boardId) {
         return boardRepository.findById(boardId);
     }

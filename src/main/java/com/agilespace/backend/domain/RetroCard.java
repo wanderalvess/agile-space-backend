@@ -47,8 +47,11 @@ public class RetroCard {
     private String parentId; // Para cartões agrupados
 
     private String carriedFromBoardId;
-    
+
     private String carriedFromBoardTitle;
+
+    // Quantas vezes esta ação foi reimportada sem ser concluída (sinal de tema recorrente)
+    private Integer carryCount;
 
     // --- Votes collection ---
     @ElementCollection(fetch = FetchType.EAGER)

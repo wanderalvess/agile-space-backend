@@ -66,6 +66,26 @@ public class ActionPlanControllerTest {
     }
 
     @Test
+    public void testListBoardsBySprintId() {
+        ActionPlan board = new ActionPlan();
+        when(service.listBoardsBySprintId("SPRINT-1")).thenReturn(Arrays.asList(board));
+
+        ResponseEntity<List<ActionPlan>> response = controller.listBoards("SPRINT-1");
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(1, response.getBody().size());
+    }
+
+    @Test
+    public void testListBoardsWithoutSprintIdReturnsEmpty() {
+        ResponseEntity<List<ActionPlan>> response = controller.listBoards(null);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(0, response.getBody().size());
+        verify(service, never()).listBoardsBySprintId(any());
+    }
+
+    @Test
     public void testListTasks() {
         UUID id = UUID.randomUUID();
         when(service.listTasks(id)).thenReturn(Arrays.asList(new ActionPlanTask()));

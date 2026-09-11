@@ -55,6 +55,21 @@ public class ActionPlanController {
         return ResponseEntity.status(HttpStatus.CREATED).body(actionPlanService.createBoard(board));
     }
 
+    @GetMapping
+    public ResponseEntity<List<ActionPlan>> listBoards(
+            @RequestParam(value = "sprintId", required = false) String sprintId) {
+        if (sprintId == null || sprintId.isBlank()) {
+            return ResponseEntity.ok(List.of());
+        }
+        // Listagem por sprintId é ampla (não pede o UUID do board), então só
+        // devolve boards públicos aqui — igual a getBoardById/requireBoardAccess,
+        // um board privado não deve ficar descobrível por enumeração de sprintId.
+        List<ActionPlan> publicBoards = actionPlanService.listBoardsBySprintId(sprintId).stream()
+                .filter(b -> Boolean.TRUE.equals(b.getIsPublic()))
+                .toList();
+        return ResponseEntity.ok(publicBoards);
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<ActionPlan> getBoardById(@PathVariable("id") UUID id) {
         try {

@@ -40,6 +40,16 @@ public class RetroBoard {
     @Builder.Default
     private String team = "Squad Geral";
 
+    // Id real da squad (Squad.id) — team acima continua só o nome de exibição.
+    // Sem FK, mesmo padrão de sprintId: liga pelo id sem depender de join/tabela nova.
+    @Column(length = 100)
+    private String squadId;
+
+    // Id da sprint do Jira (mesmo espaço de Squad.activeSprintId / WorkItem.sprintId).
+    // String livre, sem FK — permite ligar o board à sprint sem tabela nova.
+    @Column(length = 100)
+    private String sprintId;
+
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;

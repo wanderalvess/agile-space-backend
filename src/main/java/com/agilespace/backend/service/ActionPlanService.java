@@ -27,6 +27,11 @@ public class ActionPlanService {
     }
 
     @Transactional(readOnly = true)
+    public List<ActionPlan> listBoardsBySprintId(String sprintId) {
+        return boardRepository.findBySprintIdOrderByCreatedAtDesc(sprintId);
+    }
+
+    @Transactional(readOnly = true)
     public ActionPlan getBoardById(UUID id) {
         return boardRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Action Plan not found with id: " + id));
