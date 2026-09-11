@@ -64,6 +64,13 @@ public class RetroBoard {
     @Builder.Default
     private Boolean autoSortOnVoteEnd = false;
 
+    // --- Check-in inicial (health-check configurável pelo facilitador) ---
+    @Builder.Default
+    private Boolean healthCheckEnabled = false;
+
+    @Column(columnDefinition = "TEXT")
+    private String healthCheckQuestion;
+
     // --- Timer Details ---
     @Builder.Default
     private String timerStatus = "stopped";

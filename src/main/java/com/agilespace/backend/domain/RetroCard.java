@@ -1,7 +1,10 @@
 package com.agilespace.backend.domain;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -53,4 +56,10 @@ public class RetroCard {
     @Column(name = "user_id")
     @Builder.Default
     private List<String> votes = new ArrayList<>();
+
+    // --- Reações rápidas (independentes do voto de priorização) ---
+    // Formato: { "up": ["uid1"], "love": [], "wow": [], "concern": ["uid2"] }
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "reactions", columnDefinition = "jsonb")
+    private JsonNode reactions;
 }
