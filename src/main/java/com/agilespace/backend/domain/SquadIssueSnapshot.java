@@ -84,6 +84,17 @@ public class SquadIssueSnapshot {
     @Column(name = "target_end")
     private String targetEnd;
 
+    // Posição no array fields.subtasks da issue pai (ordem de rank do Jira) —
+    // desempate de ordem de fase quando duas fases caem na mesma data.
+    @Column(name = "order_index")
+    private Integer orderIndex;
+
+    // true = target_start/target_end vieram de campo de data real do Jira;
+    // false/null = caiu no fallback (dueDate, created/updated). Ver
+    // squadIssueToPlansTask no frontend.
+    @Column(name = "dates_are_inferred")
+    private Boolean datesAreInferred;
+
     @Column(name = "parent_key")
     private String parentKey;
 
@@ -92,6 +103,12 @@ public class SquadIssueSnapshot {
 
     @Column(name = "updated_at_jira")
     private String updatedAtJira;
+
+    // Jira `resolutiondate` — só muda uma vez, quando a issue resolve/fecha
+    // (diferente de updatedAtJira, que muda a qualquer edição). Usado pro
+    // sinal "concluiu atrasado" sem falso-positivo de edição tardia.
+    @Column(name = "resolution_date")
+    private String resolutionDate;
 
     @Column(name = "synced_at")
     private String syncedAt;

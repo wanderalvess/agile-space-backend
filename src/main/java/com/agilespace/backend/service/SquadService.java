@@ -73,6 +73,7 @@ public class SquadService {
         if (squad.getCapacityFormula() != null) target.setCapacityFormula(squad.getCapacityFormula());
         if (squad.getUpdatedAt() != null) target.setUpdatedAt(squad.getUpdatedAt());
         if (squad.getSprintHistory() != null) target.setSprintHistory(squad.getSprintHistory());
+        if (squad.getPhases() != null) target.setPhases(squad.getPhases());
 
         return squadRepository.save(target);
     }

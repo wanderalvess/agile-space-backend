@@ -77,4 +77,11 @@ public class Squad {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "sprint_history", columnDefinition = "jsonb")
     private JsonNode sprintHistory;
+
+    // Mapeamento issuetype -> fase de workflow (kind/label/color/ordem) pra
+    // classificar subtarefas na timeline do Jira Plans sem heurística de
+    // texto. Array de objetos, ordem do array = ordem da fase no workflow.
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "phases", columnDefinition = "jsonb")
+    private JsonNode phases;
 }
