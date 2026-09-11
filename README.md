@@ -26,6 +26,7 @@ A arquitetura do sistema é modularizada para atender a diferentes fluxos ágeis
 - **Vault (Cofre de Segredos):** Serviço de compartilhamento seguro de credenciais com autodestruição baseada em tempo (1h, 24h) ou visualização única (`once`).
 - **Workspace do Usuário:** Quadros Kanban privados, notas adesivas e links rápidos para gestão pessoal (To-Do List pessoal).
 - **Gestão de Conhecimento e Prompts de IA:** Repositório colaborativo de prompts (Scrum Master, Product Owner, etc.) com sistema de forks, comentários e ranqueamento de uso.
+- **RAG & Base de Conhecimento Vetorial (PostgreSQL + pgvector):** Ingestão de documentações técnicas e regras de negócio vetorizadas vindas do **WinThor Dev Manager**, permitindo consultas semânticas no Chat sem custo de IA externa (*Veja [DOCS_RAG_INTEGRATION.md](DOCS_RAG_INTEGRATION.md)*).
 
 ---
 

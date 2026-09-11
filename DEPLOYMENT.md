@@ -188,5 +188,23 @@ Configure reverse proxy (nginx/haproxy) with valid TLS certificate.
 
 ---
 
+## 🔮 Backlog Arquitetural: RAG Vetorial (PostgreSQL + pgvector)
+
+Para a nova versão rodando junto ao **WinThor Dev Manager** na mesma VM:
+1. **Extensão pgvector:**
+   ```sql
+   CREATE EXTENSION IF NOT EXISTS vector;
+   ```
+2. **Tabela de Chunks Vetorizados (`kb_chunks`):**
+   - Criação da tabela com coluna `embedding VECTOR(384)` e índice `HNSW` (`vector_cosine_ops`).
+3. **Endpoint de Ingestão (`POST /api/v1/knowledge/sync`):**
+   - Recebe em lote os chunks e vetores gerados pelo WinThor Dev Manager (sem custo de IA externa).
+   - Autenticado via header `X-Api-Key` com escopo `KNOWLEDGE_WRITE`.
+4. **Consulta do Chat:**
+   - Realizada diretamente via SQL (`ORDER BY embedding <=> query_vector LIMIT 5`) de forma ultra veloz e gratuita.
+
+---
+
 **Version:** 4.1.0  
-**Last Updated:** 2026-09-08
+**Last Updated:** 2026-09-10
+
