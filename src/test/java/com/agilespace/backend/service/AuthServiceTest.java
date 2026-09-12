@@ -248,6 +248,54 @@ public class AuthServiceTest {
     }
 
     @Test
+    public void testRegisterClaimsGhostAccountCreatedByJiraSyncWithoutOverwritingJiraData() {
+        // Conta pré-provisionada pelo sync do Jira (JiraAdminService.confirmSync): sem senha,
+        // inativa, mas já com nome/jiraAccountId/squadId vindos do Jira.
+        User ghost = new User();
+        ghost.setId("acc-123");
+        ghost.setEmail("maria.souza@empresa.com.br");
+        ghost.setName("Maria Souza");
+        ghost.setJiraAccountId("acc-123");
+        ghost.setSquadId("DDWMISSI");
+        ghost.setActive(false);
+
+        when(userRepository.findByEmail("maria.souza@empresa.com.br")).thenReturn(Optional.of(ghost));
+        when(projectMemberRoleRepository.findByEmailIgnoreCase(anyString())).thenReturn(List.of());
+        when(squadMemberRepository.findByUserIdentifier(anyString())).thenReturn(List.of());
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(userProjectResolverService.resolveUserAccess(any(User.class))).thenReturn(accessWith());
+
+        AuthResponseDto response = service.register(RegisterRequestDto.builder()
+                .email("Maria.Souza@Empresa.com.br")
+                .name("Nome Diferente Digitado No Cadastro")
+                .password(RAW_PASSWORD)
+                .build());
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(captor.capture());
+        User saved = captor.getValue();
+
+        assertEquals("acc-123", saved.getId(), "deve reaproveitar o id da conta-fantasma, nao gerar outro");
+        assertEquals("Maria Souza", saved.getName(), "nome vindo do Jira nao deve ser sobrescrito");
+        assertEquals("DDWMISSI", saved.getSquadId());
+        assertTrue(saved.isActive());
+        assertTrue(PasswordUtil.verifyPassword(RAW_PASSWORD, saved.getPasswordHash()));
+        assertEquals("jwt-token", response.getToken());
+    }
+
+    @Test
+    public void testRegisterOnAlreadyClaimedAccountStillReturnsConflict() {
+        User claimed = activeUser(); // ja tem passwordHash setado
+        when(userRepository.findByEmail("joao.silva@empresa.com.br")).thenReturn(Optional.of(claimed));
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> service.register(
+                RegisterRequestDto.builder().email("joao.silva@empresa.com.br").name("Joao").password(RAW_PASSWORD).build()));
+
+        assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
     public void testRegisterAutoLinksProfieldsRolesAndInheritsProjectContext() {
         ProjectMemberRole role = new ProjectMemberRole();
         role.setId("r1");

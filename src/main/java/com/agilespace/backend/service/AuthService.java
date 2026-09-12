@@ -87,16 +87,18 @@ public class AuthService {
 
     /**
      * Cadastra um novo usuário no login padrão e faz o auto-link com os papéis do Jira Profields.
+     * Se o e-mail já pertence a uma conta pré-provisionada pelo sync do Jira (ainda sem senha —
+     * ver JiraAdminService.confirmSync), reivindica essa conta em vez de bloquear o cadastro.
      */
     @Transactional
     public AuthResponseDto register(RegisterRequestDto request) {
         String cleanEmail = request.getEmail().trim().toLowerCase();
 
-        if (userRepository.findByEmail(cleanEmail).isPresent()) {
+        Optional<User> existingUser = userRepository.findByEmail(cleanEmail);
+        if (existingUser.isPresent() && existingUser.get().getPasswordHash() != null) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Este e-mail já está cadastrado");
         }
 
-        String userId = UUID.randomUUID().toString();
         String passwordHash = PasswordUtil.hashPassword(request.getPassword());
 
         // Busca se a pessoa já possui papéis atribuídos no Profields
@@ -123,21 +125,49 @@ public class AuthService {
             }
         }
 
-        User user = User.builder()
-                .id(userId)
-                .email(cleanEmail)
-                .name(request.getName().trim())
-                .passwordHash(passwordHash)
-                .authProvider("LOCAL")
-                .role("MEMBER")
-                .jiraAccountId(request.getJiraAccountId() != null ? request.getJiraAccountId().trim() : null)
-                .defaultProjectId(defaultProject)
-                .squadId(defaultProject)
-                .segmentName(segment)
-                .tribeName(tribe)
-                .active(true)
-                .isGuest(false)
-                .build();
+        User user;
+        if (existingUser.isPresent()) {
+            // Conta-fantasma criada pelo sync do Jira (sem senha): reivindica em vez de criar outra.
+            user = existingUser.get();
+            user.setPasswordHash(passwordHash);
+            user.setAuthProvider("LOCAL");
+            user.setActive(true);
+            if (user.getName() == null || user.getName().isBlank()) {
+                user.setName(request.getName().trim());
+            }
+            if (request.getJiraAccountId() != null && !request.getJiraAccountId().isBlank()
+                    && (user.getJiraAccountId() == null || user.getJiraAccountId().isBlank())) {
+                user.setJiraAccountId(request.getJiraAccountId().trim());
+            }
+            if (user.getDefaultProjectId() == null || user.getDefaultProjectId().isBlank()) {
+                user.setDefaultProjectId(defaultProject);
+            }
+            if (user.getSquadId() == null || user.getSquadId().isBlank()) {
+                user.setSquadId(defaultProject);
+            }
+            if (user.getSegmentName() == null || user.getSegmentName().isBlank()) {
+                user.setSegmentName(segment);
+            }
+            if (user.getTribeName() == null || user.getTribeName().isBlank()) {
+                user.setTribeName(tribe);
+            }
+        } else {
+            user = User.builder()
+                    .id(UUID.randomUUID().toString())
+                    .email(cleanEmail)
+                    .name(request.getName().trim())
+                    .passwordHash(passwordHash)
+                    .authProvider("LOCAL")
+                    .role("MEMBER")
+                    .jiraAccountId(request.getJiraAccountId() != null ? request.getJiraAccountId().trim() : null)
+                    .defaultProjectId(defaultProject)
+                    .squadId(defaultProject)
+                    .segmentName(segment)
+                    .tribeName(tribe)
+                    .active(true)
+                    .isGuest(false)
+                    .build();
+        }
 
         user = userRepository.save(user);
 

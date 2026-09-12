@@ -6,6 +6,8 @@ import com.agilespace.backend.domain.SquadMetricsRollup;
 import com.agilespace.backend.domain.User;
 import com.agilespace.backend.dto.JiraConfirmSyncRequest;
 import com.agilespace.backend.dto.JiraMemberCandidateDto;
+import com.agilespace.backend.dto.JiraProjectPreviewDto;
+import com.agilespace.backend.dto.JiraSyncRequest;
 import com.agilespace.backend.dto.JiraSyncResult;
 import com.agilespace.backend.repository.SquadMemberRepository;
 import com.agilespace.backend.repository.SquadMetricsRollupRepository;
@@ -20,6 +22,10 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.MediaType;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.RestTemplate;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -29,6 +35,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("JiraAdminService - Sincronização Administrativa de Squads, Membros e Rollups do Jira")
@@ -221,6 +229,88 @@ class JiraAdminServiceTest {
             assertEquals("Developer", updated.getJobTitle());
             assertEquals(6, updated.getDailyHours());
             assertEquals("PROJ1", updated.getSquadId());
+        }
+    }
+
+    @Nested
+    @DisplayName("Preview de Projeto via API do Jira (chamadas HTTP reais mockadas)")
+    class PreviewProjectTests {
+
+        private MockRestServiceServer mockServer;
+        private static final String DOMAIN = "empresa.atlassian.net";
+        private static final String PROJECT_KEY = "PROJ1";
+
+        @BeforeEach
+        void bindMockServer() {
+            RestTemplate restTemplate = (RestTemplate) ReflectionTestUtils.getField(service, "restTemplate");
+            mockServer = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
+        }
+
+        private void expectEmptyRolesAndComponents() {
+            mockServer.expect(requestTo("https://" + DOMAIN + "/rest/api/2/project/" + PROJECT_KEY + "/components"))
+                    .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+            String epicSearchUrl = "https://" + DOMAIN + "/rest/api/2/search?jql=project%3D" + PROJECT_KEY
+                    + "+AND+issuetype+in+(Epic%2CEpico%2C%C3%89pico%2CInitiative%2CIniciativa%2CFeature%2CTema)+ORDER+BY+updated+DESC&fields=*all&expand=names&maxResults=100";
+            mockServer.expect(requestTo(epicSearchUrl))
+                    .andRespond(withSuccess("{\"issues\": []}", MediaType.APPLICATION_JSON));
+        }
+
+        @Test
+        @DisplayName("Deve detectar Project Lead e autor de issue recente como candidatos, sem duplicar")
+        void previewProjectDetectsLeadAndIssueAuthors() {
+            String projectJson = "{"
+                    + "\"name\": \"Projeto Um\","
+                    + "\"lead\": {\"accountId\": \"lead1\", \"displayName\": \"Lider Um\", \"emailAddress\": \"lider@empresa.com\"},"
+                    + "\"roles\": {}"
+                    + "}";
+            mockServer.expect(requestTo("https://" + DOMAIN + "/rest/api/2/project/" + PROJECT_KEY))
+                    .andRespond(withSuccess(projectJson, MediaType.APPLICATION_JSON));
+            expectEmptyRolesAndComponents();
+
+            String taskSearchUrl = "https://" + DOMAIN + "/rest/api/2/search?jql=project%3D" + PROJECT_KEY
+                    + "+ORDER+BY+updated+DESC&fields=*all&expand=names&maxResults=100";
+            String taskSearchJson = "{\"issues\": [{\"fields\": {\"reporter\": "
+                    + "{\"accountId\": \"dev1\", \"displayName\": \"Dev Um\", \"emailAddress\": \"dev1@empresa.com\"}}}]}";
+            mockServer.expect(requestTo(taskSearchUrl))
+                    .andRespond(withSuccess(taskSearchJson, MediaType.APPLICATION_JSON));
+
+            JiraSyncRequest request = JiraSyncRequest.builder()
+                    .jiraDomain(DOMAIN).projectKey(PROJECT_KEY).token("fake-token").build();
+
+            JiraProjectPreviewDto preview = service.previewProject(request);
+
+            assertEquals("Projeto Um", preview.getSquadName());
+            assertEquals(PROJECT_KEY, preview.getSquadId());
+            assertEquals(2, preview.getTotalCandidates());
+            assertTrue(preview.getMembers().stream().anyMatch(m -> "lead1".equals(m.getJiraAccountId())));
+            assertTrue(preview.getMembers().stream().anyMatch(m -> "dev1".equals(m.getJiraAccountId())));
+            mockServer.verify();
+        }
+
+        @Test
+        @DisplayName("Nao deve incluir conta de bot/integracao detectada por nome ou e-mail")
+        void previewProjectExcludesBotAccounts() {
+            String projectJson = "{"
+                    + "\"name\": \"Projeto Um\","
+                    + "\"lead\": {\"accountId\": \"bot1\", \"displayName\": \"Zendesk Integrador\", \"emailAddress\": \"bot@empresa.com\"},"
+                    + "\"roles\": {}"
+                    + "}";
+            mockServer.expect(requestTo("https://" + DOMAIN + "/rest/api/2/project/" + PROJECT_KEY))
+                    .andRespond(withSuccess(projectJson, MediaType.APPLICATION_JSON));
+            expectEmptyRolesAndComponents();
+
+            String taskSearchUrl = "https://" + DOMAIN + "/rest/api/2/search?jql=project%3D" + PROJECT_KEY
+                    + "+ORDER+BY+updated+DESC&fields=*all&expand=names&maxResults=100";
+            mockServer.expect(requestTo(taskSearchUrl))
+                    .andRespond(withSuccess("{\"issues\": []}", MediaType.APPLICATION_JSON));
+
+            JiraSyncRequest request = JiraSyncRequest.builder()
+                    .jiraDomain(DOMAIN).projectKey(PROJECT_KEY).token("fake-token").build();
+
+            JiraProjectPreviewDto preview = service.previewProject(request);
+
+            assertEquals(0, preview.getTotalCandidates());
+            mockServer.verify();
         }
     }
 }
