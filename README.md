@@ -260,6 +260,20 @@ export PORT=8002   # padrão — altere se necessário
 
 ---
 
+#### 1.5 Bootstrap do primeiro usuário ADMIN (passo manual, não automatizado)
+
+`User.role = ADMIN` é o tier de autorização de **sistema** — só serve pra liberar `/api/admin/**` (configurações globais, API keys, auditoria, etc). É completamente independente do cargo de negócio (Agile Master, Agile Coach, Tribe Lead...), que já vem certo do Jira via Profields.
+
+Não existe (e não deve existir) bootstrap automático de ADMIN — nenhum `CommandLineRunner`/seed grava esse valor. Depois do primeiro deploy, promova manualmente o primeiro administrador direto no banco:
+
+```sql
+UPDATE users SET role = 'ADMIN' WHERE email = '<email do primeiro admin>';
+```
+
+Isso é intencional: fica fora do fluxo de código de propósito, pra não existir nenhum caminho (endpoint, variável de ambiente, seed) que auto-promova alguém a admin de sistema. Trate como item do checklist de smoke-test pós-deploy (item 6 abaixo), não como algo a automatizar.
+
+---
+
 ### 2. Certificado SSL do Jira Corporativo (TOTVS)
 
 Atualmente o backend ignora toda validação SSL para se comunicar com o Jira da TOTVS (`jiraproducao.totvs.com.br`).
@@ -361,6 +375,7 @@ Execute este checklist após subir o servidor para confirmar que tudo está func
 | ✅ | Sync do squad funciona | Clicar em "Sincronizar" no Squad Pulse — dados devem aparecer |
 | ✅ | Acesso cruzado bloqueado | `curl GET /api/users/{outroUserId}/jira-config` sem o header `X-Caller-Id` → deve retornar `403` |
 | ✅ | `GET /users` bloqueado | `curl GET /api/users` sem `X-Admin-Key` → deve retornar `403` |
+| ✅ | Primeiro ADMIN de sistema promovido | `UPDATE users SET role='ADMIN' WHERE email='...'` (ver seção 1.5) — sem isso, ninguém acessa `/admin` no frontend |
 | ✅ | Slot legado `localStorage` limpo | Abrir DevTools → Application → Local Storage → não deve existir a chave `agileSpace_jira_config` |
 | ✅ | Frontend conecta no backend certo | Confirmar que `NEXT_PUBLIC_API_URL` aponta para o servidor de produção |
 

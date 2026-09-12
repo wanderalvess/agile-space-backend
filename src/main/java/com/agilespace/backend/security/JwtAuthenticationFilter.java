@@ -73,8 +73,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         String role = claims.hasNonNull("role") ? claims.get("role").asText() : "MEMBER";
 
-        if (request.getRequestURI().startsWith("/api/admin") && !"ADMIN".equalsIgnoreCase(role) && !"LEAD".equalsIgnoreCase(role)) {
-            reject(response, HttpServletResponse.SC_FORBIDDEN, "Acesso restrito a administradores e gestores");
+        if (request.getRequestURI().startsWith("/api/admin") && !"ADMIN".equalsIgnoreCase(role)) {
+            reject(response, HttpServletResponse.SC_FORBIDDEN, "Acesso restrito a administradores");
             return;
         }
 

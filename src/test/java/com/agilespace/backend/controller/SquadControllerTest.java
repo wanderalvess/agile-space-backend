@@ -192,7 +192,7 @@ public class SquadControllerTest {
     public void testSaveSquad_leadershipJobTitle_succeeds() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-other");
+        caller.setSquadId("DDWMISSI");
         caller.setJobTitle("Agile Master");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
         Squad squad = new Squad();
@@ -201,6 +201,21 @@ public class SquadControllerTest {
         ResponseEntity<Squad> response = controller.saveSquad("DDWMISSI", squad, memberRequest("user-1"));
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
+    }
+
+    @Test
+    public void testSaveSquad_leadershipJobTitle_otherSquad_forbidden() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-other");
+        caller.setJobTitle("Agile Master");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+        when(service.getMembers("DDWMISSI")).thenReturn(java.util.List.of());
+        when(service.getMembers("MISSI")).thenReturn(java.util.List.of());
+        Squad squad = new Squad();
+
+        assertThrows(ResponseStatusException.class,
+                () -> controller.saveSquad("DDWMISSI", squad, memberRequest("user-1")));
     }
 
     @Test
