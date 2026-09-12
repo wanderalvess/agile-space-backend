@@ -34,6 +34,9 @@ public class PokerRound {
     @Builder.Default
     private Boolean skipped = false;
 
+    @Builder.Default
+    private Boolean cancelled = false;
+
     @Column(columnDefinition = "TEXT")
     private String note;
 

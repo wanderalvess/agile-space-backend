@@ -10,7 +10,9 @@ spring:
     enabled: true
     clean-disabled: true
     locations: classpath:db/migration
-    baseline-on-migrate: false
+    # baseline-on-migrate/out-of-order herdados de application.yml (V1_1__baseline_schema.sql
+    # cobre o cenário de banco com schema pré-existente sem histórico Flyway, sem precisar de
+    # baseline manual).
 
 server:
   error:
@@ -31,3 +33,7 @@ springdoc:
     enabled: false
   api-docs:
     enabled: false
+
+app:
+  security:
+    encryption-key: ${APP_ENCRYPTION_SECRET}
