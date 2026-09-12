@@ -16,6 +16,10 @@ spring:
   flyway:
     locations: classpath:db/migration
     baseline-on-migrate: false
+    # V1_1__baseline_schema.sql foi inserida depois de V1-V7 já existirem em produção/dev.
+    # out-of-order permite que bancos que já rodaram até V7 apliquem essa migration "atrasada"
+    # (idempotente, só cria o que ainda não existe) sem travar em erro de ordem do Flyway.
+    out-of-order: true
   ai:
     mcp:
       server:

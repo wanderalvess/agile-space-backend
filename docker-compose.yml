@@ -28,6 +28,13 @@ services:
       DB_URL: jdbc:postgresql://db:5432/espacoagil
       DB_USERNAME: postgres
       DB_PASSWORD: postgres
+      # Sem isso, "docker compose up" falha no boot (placeholder nao resolvido) e o profile
+      # prod documentado no DEPLOYMENT.md (SPRING_PROFILES_ACTIVE=prod docker-compose up -d)
+      # nunca chegava a ativar o profile — variavel de ambiente do host nao propagava pro
+      # container porque nao estava referenciada aqui.
+      APP_ENCRYPTION_SECRET: ${APP_ENCRYPTION_SECRET:-AgileSpaceDevMasterKey2026LocalOnly#AES}
+      APP_ADMIN_KEY: ${APP_ADMIN_KEY:-}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
     ports:
       - "8002:8002"
     healthcheck:
