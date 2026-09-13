@@ -30,7 +30,7 @@ public class JiraServiceTest {
     @BeforeEach
     public void setup() {
         service = new JiraService();
-        RestTemplate restTemplate = (RestTemplate) ReflectionTestUtils.getField(service, "restTemplate");
+        RestTemplate restTemplate = (RestTemplate) ReflectionTestUtils.getField(service, "strictRestTemplate");
         server = MockRestServiceServer.createServer(restTemplate);
     }
 
@@ -152,6 +152,43 @@ public class JiraServiceTest {
         JsonNode worklogs = mapper.readTree(response.getBody())
                 .get("issues").get(0).get("fields").get("worklog").get("worklogs");
         assertEquals(1, worklogs.size());
+    }
+
+    @Test
+    public void testSearchIssuesRetriesOn429ThenSucceeds() {
+        server.expect(requestTo(containsString("/rest/api/2/search")))
+                .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS).header("Retry-After", "0"));
+        server.expect(requestTo(containsString("/rest/api/2/search")))
+                .andRespond(withSuccess("{\"issues\":[]}", MediaType.APPLICATION_JSON));
+
+        ResponseEntity<String> response = service.searchIssues(searchRequest("project = DDW"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        server.verify();
+    }
+
+    @Test
+    public void testSearchIssuesGivesUpAfterMaxRetriesOn429() {
+        for (int i = 0; i < 4; i++) {
+            server.expect(requestTo(containsString("/rest/api/2/search")))
+                    .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS).header("Retry-After", "0"));
+        }
+
+        ResponseEntity<String> response = service.searchIssues(searchRequest("project = DDW"));
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, response.getStatusCode());
+        server.verify();
+    }
+
+    @Test
+    public void testSearchIssuesBlocksLoopbackDomain() {
+        JiraSearchRequest request = searchRequest("project = DDW");
+        request.setDomain("127.0.0.1");
+
+        ResponseEntity<String> response = service.searchIssues(request);
+
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
+        assertThat(response.getBody(), containsString("não permitido"));
     }
 
     @Test
