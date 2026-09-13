@@ -65,4 +65,14 @@ public class RetroCard {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "reactions", columnDefinition = "jsonb")
     private JsonNode reactions;
+
+    // Histórico de ideias fundidas neste card (conteúdo das origens, na ordem
+    // em que foram fundidas) — content nunca é reescrito numa fusão, só isso
+    // aqui cresce. Renderizado como linha do tempo no frontend.
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "retro_card_original_texts", joinColumns = @JoinColumn(name = "card_id"))
+    @Column(name = "text", columnDefinition = "TEXT")
+    @OrderColumn(name = "position")
+    @Builder.Default
+    private List<String> originalTexts = new ArrayList<>();
 }
