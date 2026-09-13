@@ -74,6 +74,11 @@ public class RetroBoard {
     @Builder.Default
     private Boolean autoSortOnVoteEnd = false;
 
+    // Quantos cards cada participante pode votar no total do board (dot-voting).
+    // Null/0 = sem limite. Default 5 pra boards novos.
+    @Builder.Default
+    private Integer maxVotesPerParticipant = 5;
+
     // --- Check-in inicial (health-check configurável pelo facilitador) ---
     @Builder.Default
     private Boolean healthCheckEnabled = false;
