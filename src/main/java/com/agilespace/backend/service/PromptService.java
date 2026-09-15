@@ -73,13 +73,12 @@ public class PromptService {
         if (skillPrompt.getType() == null) {
             skillPrompt.setType("skill");
         }
+        // Upsert só considera skill do mesmo autor — sem fallback por título global, pra
+        // uma API key não sobrescrever skill de outro usuário só por colisão de nome.
         Optional<Prompt> existingOpt = Optional.empty();
         if (skillPrompt.getAuthorId() != null && skillPrompt.getTitle() != null) {
             existingOpt = promptRepository.findFirstByAuthorIdAndTitleAndType(
                     skillPrompt.getAuthorId(), skillPrompt.getTitle(), "skill");
-        }
-        if (existingOpt.isEmpty() && skillPrompt.getTitle() != null) {
-            existingOpt = promptRepository.findFirstByTitleAndType(skillPrompt.getTitle(), "skill");
         }
 
         if (existingOpt.isPresent()) {

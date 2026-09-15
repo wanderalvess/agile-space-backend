@@ -22,8 +22,6 @@ public interface PromptRepository extends JpaRepository<Prompt, UUID> {
 
     Optional<Prompt> findFirstByAuthorIdAndTitleAndType(String authorId, String title, String type);
 
-    Optional<Prompt> findFirstByTitleAndType(String title, String type);
-
     @Query("SELECT p FROM Prompt p WHERE p.visibility = :visibility AND " +
            "(LOWER(p.title) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
            "LOWER(p.description) LIKE LOWER(CONCAT('%', :query, '%')) OR " +

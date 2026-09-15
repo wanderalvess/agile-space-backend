@@ -135,8 +135,6 @@ class PromptServiceTest {
 
             when(promptRepository.findFirstByAuthorIdAndTitleAndType("user-1", "test-skill", "skill"))
                     .thenReturn(Optional.empty());
-            when(promptRepository.findFirstByTitleAndType("test-skill", "skill"))
-                    .thenReturn(Optional.empty());
             when(promptRepository.save(any(Prompt.class))).thenAnswer(i -> i.getArgument(0));
 
             Prompt result = service.saveOrUpdateSkill(newSkill);
@@ -184,8 +182,6 @@ class PromptServiceTest {
             Prompt s2 = Prompt.builder().title("s2").type("prompt").authorId("u1").build();
 
             when(promptRepository.findFirstByAuthorIdAndTitleAndType("u1", "s1", "skill"))
-                    .thenReturn(Optional.empty());
-            when(promptRepository.findFirstByTitleAndType("s1", "skill"))
                     .thenReturn(Optional.empty());
             when(promptRepository.save(any(Prompt.class))).thenAnswer(i -> i.getArgument(0));
 
