@@ -141,7 +141,7 @@ public class PromptHubApiV1Controller {
                 if (u.getName() != null && !u.getName().isBlank()) authorName = u.getName();
                 if (u.getRole() != null && !u.getRole().isBlank()) authorRole = u.getRole();
                 if (authorSquad == null && u.getSquadId() != null) authorSquad = u.getSquadId();
-                authorAvatar = u.getAvatarUrl();
+                authorAvatar = u.getAvatarSeed();
             }
         }
 
