@@ -51,6 +51,12 @@ public class PromptController {
         return ResponseEntity.status(HttpStatus.CREATED).body(promptService.createPromptsBatch(prompts));
     }
 
+    /** Upsert de skill por autor+título — usado pelo fallback item-a-item do import em lote (SkillImportDialog). */
+    @PostMapping("/skill-upsert")
+    public ResponseEntity<Prompt> upsertSkill(@Valid @RequestBody Prompt prompt) {
+        return ResponseEntity.ok(promptService.saveOrUpdateSkill(prompt));
+    }
+
     @PutMapping("/{id}")
     public ResponseEntity<Prompt> updatePrompt(@PathVariable("id") UUID id, @Valid @RequestBody Prompt prompt) {
         try {
