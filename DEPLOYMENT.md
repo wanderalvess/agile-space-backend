@@ -70,10 +70,31 @@ curl http://localhost:8002/api/v1/knowledge/search \
 - `KNOWLEDGE_WRITE` — Create/update knowledge documents
 - `SQUAD_READ` — Read squad/project data
 - `SQUAD_WRITE` — Modify squad data
-- `PROMPTHUB_READ` — Read prompt collections
-- `PROMPTHUB_WRITE` — Create/update prompts
+- `PROMPTHUB_READ` — Read prompt collections and public prompts
+- `PROMPTHUB_WRITE` — Create/update prompts and import agent skills (`SKILL.md`)
 - `POKER_READ` — View poker sessions
 - `POKER_WRITE` — Create/manage poker sessions
+
+#### Uploading Skills via REST API (`POST /api/v1/prompt-hub/items`)
+Agents and external automation scripts can publish or update skills using an API key with `PROMPTHUB_WRITE`:
+
+```bash
+curl -X POST http://localhost:8002/api/v1/prompt-hub/items \
+  -H "X-Api-Key: ask_your_generated_key_here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "---\nname: map-java-project\ndescription: Diagnóstico arquitetural de projetos Spring Boot\n---\n# Guia de Mapeamento Java...",
+    "type": "skill",
+    "visibility": "public"
+  }'
+```
+- **Automatic Frontmatter Parsing:** Title and description are extracted from the YAML frontmatter block (`---`) if omitted.
+- **Idempotent Upsert:** If a skill with the same title already exists for the author or workspace, its content, description, and tags are updated without duplicate entries.
+
+#### Uploading Skills via MCP (`/mcp`)
+The MCP Server exposes two dedicated tools for AI agents:
+1. `importSkill(name?, content, description?, tags?, visibility?)`: Uploads or updates a single skill.
+2. `batchImportSkills(skillsJson)`: Uploads multiple skills from a JSON array in a single tool call.
 
 ### Container Deployment
 

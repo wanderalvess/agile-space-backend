@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
@@ -18,6 +19,10 @@ public interface PromptRepository extends JpaRepository<Prompt, UUID> {
     Page<Prompt> findByAuthorId(String authorId, Pageable pageable);
 
     Page<Prompt> findByAuthorIdAndVisibility(String authorId, String visibility, Pageable pageable);
+
+    Optional<Prompt> findFirstByAuthorIdAndTitleAndType(String authorId, String title, String type);
+
+    Optional<Prompt> findFirstByTitleAndType(String title, String type);
 
     @Query("SELECT p FROM Prompt p WHERE p.visibility = :visibility AND " +
            "(LOWER(p.title) LIKE LOWER(CONCAT('%', :query, '%')) OR " +

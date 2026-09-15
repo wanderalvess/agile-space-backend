@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -65,6 +66,54 @@ public class PromptService {
         prompt.setUseCount(0);
         prompt.setForkCount(0);
         return promptRepository.save(prompt);
+    }
+
+    @Transactional
+    public Prompt saveOrUpdateSkill(Prompt skillPrompt) {
+        if (skillPrompt.getType() == null) {
+            skillPrompt.setType("skill");
+        }
+        Optional<Prompt> existingOpt = Optional.empty();
+        if (skillPrompt.getAuthorId() != null && skillPrompt.getTitle() != null) {
+            existingOpt = promptRepository.findFirstByAuthorIdAndTitleAndType(
+                    skillPrompt.getAuthorId(), skillPrompt.getTitle(), "skill");
+        }
+        if (existingOpt.isEmpty() && skillPrompt.getTitle() != null) {
+            existingOpt = promptRepository.findFirstByTitleAndType(skillPrompt.getTitle(), "skill");
+        }
+
+        if (existingOpt.isPresent()) {
+            Prompt existing = existingOpt.get();
+            existing.setContent(skillPrompt.getContent());
+            if (skillPrompt.getDescription() != null && !skillPrompt.getDescription().isBlank()) {
+                existing.setDescription(skillPrompt.getDescription());
+            }
+            if (skillPrompt.getTags() != null && !skillPrompt.getTags().isEmpty()) {
+                existing.setTags(skillPrompt.getTags());
+            }
+            if (skillPrompt.getVisibility() != null) {
+                existing.setVisibility(skillPrompt.getVisibility());
+            }
+            if (skillPrompt.getStatus() != null) {
+                existing.setStatus(skillPrompt.getStatus());
+            }
+            return promptRepository.save(existing);
+        }
+
+        return createPrompt(skillPrompt);
+    }
+
+    @Transactional
+    public List<Prompt> createPromptsBatch(List<Prompt> prompts) {
+        return prompts.stream()
+                .map(p -> {
+                    if ("skill".equalsIgnoreCase(p.getType())) {
+                        return saveOrUpdateSkill(p);
+                    } else {
+                        return createPrompt(p);
+                    }
+                })
+                .collect(Collectors.toList());
     }
 
     @Transactional

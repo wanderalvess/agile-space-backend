@@ -46,6 +46,11 @@ public class PromptController {
         return ResponseEntity.status(HttpStatus.CREATED).body(promptService.createPrompt(prompt));
     }
 
+    @PostMapping("/batch")
+    public ResponseEntity<List<Prompt>> createPromptsBatch(@RequestBody List<Prompt> prompts) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(promptService.createPromptsBatch(prompts));
+    }
+
     @PutMapping("/{id}")
     public ResponseEntity<Prompt> updatePrompt(@PathVariable("id") UUID id, @Valid @RequestBody Prompt prompt) {
         try {

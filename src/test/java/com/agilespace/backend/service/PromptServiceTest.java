@@ -122,5 +122,77 @@ class PromptServiceTest {
             assertNotNull(saved.getPrompt());
             assertEquals(promptId, saved.getPrompt().getId());
         }
+
+        @Test
+        @DisplayName("Deve salvar nova skill quando não existir duplicata anterior")
+        void shouldCreateNewSkillWhenNotExists() {
+            Prompt newSkill = Prompt.builder()
+                    .title("test-skill")
+                    .content("---\nname: test-skill\n---\nbody")
+                    .authorId("user-1")
+                    .type("skill")
+                    .build();
+
+            when(promptRepository.findFirstByAuthorIdAndTitleAndType("user-1", "test-skill", "skill"))
+                    .thenReturn(Optional.empty());
+            when(promptRepository.findFirstByTitleAndType("test-skill", "skill"))
+                    .thenReturn(Optional.empty());
+            when(promptRepository.save(any(Prompt.class))).thenAnswer(i -> i.getArgument(0));
+
+            Prompt result = service.saveOrUpdateSkill(newSkill);
+
+            assertNotNull(result);
+            assertEquals("test-skill", result.getTitle());
+            verify(promptRepository).save(newSkill);
+        }
+
+        @Test
+        @DisplayName("Deve atualizar skill existente com mesmo autor e título (upsert)")
+        void shouldUpdateExistingSkill() {
+            Prompt existing = Prompt.builder()
+                    .id(UUID.randomUUID())
+                    .title("test-skill")
+                    .content("old content")
+                    .description("old desc")
+                    .authorId("user-1")
+                    .type("skill")
+                    .build();
+
+            Prompt incoming = Prompt.builder()
+                    .title("test-skill")
+                    .content("new content")
+                    .description("new desc")
+                    .authorId("user-1")
+                    .type("skill")
+                    .build();
+
+            when(promptRepository.findFirstByAuthorIdAndTitleAndType("user-1", "test-skill", "skill"))
+                    .thenReturn(Optional.of(existing));
+            when(promptRepository.save(any(Prompt.class))).thenAnswer(i -> i.getArgument(0));
+
+            Prompt result = service.saveOrUpdateSkill(incoming);
+
+            assertEquals("new content", result.getContent());
+            assertEquals("new desc", result.getDescription());
+            assertEquals(existing.getId(), result.getId());
+        }
+
+        @Test
+        @DisplayName("Deve criar lista de prompts/skills em lote")
+        void shouldCreatePromptsBatch() {
+            Prompt s1 = Prompt.builder().title("s1").type("skill").authorId("u1").build();
+            Prompt s2 = Prompt.builder().title("s2").type("prompt").authorId("u1").build();
+
+            when(promptRepository.findFirstByAuthorIdAndTitleAndType("u1", "s1", "skill"))
+                    .thenReturn(Optional.empty());
+            when(promptRepository.findFirstByTitleAndType("s1", "skill"))
+                    .thenReturn(Optional.empty());
+            when(promptRepository.save(any(Prompt.class))).thenAnswer(i -> i.getArgument(0));
+
+            List<Prompt> result = service.createPromptsBatch(List.of(s1, s2));
+
+            assertEquals(2, result.size());
+            verify(promptRepository, times(2)).save(any(Prompt.class));
+        }
     }
 }

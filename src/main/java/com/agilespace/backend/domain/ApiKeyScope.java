@@ -12,6 +12,7 @@ public enum ApiKeyScope {
     KNOWLEDGE_WRITE,
     SQUAD_READ,
     PROMPTHUB_READ,
+    PROMPTHUB_WRITE,
     POKER_READ,
     POKER_WRITE;
 

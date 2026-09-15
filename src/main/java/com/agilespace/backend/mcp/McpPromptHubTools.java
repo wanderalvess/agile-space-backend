@@ -4,6 +4,9 @@ import com.agilespace.backend.domain.ApiKeyScope;
 import com.agilespace.backend.domain.Prompt;
 import com.agilespace.backend.domain.PromptCollection;
 import com.agilespace.backend.service.PromptService;
+import com.agilespace.backend.repository.UserRepository;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.hibernate.Hibernate;
 import org.springframework.ai.chat.model.ToolContext;
@@ -14,20 +17,22 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.UUID;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * Ferramentas MCP do Prompt Hub (iniciativas, prompts, gems). Usa
- * PromptService.listPublicPrompts (não o listPrompts genérico) — esse restringe a
- * visibility="public" mesmo quando authorId é informado, então uma API key MCP só
- * enxerga o que qualquer usuário anônimo/externo já veria.
- * Sem tool de escrita por ora (criar/editar prompt fica só via /api/prompts com JWT).
+ * Ferramentas MCP do Prompt Hub (iniciativas, prompts, gems, skills).
+ * Leitura: listPrompts, getPrompt, listPromptCollections, getPromptCollection (PROMPTHUB_READ).
+ * Escrita: importSkill, batchImportSkills (PROMPTHUB_WRITE) para ingestão automatizada por IAs.
  */
 @Component
 @RequiredArgsConstructor
 public class McpPromptHubTools {
 
     private final PromptService promptService;
+    private final UserRepository userRepository;
+    private final ObjectMapper objectMapper;
 
     @Tool(description = "Lista prompts/iniciativas do Prompt Hub (público), com busca textual opcional ou filtro por autor")
     public PromptPage listPrompts(
@@ -107,5 +112,143 @@ public class McpPromptHubTools {
                 .filter(p -> "public".equals(p.getVisibility()))
                 .collect(java.util.stream.Collectors.toList()));
         return collection;
+    }
+
+    public record BatchImportResult(int totalImported, List<String> importedTitles) {
+    }
+
+    public record BatchSkillDto(String name, String content, String description, String tags, String visibility) {
+    }
+
+    @Tool(description = "Importa ou atualiza uma skill (formato Agent Skills / SKILL.md) no Prompt Hub")
+    public Prompt importSkill(
+            @ToolParam(description = "Nome/título da skill (ex: map-java-project); se omitido, extrai do frontmatter", required = false) String name,
+            @ToolParam(description = "Conteúdo Markdown completo da skill, preferencialmente com frontmatter YAML delimitado por ---") String content,
+            @ToolParam(description = "Descrição resumida da skill (opcional, extrai do frontmatter)", required = false) String description,
+            @ToolParam(description = "Tags separadas por vírgula (ex: java, spring, testes)", required = false) String tags,
+            @ToolParam(description = "Visibilidade: 'public' (padrão) ou 'private'", required = false) String visibility,
+            ToolContext toolContext) {
+        ApiKeyContext ctx = ApiKeyContext.from(toolContext);
+        ctx.requireScope(ApiKeyScope.PROMPTHUB_WRITE);
+
+        Prompt skillPrompt = buildSkillPrompt(ctx, name, content, description, tags, visibility);
+        Prompt saved = promptService.saveOrUpdateSkill(skillPrompt);
+        Hibernate.initialize(saved.getTags());
+        return saved;
+    }
+
+    @Tool(description = "Importa múltiplas skills em lote para o Prompt Hub a partir de um JSON array de objetos {name, content, description, tags, visibility}")
+    public BatchImportResult batchImportSkills(
+            @ToolParam(description = "Array JSON contendo as skills a importar") String skillsJson,
+            ToolContext toolContext) {
+        ApiKeyContext ctx = ApiKeyContext.from(toolContext);
+        ctx.requireScope(ApiKeyScope.PROMPTHUB_WRITE);
+
+        List<BatchSkillDto> items;
+        try {
+            items = objectMapper.readValue(skillsJson, new TypeReference<List<BatchSkillDto>>() {});
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Erro ao processar JSON de skills: " + e.getMessage(), e);
+        }
+
+        List<String> imported = new ArrayList<>();
+        for (BatchSkillDto item : items) {
+            Prompt p = buildSkillPrompt(ctx, item.name(), item.content(), item.description(), item.tags(), item.visibility());
+            Prompt saved = promptService.saveOrUpdateSkill(p);
+            imported.add(saved.getTitle());
+        }
+
+        return new BatchImportResult(imported.size(), imported);
+    }
+
+    private Prompt buildSkillPrompt(ApiKeyContext ctx, String name, String content, String description, String tags, String visibility) {
+        String resolvedName = (name != null && !name.isBlank()) ? name : extractFrontmatterField(content, "name");
+        if (resolvedName == null || resolvedName.isBlank()) {
+            resolvedName = "Nova Skill";
+        }
+
+        String resolvedDesc = (description != null && !description.isBlank()) ? description : extractFrontmatterField(content, "description");
+
+        String authorId = ctx.ownerUserIdOrFallback("mcp-agent");
+        String authorName = "Agente MCP";
+        String authorRole = "AI Assistant";
+        String authorSquad = ctx.squadId();
+        String authorAvatar = null;
+
+        if (ctx.ownerUserId() != null) {
+            var userOpt = userRepository.findById(ctx.ownerUserId());
+            if (userOpt.isPresent()) {
+                var u = userOpt.get();
+                if (u.getName() != null && !u.getName().isBlank()) authorName = u.getName();
+                if (u.getRole() != null && !u.getRole().isBlank()) authorRole = u.getRole();
+                if (authorSquad == null && u.getSquadId() != null) authorSquad = u.getSquadId();
+                authorAvatar = u.getAvatarUrl();
+            }
+        }
+
+        return Prompt.builder()
+                .title(resolvedName)
+                .description(resolvedDesc)
+                .content(content)
+                .type("skill")
+                .visibility((visibility != null && !visibility.isBlank()) ? visibility : "public")
+                .status("producao")
+                .impact("medio")
+                .authorId(authorId)
+                .authorName(authorName)
+                .authorRole(authorRole)
+                .authorSquad(authorSquad)
+                .authorAvatar(authorAvatar)
+                .tags(parseTags(tags))
+                .build();
+    }
+
+    private static final Pattern FRONTMATTER_PATTERN = Pattern.compile("^\\s*---\\r?\\n([\\s\\S]*?)\\r?\\n---", Pattern.MULTILINE);
+
+    private static String extractFrontmatterField(String content, String field) {
+        if (content == null) return null;
+        Matcher matcher = FRONTMATTER_PATTERN.matcher(content);
+        if (!matcher.find()) return null;
+        String block = matcher.group(1);
+        String[] lines = block.split("\\r?\\n");
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            Matcher fieldMatcher = Pattern.compile("^" + Pattern.quote(field) + "\\s*:\\s*(.*)$", Pattern.CASE_INSENSITIVE).matcher(line);
+            if (fieldMatcher.find()) {
+                String val = fieldMatcher.group(1).trim().replaceAll("^[\"']|[\"']$", "");
+                if (val.equals(">-") || val.equals(">") || val.equals("|") || val.equals("|-") || val.isEmpty()) {
+                    List<String> multiline = new ArrayList<>();
+                    for (int j = i + 1; j < lines.length; j++) {
+                        String nextLine = lines[j];
+                        if (nextLine.matches("^\\s{2,}.*")) {
+                            multiline.add(nextLine.trim());
+                        } else if (nextLine.trim().isEmpty()) {
+                            // linha em branco permitida no bloco
+                        } else {
+                            break;
+                        }
+                    }
+                    if (!multiline.isEmpty()) {
+                        return String.join(" ", multiline).trim();
+                    }
+                }
+                return val.isEmpty() ? null : val;
+            }
+        }
+        return null;
+    }
+
+    private static Set<String> parseTags(String tags) {
+        Set<String> result = new HashSet<>();
+        result.add("skill");
+        if (tags != null && !tags.isBlank()) {
+            for (String tag : tags.split(",")) {
+                String trimmed = tag.trim().replace("#", "").toLowerCase();
+                if (!trimmed.isEmpty()) {
+                    result.add(trimmed);
+                }
+            }
+        }
+        return result;
     }
 }
