@@ -41,6 +41,17 @@ public class JiraController {
         return jiraService.getFields(domain, token);
     }
 
+    @PostMapping("/attachment")
+    public ResponseEntity<?> getAttachment(@RequestBody java.util.Map<String, String> payload) {
+        String domain = payload.get("domain");
+        String token = payload.get("token");
+        String url = payload.get("url");
+        if (domain == null || token == null || url == null) {
+            return ResponseEntity.badRequest().body("{\"error\": \"Domain, Token e url são obrigatórios.\"}");
+        }
+        return jiraService.getAttachment(domain, token, url);
+    }
+
     @PostMapping("/myself")
     public ResponseEntity<String> getMyself(@RequestBody java.util.Map<String, String> payload) {
         String domain = payload.get("domain");

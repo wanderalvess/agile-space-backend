@@ -115,14 +115,14 @@ public class JiraService {
      * certificado válido, e preserva compatibilidade com o Jira corporativo
      * que motivou o trust-all original.
      */
-    private ResponseEntity<String> exchangeSecure(URI uri, HttpEntity<Void> entity) {
+    private <T> ResponseEntity<T> exchangeSecure(URI uri, HttpEntity<Void> entity, Class<T> responseType) {
         assertNotBlockedHost(uri);
         try {
-            return exchangeWithRetry(strictRestTemplate, uri, entity);
+            return exchangeWithRetry(strictRestTemplate, uri, entity, responseType);
         } catch (org.springframework.web.client.ResourceAccessException e) {
             if (isTlsTrustFailure(e)) {
                 log.warn("TLS handshake falhou com validação padrão para {} — tentando com trust-all (esperado só para Jira corporativo com certificado próprio): {}", uri.getHost(), e.getMessage());
-                return exchangeWithRetry(trustAllRestTemplate, uri, entity);
+                return exchangeWithRetry(trustAllRestTemplate, uri, entity, responseType);
             }
             throw e;
         }
@@ -145,11 +145,11 @@ public class JiraService {
      * respeitando o header Retry-After quando presente. Sem isso, um 429 durante
      * o sync do squad falha o run inteiro e força FULL sync na próxima tentativa.
      */
-    private ResponseEntity<String> exchangeWithRetry(RestTemplate restTemplate, URI uri, HttpEntity<Void> entity) {
+    private <T> ResponseEntity<T> exchangeWithRetry(RestTemplate restTemplate, URI uri, HttpEntity<Void> entity, Class<T> responseType) {
         int attempt = 0;
         while (true) {
             try {
-                return restTemplate.exchange(uri, HttpMethod.GET, entity, String.class);
+                return restTemplate.exchange(uri, HttpMethod.GET, entity, responseType);
             } catch (org.springframework.web.client.HttpStatusCodeException e) {
                 if (e.getStatusCode().value() == 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
                     long waitMs = retryAfterMillis(e, attempt);
@@ -216,7 +216,7 @@ public class JiraService {
         try {
             log.info("Fetching complete worklogs for {} (truncated in search response)...", key);
             String wlUrl = "https://" + cleanDomain + "/rest/api/2/issue/" + key + "/worklog";
-            ResponseEntity<String> wlResponse = exchangeSecure(new URI(wlUrl), entity);
+            ResponseEntity<String> wlResponse = exchangeSecure(new URI(wlUrl), entity, String.class);
             JsonNode wlRoot = objectMapper.readTree(wlResponse.getBody());
             JsonNode wlArray = wlRoot.get("worklogs");
             return (wlArray != null && wlArray.isArray()) ? wlArray : null;
@@ -272,7 +272,7 @@ public class JiraService {
 
         try {
             log.info("Proxying JQL search to Jira URI: {}", jiraUri);
-            ResponseEntity<String> response = exchangeSecure(jiraUri, entity);
+            ResponseEntity<String> response = exchangeSecure(jiraUri, entity, String.class);
             String body = response.getBody();
             
             if (body != null) {
@@ -341,7 +341,7 @@ public class JiraService {
 
         try {
             log.info("Fetching Jira field metadata from URI: {}", jiraUri);
-            ResponseEntity<String> response = exchangeSecure(jiraUri, entity);
+            ResponseEntity<String> response = exchangeSecure(jiraUri, entity, String.class);
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.error("Jira field metadata failed with status: {}, body: {}", e.getStatusCode(), e.getResponseBodyAsString());
@@ -381,7 +381,7 @@ public class JiraService {
 
         try {
             log.info("Fetching Jira sprint metadata from URI: {}", jiraUri);
-            ResponseEntity<String> response = exchangeSecure(jiraUri, entity);
+            ResponseEntity<String> response = exchangeSecure(jiraUri, entity, String.class);
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.error("Jira sprint metadata failed with status: {}, body: {}", e.getStatusCode(), e.getResponseBodyAsString());
@@ -390,6 +390,58 @@ public class JiraService {
             log.error("Jira sprint metadata failed", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("{\"error\": \"Erro ao buscar sprint no Jira: " + e.getMessage() + "\"}");
+        }
+    }
+
+    /**
+     * Busca um anexo/thumbnail do próprio Jira (/secure/attachment/...,
+     * /secure/thumbnail/...) e devolve os bytes com o Content-Type original —
+     * usado pelo Modo Teatro do Showcase pra embutir evidência hospedada no
+     * Jira, que como <img> cross-origin nunca carrega (Jira exige
+     * sessão/cookie que o navegador não envia num request de terceiro).
+     */
+    public ResponseEntity<?> getAttachment(String domain, String token, String attachmentUrl) {
+        String cleanDomain = domain.trim().replace("https://", "").replace("http://", "");
+
+        URI parsedUrl;
+        try {
+            parsedUrl = new URI(attachmentUrl);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body("{\"error\": \"URL de anexo inválida.\"}");
+        }
+        // A URL do anexo precisa pertencer ao MESMO domínio configurado — sem essa
+        // checagem, esse endpoint vira um proxy autenticado aberto: qualquer host
+        // https informado receberia o PAT do usuário no header Authorization.
+        if (!"https".equalsIgnoreCase(parsedUrl.getScheme()) || !cleanDomain.equalsIgnoreCase(parsedUrl.getHost())) {
+            return ResponseEntity.badRequest().body("{\"error\": \"URL de anexo fora do domínio Jira configurado.\"}");
+        }
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", "Bearer " + token.trim());
+        headers.set("Accept", "image/*");
+        headers.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+        try {
+            log.info("Fetching Jira attachment from URI: {}", parsedUrl);
+            ResponseEntity<byte[]> response = exchangeSecure(parsedUrl, entity, byte[].class);
+            MediaType contentType = response.getHeaders().getContentType();
+            if (contentType == null || !"image".equals(contentType.getType())) {
+                // Token inválido/sem permissão costuma devolver 200 com a página de
+                // login em HTML, não um 401/403 — sem essa checagem isso "funcionaria"
+                // como se fosse uma imagem válida e quebraria só no <img> do cliente.
+                return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body("{\"error\": \"O anexo retornado não é uma imagem válida.\"}");
+            }
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setContentType(contentType);
+            responseHeaders.setCacheControl("private, max-age=300");
+            return new ResponseEntity<>(response.getBody(), responseHeaders, HttpStatus.OK);
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            log.error("Jira attachment fetch failed with status: {}", e.getStatusCode());
+            return ResponseEntity.status(e.getStatusCode()).body("{\"error\": \"Erro do Jira: " + e.getStatusCode().value() + "\"}");
+        } catch (Exception e) {
+            log.error("Jira attachment fetch failed", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("{\"error\": \"Erro ao buscar anexo do Jira: " + e.getMessage() + "\"}");
         }
     }
 
@@ -414,7 +466,7 @@ public class JiraService {
 
         try {
             log.info("Fetching authenticated user info from Jira URI: {}", jiraUri);
-            ResponseEntity<String> response = exchangeSecure(jiraUri, entity);
+            ResponseEntity<String> response = exchangeSecure(jiraUri, entity, String.class);
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.error("Jira myself failed with status: {}, body: {}", e.getStatusCode(), e.getResponseBodyAsString());
@@ -455,7 +507,7 @@ public class JiraService {
 
         try {
             log.info("Fetching Greenhopper work data from URI: {}", jiraUri);
-            ResponseEntity<String> response = exchangeSecure(jiraUri, entity);
+            ResponseEntity<String> response = exchangeSecure(jiraUri, entity, String.class);
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.error("Greenhopper work data failed with status: {}, body: {}", e.getStatusCode(), e.getResponseBodyAsString());
