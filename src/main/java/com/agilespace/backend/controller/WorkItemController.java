@@ -44,23 +44,26 @@ public class WorkItemController {
     }
 
     /**
-     * Só ADMIN/LEAD ou um membro já vinculado a esta squad (User.squadId, defaultProjectId, etc.)
-     * pode gravar work_items dela. Mesma regra de SquadController.requireSquadWriteAccess.
+     * Núcleo comum de leitura E escrita: ADMIN/LEAD, ou um caller já vinculado a esta squad
+     * (User.squadId/defaultProjectId, papel de projeto via ProjectMemberRoleRepository, ou
+     * jobTitle de liderança quando já pertence à squad). Sem efeito colateral — nunca grava
+     * nada — por isso serve tanto pra decidir leitura quanto como primeira parte de
+     * requireSquadWriteAccess. Mesmo padrão de SquadController.matchesSquad.
      */
-    private void requireSquadWriteAccess(String squadId, HttpServletRequest request) {
+    private boolean matchesSquad(String squadId, HttpServletRequest request) {
         String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
         if ("ADMIN".equalsIgnoreCase(role) || "LEAD".equalsIgnoreCase(role)) {
-            return;
+            return true;
         }
         String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
         User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
         if (caller == null) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a membros desta squad ou administradores.");
+            return false;
         }
 
         // 0. Papel administrativo no banco
         if ("ADMIN".equalsIgnoreCase(caller.getRole()) || "LEAD".equalsIgnoreCase(caller.getRole())) {
-            return;
+            return true;
         }
 
         // 1. Checagem direta por squadId ou defaultProjectId
@@ -76,11 +79,14 @@ public class WorkItemController {
         // 0.1 Cargos de liderança/governança de squad — só vale se o caller já pertence a este squad
         // (senão qualquer usuário autodeclarando jobTitle de liderança ganharia acesso a squads alheios)
         if (matches && isLeadershipJobTitle(caller.getJobTitle())) {
-            return;
+            return true;
+        }
+        if (matches) {
+            return true;
         }
 
         // 2.1 Checagem via papéis de membros de projeto (Profields / ProjectMemberRole)
-        if (!matches && caller.getEmail() != null && !caller.getEmail().isBlank()) {
+        if (caller.getEmail() != null && !caller.getEmail().isBlank()) {
             matches = projectMemberRoleRepository.findByEmailIgnoreCase(caller.getEmail().trim())
                     .stream()
                     .anyMatch(r -> r.getProjectId() != null && (
@@ -90,21 +96,48 @@ public class WorkItemController {
                     ));
         }
 
-        // 3. Auto-vinculação caso não possua squad
+        return matches;
+    }
+
+    /**
+     * Leitura: qualquer membro real da squad (ou admin/liderança) — nunca auto-vincula.
+     * Antes desta checagem, todo GET de /api/work-items/** exigia só autenticação, sem checar
+     * pertencimento — qualquer usuário autenticado da aplicação lia work items de qualquer squad.
+     */
+    private void requireSquadReadAccess(String squadId, HttpServletRequest request) {
+        if (!matchesSquad(squadId, request)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a membros desta squad ou administradores.");
+        }
+    }
+
+    /**
+     * Escrita: igual à leitura, mas com um fallback a mais — em ambientes limpos onde o
+     * usuário ainda não possui squad/projeto configurado, auto-associa pra permitir o
+     * primeiro fluxo de sincronização (efeito colateral que uma leitura nunca deve ter).
+     */
+    private void requireSquadWriteAccess(String squadId, HttpServletRequest request) {
+        if (matchesSquad(squadId, request)) {
+            return;
+        }
+        String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
+        if (caller == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a membros desta squad ou administradores.");
+        }
+
+        // Auto-vinculação caso não possua squad
         boolean hasNoSquad = caller.getSquadId() == null || caller.getSquadId().isBlank() || "Sem Time".equalsIgnoreCase(caller.getSquadId().trim());
         boolean hasNoProject = caller.getDefaultProjectId() == null || caller.getDefaultProjectId().isBlank() || "Sem Time".equalsIgnoreCase(caller.getDefaultProjectId().trim());
-        if (!matches && hasNoSquad) {
+        if (hasNoSquad) {
             caller.setSquadId(squadId);
             if (hasNoProject) {
                 caller.setDefaultProjectId(squadId);
             }
             userRepository.save(caller);
-            matches = true;
+            return;
         }
 
-        if (!matches) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a membros desta squad ou administradores.");
-        }
+        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a membros desta squad ou administradores.");
     }
 
     public record EstimateRequest(@JsonProperty("points_estimated") Double points_estimated) {}
@@ -124,8 +157,10 @@ public class WorkItemController {
     @GetMapping("/{squadId}/assignee/{accountId}")
     public ResponseEntity<List<WorkItem>> getAssignedWorkItems(
             @PathVariable String squadId,
-            @PathVariable String accountId) {
+            @PathVariable String accountId,
+            HttpServletRequest httpRequest) {
         String resolvedSquad = resolveSquad(squadId, null);
+        requireSquadReadAccess(resolvedSquad, httpRequest);
         List<WorkItem> workItems = workItemService.getAssignedWorkItems(resolvedSquad, accountId);
         return ResponseEntity.ok(workItems);
     }
@@ -161,21 +196,26 @@ public class WorkItemController {
     @GetMapping("/{squadId}/sprint/{sprintId}/stats")
     public ResponseEntity<java.util.Map<String, Object>> getSprintStats(
             @PathVariable String squadId,
-            @PathVariable String sprintId) {
+            @PathVariable String sprintId,
+            HttpServletRequest httpRequest) {
         String resolvedSquad = resolveSquad(squadId, null);
+        requireSquadReadAccess(resolvedSquad, httpRequest);
         return ResponseEntity.ok(workItemService.getSprintStats(resolvedSquad, sprintId));
     }
 
     @GetMapping("/{squadId}")
-    public ResponseEntity<List<WorkItem>> getWorkItemsBySquad(@PathVariable String squadId) {
+    public ResponseEntity<List<WorkItem>> getWorkItemsBySquad(@PathVariable String squadId, HttpServletRequest httpRequest) {
         String resolvedSquad = resolveSquad(squadId, null);
+        requireSquadReadAccess(resolvedSquad, httpRequest);
         return ResponseEntity.ok(workItemService.getWorkItemsBySquadId(resolvedSquad));
     }
 
     @GetMapping("/{squadId}/backlog-estimated")
     public ResponseEntity<List<WorkItem>> getBacklogEstimated(
-            @PathVariable String squadId) {
+            @PathVariable String squadId,
+            HttpServletRequest httpRequest) {
         String resolvedSquad = resolveSquad(squadId, null);
+        requireSquadReadAccess(resolvedSquad, httpRequest);
         return ResponseEntity.ok(workItemService.getBacklogEstimated(resolvedSquad));
     }
 }

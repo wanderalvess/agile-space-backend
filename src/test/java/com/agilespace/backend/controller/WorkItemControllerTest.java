@@ -121,7 +121,7 @@ class WorkItemControllerTest {
             Map<String, Object> stats = Map.of("velocityReal", 8.0, "previsto", 13.0, "entregue", 8.0, "carryOvers", 1);
             when(workItemService.getSprintStats("SQ1", "SPRINT-42")).thenReturn(stats);
 
-            ResponseEntity<Map<String, Object>> response = controller.getSprintStats("SQ1", "SPRINT-42");
+            ResponseEntity<Map<String, Object>> response = controller.getSprintStats("SQ1", "SPRINT-42", memberOfSq1());
 
             assertEquals(HttpStatus.OK, response.getStatusCode());
             assertEquals(8.0, response.getBody().get("velocityReal"));
@@ -221,6 +221,108 @@ class WorkItemControllerTest {
 
             assertEquals(HttpStatus.OK, response.getStatusCode());
             verify(workItemService).commitWorkItem("SQ-QUALQUER", "DDW-1", "SPRINT-42");
+        }
+    }
+
+    @Nested
+    @DisplayName("Segurança e Controle de Acesso de Leitura por Squad (requireSquadReadAccess)")
+    class ReadAuthorizationTests {
+
+        // Regressão: getAssignedWorkItems, getSprintStats, getWorkItemsBySquad e
+        // getBacklogEstimated eram GETs que só exigiam autenticação, sem checar pertencimento
+        // à squad — qualquer usuário autenticado lia work items de qualquer squad. Mesmo padrão
+        // de correção de SquadController.requireSquadReadAccess.
+
+        @Test
+        @DisplayName("Deve rejeitar com HTTP 403 leitura de itens atribuídos por membro de outra squad")
+        void shouldRejectGetAssignedWorkItemsFromAnotherSquadMember() {
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> controller.getAssignedWorkItems(
+                    "SQ1", "acc-1", memberOfAnotherSquad()));
+
+            assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+            verifyNoInteractions(workItemService);
+        }
+
+        @Test
+        @DisplayName("Deve permitir ao membro da squad ler itens atribuídos")
+        void shouldAllowGetAssignedWorkItemsForSquadMember() {
+            when(workItemService.getAssignedWorkItems("SQ1", "acc-1")).thenReturn(List.of());
+
+            ResponseEntity<List<WorkItem>> response = controller.getAssignedWorkItems("SQ1", "acc-1", memberOfSq1());
+
+            assertEquals(HttpStatus.OK, response.getStatusCode());
+        }
+
+        @Test
+        @DisplayName("Deve permitir ao ADMIN ler itens atribuídos de qualquer squad")
+        void shouldAllowAdminToReadAssignedWorkItemsOfAnySquad() {
+            when(workItemService.getAssignedWorkItems("SQ-QUALQUER", "acc-1")).thenReturn(List.of());
+
+            ResponseEntity<List<WorkItem>> response = controller.getAssignedWorkItems(
+                    "SQ-QUALQUER", "acc-1", requestAs("admin1", "ADMIN"));
+
+            assertEquals(HttpStatus.OK, response.getStatusCode());
+        }
+
+        @Test
+        @DisplayName("Deve rejeitar com HTTP 403 leitura de estatísticas de sprint por membro de outra squad")
+        void shouldRejectGetSprintStatsFromAnotherSquadMember() {
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> controller.getSprintStats(
+                    "SQ1", "SPRINT-42", memberOfAnotherSquad()));
+
+            assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+            verifyNoInteractions(workItemService);
+        }
+
+        @Test
+        @DisplayName("Deve permitir ao membro da squad ler estatísticas de sprint")
+        void shouldAllowGetSprintStatsForSquadMember() {
+            when(workItemService.getSprintStats("SQ1", "SPRINT-42")).thenReturn(Map.of());
+
+            ResponseEntity<Map<String, Object>> response = controller.getSprintStats("SQ1", "SPRINT-42", memberOfSq1());
+
+            assertEquals(HttpStatus.OK, response.getStatusCode());
+        }
+
+        @Test
+        @DisplayName("Deve rejeitar com HTTP 403 leitura de work items da squad por membro de outra squad")
+        void shouldRejectGetWorkItemsBySquadFromAnotherSquadMember() {
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> controller.getWorkItemsBySquad(
+                    "SQ1", memberOfAnotherSquad()));
+
+            assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+            verifyNoInteractions(workItemService);
+        }
+
+        @Test
+        @DisplayName("Deve permitir ao membro da squad listar work items da própria squad")
+        void shouldAllowGetWorkItemsBySquadForSquadMember() {
+            when(workItemService.getWorkItemsBySquadId("SQ1")).thenReturn(List.of());
+
+            ResponseEntity<List<WorkItem>> response = controller.getWorkItemsBySquad("SQ1", memberOfSq1());
+
+            assertEquals(HttpStatus.OK, response.getStatusCode());
+        }
+
+        @Test
+        @DisplayName("Deve rejeitar com HTTP 403 leitura de backlog estimado por membro de outra squad")
+        void shouldRejectGetBacklogEstimatedFromAnotherSquadMember() {
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> controller.getBacklogEstimated(
+                    "SQ1", memberOfAnotherSquad()));
+
+            assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+            verifyNoInteractions(workItemService);
+        }
+
+        @Test
+        @DisplayName("Deve permitir ao LEAD ler backlog estimado de qualquer squad")
+        void shouldAllowLeadToReadBacklogEstimatedOfAnySquad() {
+            when(workItemService.getBacklogEstimated("SQ-QUALQUER")).thenReturn(List.of());
+
+            ResponseEntity<List<WorkItem>> response = controller.getBacklogEstimated(
+                    "SQ-QUALQUER", requestAs("lead1", "LEAD"));
+
+            assertEquals(HttpStatus.OK, response.getStatusCode());
         }
     }
 }
