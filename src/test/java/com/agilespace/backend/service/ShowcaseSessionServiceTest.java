@@ -12,6 +12,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -160,6 +161,21 @@ class ShowcaseSessionServiceTest {
             assertEquals("completed", result.getStatus());
 
             verify(webSocketHandler).broadcastEvent(eq("session-456"), eq("SESSION_UPDATED"), eq(result));
+        }
+    }
+
+    @Nested
+    @DisplayName("Validação de Entrada")
+    class ValidationTests {
+
+        @Test
+        @DisplayName("Deve rejeitar sessão sem nome")
+        void shouldRejectBlankName() {
+            ShowcaseSession blank = ShowcaseSession.builder().name(" ").status("planning").build();
+
+            assertThrows(ResponseStatusException.class, () -> service.saveSession(blank, "user-author"));
+            verify(repository, never()).save(any());
+            verify(webSocketHandler, never()).broadcastEvent(any(), any(), any());
         }
     }
 }

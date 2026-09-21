@@ -5,8 +5,10 @@ import com.agilespace.backend.repository.ShowcaseSessionRepository;
 import com.agilespace.backend.websocket.ShowcaseWebSocketHandler;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -34,6 +36,16 @@ public class ShowcaseSessionService {
 
     @Transactional
     public ShowcaseSession saveSession(ShowcaseSession session, String callerId) {
+        if (session.getName() == null || session.getName().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "name é obrigatório");
+        }
+        if (session.getTasks() != null && session.getTasks().size() > 2000) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tasks excede o limite de 2000 itens");
+        }
+        if (session.getMembers() != null && session.getMembers().size() > 200) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "members excede o limite de 200 itens");
+        }
+
         if (session.getId() != null && !session.getId().isEmpty()) {
             repository.findById(session.getId()).ifPresent(existing -> {
                 session.setCreatedBy(existing.getCreatedBy() != null ? existing.getCreatedBy() : callerId);
