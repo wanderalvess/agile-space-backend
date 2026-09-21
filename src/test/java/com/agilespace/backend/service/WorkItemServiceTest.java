@@ -1,8 +1,9 @@
 package com.agilespace.backend.service;
 
+import com.agilespace.backend.domain.SquadIssueSnapshot;
 import com.agilespace.backend.domain.WorkItem;
+import com.agilespace.backend.repository.SquadIssueSnapshotRepository;
 import com.agilespace.backend.repository.SquadRepository;
-import com.agilespace.backend.repository.WorkItemRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -10,20 +11,18 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 public class WorkItemServiceTest {
 
     @Mock
-    private WorkItemRepository workItemRepository;
+    private SquadIssueSnapshotRepository issueSnapshotRepository;
 
     @Mock
     private SquadRepository squadRepository;
@@ -36,20 +35,18 @@ public class WorkItemServiceTest {
         MockitoAnnotations.openMocks(this);
     }
 
-    private WorkItem existing(String status) {
-        return WorkItem.builder()
-                .id("SQ1_DDW-1")
+    private SquadIssueSnapshot existing(String ceremonyStatus) {
+        return SquadIssueSnapshot.builder()
+                .dbId("SQ1_DDW-1")
                 .squadId("SQ1")
                 .jiraKey("DDW-1")
-                .title("Item existente")
-                .status(status)
-                .createdAt(LocalDateTime.now().minusDays(1))
+                .ceremonyStatus(ceremonyStatus)
                 .build();
     }
 
-    private WorkItem captureSaved() {
-        ArgumentCaptor<WorkItem> captor = ArgumentCaptor.forClass(WorkItem.class);
-        verify(workItemRepository).save(captor.capture());
+    private SquadIssueSnapshot captureSaved() {
+        ArgumentCaptor<SquadIssueSnapshot> captor = ArgumentCaptor.forClass(SquadIssueSnapshot.class);
+        verify(issueSnapshotRepository).save(captor.capture());
         return captor.getValue();
     }
 
@@ -57,90 +54,104 @@ public class WorkItemServiceTest {
 
     @Test
     public void testEstimateCreatesItemWhenAbsentUsingCompositeId() {
-        when(workItemRepository.findBySquadIdAndJiraKey("SQ1", "DDW-1")).thenReturn(Optional.empty());
+        when(issueSnapshotRepository.findBySquadIdAndJiraKey("SQ1", "DDW-1")).thenReturn(Optional.empty());
 
         service.estimateWorkItem("SQ1", "DDW-1", 8.0);
 
-        WorkItem saved = captureSaved();
-        assertEquals("SQ1_DDW-1", saved.getId());
+        SquadIssueSnapshot saved = captureSaved();
+        assertEquals("SQ1_DDW-1", saved.getDbId());
         assertEquals("SQ1", saved.getSquadId());
         assertEquals("DDW-1", saved.getJiraKey());
-        assertEquals("DDW-1", saved.getTitle());
-        assertEquals("backlog", saved.getStatus());
+        assertEquals("backlog", saved.getCeremonyStatus());
         assertEquals(8.0, saved.getPointsEstimated());
-        assertNotNull(saved.getCreatedAt());
-        assertNotNull(saved.getUpdatedAt());
     }
 
     @Test
-    public void testEstimateUpdatesExistingItemAndPreservesStatus() {
-        WorkItem item = existing("committed");
+    public void testEstimateUpdatesExistingItemAndPreservesCeremonyStatus() {
+        SquadIssueSnapshot item = existing("committed");
         item.setPointsEstimated(3.0);
-        when(workItemRepository.findBySquadIdAndJiraKey("SQ1", "DDW-1")).thenReturn(Optional.of(item));
+        when(issueSnapshotRepository.findBySquadIdAndJiraKey("SQ1", "DDW-1")).thenReturn(Optional.of(item));
 
         service.estimateWorkItem("SQ1", "DDW-1", 13.0);
 
-        WorkItem saved = captureSaved();
+        SquadIssueSnapshot saved = captureSaved();
         assertEquals(13.0, saved.getPointsEstimated());
-        assertEquals("committed", saved.getStatus());
-        assertEquals("Item existente", saved.getTitle());
+        assertEquals("committed", saved.getCeremonyStatus());
     }
 
     @Test
-    public void testEstimateBackfillsBlankStatusToBacklog() {
-        WorkItem item = existing("   ");
-        when(workItemRepository.findBySquadIdAndJiraKey(anyString(), anyString())).thenReturn(Optional.of(item));
+    public void testEstimateBackfillsBlankCeremonyStatusToBacklog() {
+        SquadIssueSnapshot item = existing("   ");
+        when(issueSnapshotRepository.findBySquadIdAndJiraKey(anyString(), anyString())).thenReturn(Optional.of(item));
 
         service.estimateWorkItem("SQ1", "DDW-1", 5.0);
 
-        assertEquals("backlog", captureSaved().getStatus());
+        assertEquals("backlog", captureSaved().getCeremonyStatus());
     }
 
     @Test
-    public void testEstimateBackfillsNullStatusToBacklog() {
-        WorkItem item = existing(null);
-        when(workItemRepository.findBySquadIdAndJiraKey(anyString(), anyString())).thenReturn(Optional.of(item));
+    public void testEstimateBackfillsNullCeremonyStatusToBacklog() {
+        SquadIssueSnapshot item = existing(null);
+        when(issueSnapshotRepository.findBySquadIdAndJiraKey(anyString(), anyString())).thenReturn(Optional.of(item));
 
         service.estimateWorkItem("SQ1", "DDW-1", 5.0);
 
-        assertEquals("backlog", captureSaved().getStatus());
+        assertEquals("backlog", captureSaved().getCeremonyStatus());
     }
 
     @Test
     public void testEstimateAcceptsNullPointsToClearEstimate() {
-        WorkItem item = existing("backlog");
+        SquadIssueSnapshot item = existing("backlog");
         item.setPointsEstimated(8.0);
-        when(workItemRepository.findBySquadIdAndJiraKey(anyString(), anyString())).thenReturn(Optional.of(item));
+        when(issueSnapshotRepository.findBySquadIdAndJiraKey(anyString(), anyString())).thenReturn(Optional.of(item));
 
         service.estimateWorkItem("SQ1", "DDW-1", null);
 
         assertNull(captureSaved().getPointsEstimated());
     }
 
+    @Test
+    public void testEstimatePreservesRealJiraFieldsAlreadySyncedOnTheSnapshot() {
+        // A grande vantagem de gravar em SquadIssueSnapshot em vez de work_items: campos
+        // populados pelo sync real do Squad (type/status do Jira) não somem quando o Poker
+        // grava a estimativa por cima da mesma linha.
+        SquadIssueSnapshot item = existing("backlog");
+        item.setType("Story");
+        item.setStatus("In Progress");
+        item.setAssigneeName("Fulano");
+        when(issueSnapshotRepository.findBySquadIdAndJiraKey("SQ1", "DDW-1")).thenReturn(Optional.of(item));
+
+        service.estimateWorkItem("SQ1", "DDW-1", 8.0);
+
+        SquadIssueSnapshot saved = captureSaved();
+        assertEquals("Story", saved.getType());
+        assertEquals("In Progress", saved.getStatus());
+        assertEquals("Fulano", saved.getAssigneeName());
+    }
+
     // ---------- commitWorkItem ----------
 
     @Test
-    public void testCommitSetsStatusAndSprint() {
-        WorkItem item = existing("backlog");
-        when(workItemRepository.findBySquadIdAndJiraKey("SQ1", "DDW-1")).thenReturn(Optional.of(item));
+    public void testCommitSetsCeremonyStatusAndSprint() {
+        SquadIssueSnapshot item = existing("backlog");
+        when(issueSnapshotRepository.findBySquadIdAndJiraKey("SQ1", "DDW-1")).thenReturn(Optional.of(item));
 
         service.commitWorkItem("SQ1", "DDW-1", "SPRINT-42");
 
-        WorkItem saved = captureSaved();
-        assertEquals("committed", saved.getStatus());
+        SquadIssueSnapshot saved = captureSaved();
+        assertEquals("committed", saved.getCeremonyStatus());
         assertEquals("SPRINT-42", saved.getSprintId());
-        assertNotNull(saved.getUpdatedAt());
     }
 
     @Test
     public void testCommitCreatesItemWhenAbsent() {
-        when(workItemRepository.findBySquadIdAndJiraKey("SQ1", "DDW-9")).thenReturn(Optional.empty());
+        when(issueSnapshotRepository.findBySquadIdAndJiraKey("SQ1", "DDW-9")).thenReturn(Optional.empty());
 
         service.commitWorkItem("SQ1", "DDW-9", "SPRINT-42");
 
-        WorkItem saved = captureSaved();
-        assertEquals("SQ1_DDW-9", saved.getId());
-        assertEquals("committed", saved.getStatus());
+        SquadIssueSnapshot saved = captureSaved();
+        assertEquals("SQ1_DDW-9", saved.getDbId());
+        assertEquals("committed", saved.getCeremonyStatus());
         assertEquals("SPRINT-42", saved.getSprintId());
     }
 
@@ -148,27 +159,26 @@ public class WorkItemServiceTest {
 
     @Test
     public void testShowcaseDecisionRecordsVerdictFeedbackAndTimestamp() {
-        WorkItem item = existing("committed");
-        when(workItemRepository.findBySquadIdAndJiraKey("SQ1", "DDW-1")).thenReturn(Optional.of(item));
+        SquadIssueSnapshot item = existing("committed");
+        when(issueSnapshotRepository.findBySquadIdAndJiraKey("SQ1", "DDW-1")).thenReturn(Optional.of(item));
 
         service.showcaseDecision("SQ1", "DDW-1", "delivered", "Aceito pelo PO");
 
-        WorkItem saved = captureSaved();
-        assertEquals("delivered", saved.getStatus());
+        SquadIssueSnapshot saved = captureSaved();
+        assertEquals("delivered", saved.getCeremonyStatus());
         assertEquals("Aceito pelo PO", saved.getDecisionFeedback());
         assertNotNull(saved.getDecidedAt());
-        assertNotNull(saved.getUpdatedAt());
     }
 
     @Test
     public void testShowcaseDecisionRejectedKeepsFeedback() {
-        WorkItem item = existing("committed");
-        when(workItemRepository.findBySquadIdAndJiraKey(anyString(), anyString())).thenReturn(Optional.of(item));
+        SquadIssueSnapshot item = existing("committed");
+        when(issueSnapshotRepository.findBySquadIdAndJiraKey(anyString(), anyString())).thenReturn(Optional.of(item));
 
         service.showcaseDecision("SQ1", "DDW-1", "rejected", "Criterio de aceite nao atendido");
 
-        WorkItem saved = captureSaved();
-        assertEquals("rejected", saved.getStatus());
+        SquadIssueSnapshot saved = captureSaved();
+        assertEquals("rejected", saved.getCeremonyStatus());
         assertEquals("Criterio de aceite nao atendido", saved.getDecisionFeedback());
     }
 
@@ -176,18 +186,18 @@ public class WorkItemServiceTest {
 
     @Test
     public void testGetBacklogEstimatedFiltersUnestimatedAndZeroPointItems() {
-        WorkItem estimated = existing("backlog");
+        SquadIssueSnapshot estimated = existing("backlog");
         estimated.setJiraKey("DDW-1");
         estimated.setPointsEstimated(5.0);
 
-        WorkItem zeroPoints = existing("backlog");
+        SquadIssueSnapshot zeroPoints = existing("backlog");
         zeroPoints.setJiraKey("DDW-2");
         zeroPoints.setPointsEstimated(0.0);
 
-        WorkItem noPoints = existing("backlog");
+        SquadIssueSnapshot noPoints = existing("backlog");
         noPoints.setJiraKey("DDW-3");
 
-        when(workItemRepository.findBySquadIdAndStatus("SQ1", "backlog"))
+        when(issueSnapshotRepository.findBySquadIdAndCeremonyStatus("SQ1", "backlog"))
                 .thenReturn(List.of(estimated, zeroPoints, noPoints));
 
         List<WorkItem> result = service.getBacklogEstimated("SQ1");
@@ -198,23 +208,23 @@ public class WorkItemServiceTest {
 
     @Test
     public void testGetBacklogEstimatedEmptyWhenNothingInBacklog() {
-        when(workItemRepository.findBySquadIdAndStatus("SQ1", "backlog")).thenReturn(List.of());
+        when(issueSnapshotRepository.findBySquadIdAndCeremonyStatus("SQ1", "backlog")).thenReturn(List.of());
 
         assertTrue(service.getBacklogEstimated("SQ1").isEmpty());
     }
 
     // ---------- getSprintStats ----------
 
-    private WorkItem item(String key, String status, Double points) {
-        WorkItem w = existing(status);
-        w.setJiraKey(key);
-        w.setPointsEstimated(points);
-        return w;
+    private SquadIssueSnapshot item(String key, String ceremonyStatus, Double points) {
+        SquadIssueSnapshot s = existing(ceremonyStatus);
+        s.setJiraKey(key);
+        s.setPointsEstimated(points);
+        return s;
     }
 
     @Test
     public void testGetSprintStatsSumsDeliveredAsVelocityAndCountsCarryOvers() {
-        when(workItemRepository.findBySquadIdAndSprintId("SQ1", "SPRINT-42")).thenReturn(List.of(
+        when(issueSnapshotRepository.findBySquadIdAndSprintId("SQ1", "SPRINT-42")).thenReturn(List.of(
                 item("DDW-1", "delivered", 5.0),
                 item("DDW-2", "delivered", 3.0),
                 item("DDW-3", "carried_over", 8.0),
@@ -230,7 +240,7 @@ public class WorkItemServiceTest {
 
     @Test
     public void testGetSprintStatsTreatsUnestimatedItemsAsZero() {
-        when(workItemRepository.findBySquadIdAndSprintId("SQ1", "SPRINT-42")).thenReturn(List.of(
+        when(issueSnapshotRepository.findBySquadIdAndSprintId("SQ1", "SPRINT-42")).thenReturn(List.of(
                 item("DDW-1", "delivered", null),
                 item("DDW-2", "delivered", 5.0)));
 
@@ -242,7 +252,7 @@ public class WorkItemServiceTest {
 
     @Test
     public void testGetSprintStatsEmptySprintReturnsZeroes() {
-        when(workItemRepository.findBySquadIdAndSprintId("SQ1", "SPRINT-42")).thenReturn(List.of());
+        when(issueSnapshotRepository.findBySquadIdAndSprintId("SQ1", "SPRINT-42")).thenReturn(List.of());
 
         Map<String, Object> stats = service.getSprintStats("SQ1", "SPRINT-42");
 
@@ -257,7 +267,7 @@ public class WorkItemServiceTest {
         squad.setId("SQ1");
         squad.setActiveSprintId("SPRINT-99");
         when(squadRepository.findById("SQ1")).thenReturn(Optional.of(squad));
-        when(workItemRepository.findBySquadIdAndSprintId("SQ1", "SPRINT-99")).thenReturn(List.of(
+        when(issueSnapshotRepository.findBySquadIdAndSprintId("SQ1", "SPRINT-99")).thenReturn(List.of(
                 item("DDW-1", "delivered", 8.0),
                 item("DDW-2", "committed", 3.0)));
 
@@ -271,7 +281,7 @@ public class WorkItemServiceTest {
     @Test
     public void testGetSprintStatsWithActiveSprintFallbackToActiveWorkItems() {
         when(squadRepository.findById("SQ1")).thenReturn(Optional.empty());
-        when(workItemRepository.findBySquadId("SQ1")).thenReturn(List.of(
+        when(issueSnapshotRepository.findBySquadId("SQ1")).thenReturn(List.of(
                 item("DDW-1", "delivered", 5.0),
                 item("DDW-2", "backlog", 13.0),
                 item("DDW-3", "carried_over", 2.0)));
@@ -287,26 +297,27 @@ public class WorkItemServiceTest {
 
     @Test
     public void testGetAssignedWorkItemsTrimsIdentifier() {
-        when(workItemRepository.findBySquadIdAndUserIdentifier("SQ1", "conta-jira")).thenReturn(List.of(existing("committed")));
+        when(issueSnapshotRepository.findBySquadIdAndAssigneeIdentifier("SQ1", "conta-jira"))
+                .thenReturn(List.of(existing("committed")));
 
         assertEquals(1, service.getAssignedWorkItems("SQ1", "  conta-jira  ").size());
-        verify(workItemRepository).findBySquadIdAndUserIdentifier("SQ1", "conta-jira");
+        verify(issueSnapshotRepository).findBySquadIdAndAssigneeIdentifier("SQ1", "conta-jira");
     }
 
     @Test
     public void testGetAssignedWorkItemsReturnsEmptyForNullOrBlankIdentifier() {
         assertTrue(service.getAssignedWorkItems("SQ1", null).isEmpty());
         assertTrue(service.getAssignedWorkItems("SQ1", "   ").isEmpty());
-        verify(workItemRepository, never()).findBySquadIdAndUserIdentifier(anyString(), anyString());
+        verify(issueSnapshotRepository, never()).findBySquadIdAndAssigneeIdentifier(anyString(), anyString());
     }
 
     // ---------- getWorkItemsBySquadId ----------
 
     @Test
     public void testGetWorkItemsBySquadIdDelegatesToRepository() {
-        when(workItemRepository.findBySquadId("SQ1")).thenReturn(List.of(existing("backlog")));
+        when(issueSnapshotRepository.findBySquadId("SQ1")).thenReturn(List.of(existing("backlog")));
 
         assertEquals(1, service.getWorkItemsBySquadId("SQ1").size());
-        verify(workItemRepository).findBySquadId("SQ1");
+        verify(issueSnapshotRepository).findBySquadId("SQ1");
     }
 }

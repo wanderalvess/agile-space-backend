@@ -112,4 +112,24 @@ public class SquadIssueSnapshot {
 
     @Column(name = "synced_at")
     private String syncedAt;
+
+    // --- Campos de cerimônia (Poker/Planner/Showcase) ---
+    // Consolidados aqui em vez de numa tabela work_items separada: esta linha já é a mesma
+    // que o sync real do Squad popula (type/status/assignee/estimate vindos do Jira de
+    // verdade), então commit/estimativa/decisão de showcase passam a enriquecer o dado real
+    // em vez de um casco paralelo nunca sincronizado. Ver plano de unificação Squad Pulse +
+    // jiradash, Fase 1. "ceremonyStatus" é o estágio da cerimônia (backlog/committed/
+    // delivered/rejected/carried_over) — nunca confundir com "status", que é o status bruto
+    // do Jira (To Do/In Progress/Done).
+    @Column(name = "ceremony_status")
+    private String ceremonyStatus;
+
+    @Column(name = "points_estimated")
+    private Double pointsEstimated;
+
+    @Column(name = "decision_feedback", columnDefinition = "TEXT")
+    private String decisionFeedback;
+
+    @Column(name = "decided_at")
+    private String decidedAt;
 }

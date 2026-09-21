@@ -1,136 +1,154 @@
 package com.agilespace.backend.service;
 
+import com.agilespace.backend.domain.SquadIssueSnapshot;
 import com.agilespace.backend.domain.WorkItem;
-import com.agilespace.backend.repository.WorkItemRepository;
+import com.agilespace.backend.repository.SquadIssueSnapshotRepository;
+import com.agilespace.backend.repository.SquadRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
+/**
+ * Cerimônias (Poker/Planner/Showcase) gravam aqui, mas o dado mora em SquadIssueSnapshot —
+ * a mesma linha que o sync real do Squad já popula com type/status/assignee/estimate vindos
+ * do Jira — em vez da antiga tabela work_items separada, que nunca era alimentada por um
+ * sync de verdade. Os métodos seguem devolvendo WorkItem só como formato de resposta, pra
+ * não quebrar o contrato que WorkItemController/frontend já consomem (ver plano de
+ * unificação Squad Pulse + jiradash, Fase 1).
+ */
 @Service
 @RequiredArgsConstructor
 public class WorkItemService {
 
-    private final WorkItemRepository workItemRepository;
-    private final com.agilespace.backend.repository.SquadRepository squadRepository;
+    private final SquadIssueSnapshotRepository issueSnapshotRepository;
+    private final SquadRepository squadRepository;
+
+    private SquadIssueSnapshot findOrCreate(String squadId, String jiraKey) {
+        return issueSnapshotRepository.findBySquadIdAndJiraKey(squadId, jiraKey)
+                .orElseGet(() -> SquadIssueSnapshot.builder()
+                        .dbId(squadId + "_" + jiraKey)
+                        .squadId(squadId)
+                        .jiraKey(jiraKey)
+                        .build());
+    }
+
+    private WorkItem toWorkItemView(SquadIssueSnapshot s) {
+        return WorkItem.builder()
+                .id(s.getDbId())
+                .squadId(s.getSquadId())
+                .sprintId(s.getSprintId())
+                .jiraKey(s.getJiraKey())
+                .title(s.getJiraKey())
+                .type(s.getType())
+                .assigneeName(s.getAssigneeName())
+                .assigneeId(s.getAssigneeId())
+                .pointsEstimated(s.getPointsEstimated())
+                .estimateSec(s.getEstimateSec())
+                .remainingSec(s.getRemainingSec())
+                .loggedSec(s.getLoggedSec())
+                .status(s.getCeremonyStatus())
+                .decisionFeedback(s.getDecisionFeedback())
+                .parentKey(s.getParentKey())
+                .parentTitle(s.getParentTitle())
+                .build();
+    }
 
     @Transactional
     public void estimateWorkItem(String squadId, String jiraKey, Double pointsEstimated) {
-        WorkItem item = workItemRepository.findBySquadIdAndJiraKey(squadId, jiraKey)
-            .orElseGet(() -> WorkItem.builder()
-                .id(squadId + "_" + jiraKey)
-                .squadId(squadId)
-                .jiraKey(jiraKey)
-                .title(jiraKey)
-                .status("backlog")
-                .createdAt(LocalDateTime.now())
-                .build());
-
-        if (item.getStatus() == null || item.getStatus().isBlank()) {
-            item.setStatus("backlog");
+        SquadIssueSnapshot item = findOrCreate(squadId, jiraKey);
+        if (item.getCeremonyStatus() == null || item.getCeremonyStatus().isBlank()) {
+            item.setCeremonyStatus("backlog");
         }
         item.setPointsEstimated(pointsEstimated);
-        item.setUpdatedAt(LocalDateTime.now());
-        workItemRepository.save(item);
+        issueSnapshotRepository.save(item);
     }
 
     @Transactional
     public void commitWorkItem(String squadId, String jiraKey, String sprintId) {
-        WorkItem item = workItemRepository.findBySquadIdAndJiraKey(squadId, jiraKey)
-            .orElseGet(() -> WorkItem.builder()
-                .id(squadId + "_" + jiraKey)
-                .squadId(squadId)
-                .jiraKey(jiraKey)
-                .title(jiraKey)
-                .createdAt(LocalDateTime.now())
-                .build());
-
-        item.setStatus("committed");
+        SquadIssueSnapshot item = findOrCreate(squadId, jiraKey);
+        item.setCeremonyStatus("committed");
         item.setSprintId(sprintId);
-        item.setUpdatedAt(LocalDateTime.now());
-        workItemRepository.save(item);
+        issueSnapshotRepository.save(item);
     }
 
     @Transactional
     public void showcaseDecision(String squadId, String jiraKey, String status, String feedback) {
-        WorkItem item = workItemRepository.findBySquadIdAndJiraKey(squadId, jiraKey)
-            .orElseGet(() -> WorkItem.builder()
-                .id(squadId + "_" + jiraKey)
-                .squadId(squadId)
-                .jiraKey(jiraKey)
-                .title(jiraKey)
-                .createdAt(LocalDateTime.now())
-                .build());
-
-        item.setStatus(status);
+        SquadIssueSnapshot item = findOrCreate(squadId, jiraKey);
+        item.setCeremonyStatus(status);
         item.setDecisionFeedback(feedback);
-        item.setDecidedAt(LocalDateTime.now());
-        item.setUpdatedAt(LocalDateTime.now());
-        workItemRepository.save(item);
+        item.setDecidedAt(LocalDateTime.now().toString());
+        issueSnapshotRepository.save(item);
     }
 
     public List<WorkItem> getBacklogEstimated(String squadId) {
-        return workItemRepository.findBySquadIdAndStatus(squadId, "backlog").stream()
-            .filter(w -> w.getPointsEstimated() != null && w.getPointsEstimated() > 0)
-            .toList();
+        return issueSnapshotRepository.findBySquadIdAndCeremonyStatus(squadId, "backlog").stream()
+                .filter(w -> w.getPointsEstimated() != null && w.getPointsEstimated() > 0)
+                .map(this::toWorkItemView)
+                .toList();
     }
 
-    public java.util.Map<String, Object> getSprintStats(String squadId, String sprintId) {
-        List<WorkItem> items;
+    public Map<String, Object> getSprintStats(String squadId, String sprintId) {
+        List<SquadIssueSnapshot> items;
         if (sprintId == null || sprintId.isBlank() || "active".equalsIgnoreCase(sprintId.trim())) {
-            // Verifica se a squad possui uma activeSprintId cadastrada
             String activeSprint = squadRepository.findById(squadId)
                     .map(com.agilespace.backend.domain.Squad::getActiveSprintId)
-                    .filter(s -> !s.isBlank())
+                    .filter(s -> s != null && !s.isBlank())
                     .orElse(null);
 
             if (activeSprint != null) {
-                items = workItemRepository.findBySquadIdAndSprintId(squadId, activeSprint);
+                items = issueSnapshotRepository.findBySquadIdAndSprintId(squadId, activeSprint);
             } else {
-                items = java.util.Collections.emptyList();
+                items = Collections.emptyList();
             }
 
             // Fallback: se nenhum item estiver amarrado ao ID exato, busca todos os itens ativos (não-backlog) da squad
             if (items.isEmpty()) {
-                items = workItemRepository.findBySquadId(squadId).stream()
-                        .filter(w -> w.getStatus() != null && !"backlog".equalsIgnoreCase(w.getStatus()))
+                items = issueSnapshotRepository.findBySquadId(squadId).stream()
+                        .filter(w -> w.getCeremonyStatus() != null && !"backlog".equalsIgnoreCase(w.getCeremonyStatus()))
                         .toList();
             }
         } else {
-            items = workItemRepository.findBySquadIdAndSprintId(squadId, sprintId);
+            items = issueSnapshotRepository.findBySquadIdAndSprintId(squadId, sprintId);
         }
 
         double velocityReal = 0;
         double previsto = 0;
         int carryOvers = 0;
-        
-        for (WorkItem item : items) {
+
+        for (SquadIssueSnapshot item : items) {
             double pts = item.getPointsEstimated() != null ? item.getPointsEstimated() : 0;
             previsto += pts;
-            if ("delivered".equals(item.getStatus())) {
+            if ("delivered".equals(item.getCeremonyStatus())) {
                 velocityReal += pts;
-            } else if ("carried_over".equals(item.getStatus())) {
+            } else if ("carried_over".equals(item.getCeremonyStatus())) {
                 carryOvers++;
             }
         }
-        
-        return java.util.Map.of(
-            "velocityReal", velocityReal,
-            "previsto", previsto,
-            "entregue", velocityReal,
-            "carryOvers", carryOvers
+
+        return Map.of(
+                "velocityReal", velocityReal,
+                "previsto", previsto,
+                "entregue", velocityReal,
+                "carryOvers", carryOvers
         );
     }
 
     public List<WorkItem> getAssignedWorkItems(String squadId, String identifier) {
         if (identifier == null || identifier.isBlank()) {
-            return java.util.Collections.emptyList();
+            return Collections.emptyList();
         }
-        return workItemRepository.findBySquadIdAndUserIdentifier(squadId, identifier.trim());
+        return issueSnapshotRepository.findBySquadIdAndAssigneeIdentifier(squadId, identifier.trim()).stream()
+                .map(this::toWorkItemView)
+                .toList();
     }
 
     public List<WorkItem> getWorkItemsBySquadId(String squadId) {
-        return workItemRepository.findBySquadId(squadId);
+        return issueSnapshotRepository.findBySquadId(squadId).stream()
+                .map(this::toWorkItemView)
+                .toList();
     }
 }
