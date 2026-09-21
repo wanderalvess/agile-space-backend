@@ -16,6 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -62,16 +63,16 @@ public class SquadControllerTest {
         Squad squad = new Squad();
         when(service.getSquad("sq-1")).thenReturn(Optional.of(squad));
         
-        ResponseEntity<Squad> response = controller.getSquad("sq-1");
-        
+        ResponseEntity<Squad> response = controller.getSquad("sq-1", adminRequest());
+
         assertEquals(HttpStatus.OK, response.getStatusCode());
     }
 
     @Test
     public void testGetSquadNotFound() {
         when(service.getSquad("sq-1")).thenReturn(Optional.empty());
-        
-        ResponseEntity<Squad> response = controller.getSquad("sq-1");
+
+        ResponseEntity<Squad> response = controller.getSquad("sq-1", adminRequest());
         
         assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
     }
@@ -85,6 +86,66 @@ public class SquadControllerTest {
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals("sq-1", squad.getId());
+    }
+
+    @Test
+    public void testGetSquad_nonMemberOfSquad_forbidden() {
+        // Antes desta checagem, GET de /api/squads/** exigia só autenticação — qualquer
+        // usuário autenticado da aplicação lia dado de qualquer squad.
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-other");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+
+        assertThrows(ResponseStatusException.class, () -> controller.getSquad("sq-1", memberRequest("user-1")));
+        verify(service, never()).getSquad(anyString());
+    }
+
+    @Test
+    public void testGetSquad_memberOfSquad_succeeds() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-1");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+        when(service.getSquad("sq-1")).thenReturn(Optional.of(new Squad()));
+
+        ResponseEntity<Squad> response = controller.getSquad("sq-1", memberRequest("user-1"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+    }
+
+    @Test
+    public void testGetSquad_admin_neverConsultsUserRepository() {
+        ResponseEntity<Squad> response = controller.getSquad("sq-1", adminRequest());
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        verifyNoInteractions(userRepository);
+    }
+
+    @Test
+    public void testGetIssues_nonMemberOfSquad_forbidden() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-other");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+
+        assertThrows(ResponseStatusException.class,
+                () -> controller.getIssues("sq-1", null, memberRequest("user-1")));
+        verify(service, never()).getIssues(anyString(), any());
+    }
+
+    @Test
+    public void testGetMemberMetrics_memberOfSquad_succeeds() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-1");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+        when(service.getMemberMetrics("sq-1")).thenReturn(List.of());
+
+        ResponseEntity<List<com.agilespace.backend.domain.SquadMemberMetric>> response =
+                controller.getMemberMetrics("sq-1", memberRequest("user-1"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
     }
 
     @Test
