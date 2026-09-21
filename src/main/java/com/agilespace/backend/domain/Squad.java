@@ -65,6 +65,12 @@ public class Squad {
     @Column(name = "last_sync_error", columnDefinition = "TEXT")
     private String lastSyncError;
 
+    // Opt-in por squad pro sync agendado (SquadSyncScheduler) — null = squad continua
+    // manual mesmo com app.squad.scheduled-sync.enabled ligado globalmente. É o usuário
+    // "dono" cujo UserJiraConfig (PAT) o job agendado usa, já que não há sessão logada.
+    @Column(name = "sync_owner_user_id")
+    private String syncOwnerUserId;
+
     @Column(name = "reconcile_interval_hours")
     private Integer reconcileIntervalHours;
 

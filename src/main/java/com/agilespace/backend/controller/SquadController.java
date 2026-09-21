@@ -23,6 +23,7 @@ public class SquadController {
 
     private final SquadService squadService;
     private final com.agilespace.backend.service.SquadSyncService squadSyncService;
+    private final com.agilespace.backend.service.SquadSyncGuard squadSyncGuard;
     private final UserRepository userRepository;
     private final com.agilespace.backend.service.UserProjectResolverService userProjectResolverService;
 
@@ -171,9 +172,20 @@ public class SquadController {
             @RequestParam(required = false, defaultValue = "false") boolean forceFull,
             HttpServletRequest request) {
         requireSquadWriteAccess(squadId, request);
-        String callerUserId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
-        squadSyncService.syncSquad(squadId, callerUserId, forceFull);
-        return ResponseEntity.ok().build();
+        // Sem isso, um tick do sync agendado (SquadSyncScheduler) podia coincidir com
+        // alguém clicando "Sincronizar" ao mesmo tempo — duas syncs do mesmo squad
+        // escrevendo por cima uma da outra. Risco que só existe desde que o sync
+        // agendado existe (Fase 4); antes só um humano por vez clicava o botão.
+        if (!squadSyncGuard.tryAcquire(squadId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma sincronização em andamento para esta squad.");
+        }
+        try {
+            String callerUserId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+            squadSyncService.syncSquad(squadId, callerUserId, forceFull);
+            return ResponseEntity.ok().build();
+        } finally {
+            squadSyncGuard.release(squadId);
+        }
     }
 
     @PostMapping("/{squadId}/force-resync-sprint")
@@ -182,9 +194,16 @@ public class SquadController {
             @RequestParam String sprintId,
             HttpServletRequest request) {
         requireSquadWriteAccess(squadId, request);
-        String callerUserId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
-        squadSyncService.forceResyncSprint(squadId, callerUserId, sprintId);
-        return ResponseEntity.ok().build();
+        if (!squadSyncGuard.tryAcquire(squadId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma sincronização em andamento para esta squad.");
+        }
+        try {
+            String callerUserId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+            squadSyncService.forceResyncSprint(squadId, callerUserId, sprintId);
+            return ResponseEntity.ok().build();
+        } finally {
+            squadSyncGuard.release(squadId);
+        }
     }
 
     @GetMapping("/{squadId}")

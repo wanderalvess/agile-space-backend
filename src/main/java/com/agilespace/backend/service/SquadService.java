@@ -69,6 +69,7 @@ public class SquadService {
         if (squad.getLastSyncBy() != null) target.setLastSyncBy(squad.getLastSyncBy());
         if (squad.getLastSyncIssueCount() != null) target.setLastSyncIssueCount(squad.getLastSyncIssueCount());
         if (squad.getLastSyncError() != null) target.setLastSyncError(squad.getLastSyncError());
+        if (squad.getSyncOwnerUserId() != null) target.setSyncOwnerUserId(squad.getSyncOwnerUserId());
         if (squad.getReconcileIntervalHours() != null) target.setReconcileIntervalHours(squad.getReconcileIntervalHours());
         if (squad.getDefaultDailyCapacityHours() != null) target.setDefaultDailyCapacityHours(squad.getDefaultDailyCapacityHours());
         if (squad.getCapacityCalculationMethod() != null) target.setCapacityCalculationMethod(squad.getCapacityCalculationMethod());

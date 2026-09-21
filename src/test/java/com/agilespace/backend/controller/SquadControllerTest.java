@@ -32,6 +32,9 @@ public class SquadControllerTest {
     private com.agilespace.backend.service.SquadSyncService squadSyncService;
 
     @Mock
+    private com.agilespace.backend.service.SquadSyncGuard squadSyncGuard;
+
+    @Mock
     private UserRepository userRepository;
 
     @Mock
@@ -43,6 +46,7 @@ public class SquadControllerTest {
     @BeforeEach
     public void setup() {
         MockitoAnnotations.openMocks(this);
+        lenient().when(squadSyncGuard.tryAcquire(anyString())).thenReturn(true);
     }
 
     private HttpServletRequest adminRequest() {
@@ -169,6 +173,22 @@ public class SquadControllerTest {
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         verify(squadSyncService).syncSquad("sq-1", null, true);
+        // Reserva e libera o guarda mesmo no caminho feliz — senão o próximo tick do
+        // agendador (ou um segundo clique) ficaria travado achando que ainda está em voo.
+        verify(squadSyncGuard).tryAcquire("sq-1");
+        verify(squadSyncGuard).release("sq-1");
+    }
+
+    @Test
+    public void testSyncSquad_alreadyInFlight_returnsConflictWithoutCallingSyncService() {
+        when(squadSyncGuard.tryAcquire("sq-1")).thenReturn(false);
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> controller.syncSquad("sq-1", false, adminRequest()));
+
+        assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
+        verifyNoInteractions(squadSyncService);
+        verify(squadSyncGuard, never()).release(anyString());
     }
 
     @Test

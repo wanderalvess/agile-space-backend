@@ -4,6 +4,9 @@ import com.agilespace.backend.domain.Squad;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
+
 @Repository
 public interface SquadRepository extends JpaRepository<Squad, String> {
+    List<Squad> findBySyncOwnerUserIdIsNotNull();
 }
