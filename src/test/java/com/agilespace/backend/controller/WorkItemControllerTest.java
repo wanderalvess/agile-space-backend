@@ -164,6 +164,25 @@ class WorkItemControllerTest {
         }
 
         @Test
+        @DisplayName("Não deve permitir que jobTitle autodeclarado de liderança destrave escrita em squad alheia")
+        void shouldRejectSelfDeclaredLeadershipJobTitleFromAnotherSquadMember() {
+            // Regressão: requireSquadWriteAccess já teve o bypass de liderança (isLeadershipJobTitle)
+            // rodando ANTES da checagem de squad, então bastava declarar jobTitle="tech lead" no próprio
+            // perfil pra escrever em work_items de qualquer squad. O bypass só é seguro quando gated por
+            // "matches" (mesma regra de SquadController.requireSquadWriteAccess) — este teste trava isso.
+            User caller = User.builder().id("u4").email("lider.de.outra@empresa.com.br")
+                    .squadId("SQ-OUTRA").jobTitle("tech lead").build();
+            when(userRepository.findById("u4")).thenReturn(Optional.of(caller));
+            lenient().when(projectMemberRoleRepository.findByEmailIgnoreCase("lider.de.outra@empresa.com.br")).thenReturn(List.of());
+
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> controller.estimateWorkItem(
+                    "SQ1", "DDW-1", new WorkItemController.EstimateRequest(8.0), requestAs("u4", "MEMBER")));
+
+            assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+            verifyNoInteractions(workItemService);
+        }
+
+        @Test
         @DisplayName("Deve auto-vincular usuário sem squad à squad do work item e permitir a escrita")
         void shouldAutoLinkUserWithoutSquadAndAllow() {
             // requireSquadWriteAccess (passo 3, "Auto-vinculação caso não possua squad") vincula

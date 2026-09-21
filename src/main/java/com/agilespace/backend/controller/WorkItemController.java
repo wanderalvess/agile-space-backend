@@ -23,14 +23,8 @@ public class WorkItemController {
     private final UserRepository userRepository;
     private final com.agilespace.backend.repository.ProjectMemberRoleRepository projectMemberRoleRepository;
 
-    private static final java.util.Set<String> LEADERSHIP_JOB_TITLES = java.util.Set.of(
-            "tech lead", "scrum master", "agile master", "product owner",
-            "people lead", "tribe lead", "agile coach", "sme", "admin", "lead"
-    );
-
     private boolean isLeadershipJobTitle(String jobTitle) {
-        if (jobTitle == null || jobTitle.isBlank()) return false;
-        return LEADERSHIP_JOB_TITLES.contains(jobTitle.trim().toLowerCase());
+        return com.agilespace.backend.security.SquadLeadership.isLeadershipJobTitle(jobTitle);
     }
 
     private String resolveSquad(String squadId, String jiraKey) {
@@ -69,11 +63,6 @@ public class WorkItemController {
             return;
         }
 
-        // 0.1 Cargos de liderança/governança
-        if (isLeadershipJobTitle(caller.getJobTitle())) {
-            return;
-        }
-
         // 1. Checagem direta por squadId ou defaultProjectId
         boolean matches = (caller.getSquadId() != null && caller.getSquadId().equalsIgnoreCase(squadId))
                 || (caller.getDefaultProjectId() != null && caller.getDefaultProjectId().equalsIgnoreCase(squadId));
@@ -82,6 +71,12 @@ public class WorkItemController {
         if (!matches && ("DDWMISSI".equalsIgnoreCase(squadId) || "MISSI".equalsIgnoreCase(squadId))) {
             matches = ("DDWMISSI".equalsIgnoreCase(caller.getSquadId()) || "MISSI".equalsIgnoreCase(caller.getSquadId()))
                     || ("DDWMISSI".equalsIgnoreCase(caller.getDefaultProjectId()) || "MISSI".equalsIgnoreCase(caller.getDefaultProjectId()));
+        }
+
+        // 0.1 Cargos de liderança/governança de squad — só vale se o caller já pertence a este squad
+        // (senão qualquer usuário autodeclarando jobTitle de liderança ganharia acesso a squads alheios)
+        if (matches && isLeadershipJobTitle(caller.getJobTitle())) {
+            return;
         }
 
         // 2.1 Checagem via papéis de membros de projeto (Profields / ProjectMemberRole)
