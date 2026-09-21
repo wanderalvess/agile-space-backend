@@ -157,6 +157,20 @@ public class SquadSyncService {
         defaultCapacityHolder.put("v", config.getDefaultDailyCapacityHours() != null ? config.getDefaultDailyCapacityHours() : 6.0);
         Function<String, Double> capacityFn = seedRosterAndBuildCapacityFn(squadId, snapshots, syncedAt, defaultCapacityHolder.get("v"));
 
+        // Issues removidas da sprint ativa — só em sync FULL (mesma condição do changelog),
+        // já que precisa de uma SEGUNDA JQL derivada (JQL sozinha não expressa "estava nesta
+        // sprint mas não está mais"). Best-effort: uma falha aqui não deve abortar a sync
+        // inteira, é um enriquecimento do scopeChurn, não o dado principal.
+        int removedFromEffectiveSprint = 0;
+        if (isFull && !UNMAPPED_SPRINT_ID.equals(effectiveSprintId)) {
+            SprintMeta activeMeta = sprintMeta.get(effectiveSprintId);
+            Instant activeSprintStart = activeMeta != null ? parseInstantFlexible(activeMeta.startDate) : null;
+            if (activeSprintStart != null) {
+                removedFromEffectiveSprint = countRemovedFromSprint(creds.domain(), creds.token(),
+                        config.getJiraProjectKey(), effectiveSprintId, activeSprintStart, fields);
+            }
+        }
+
         if (isMigrationSync) {
             runMigrationSafetyCheck(squadId, snapshots);
         }
@@ -188,7 +202,8 @@ public class SquadSyncService {
 
             SprintMeta meta = sprintMeta.get(sprintId);
             int sprintWorkdays = meta != null ? countWorkdays(meta.startDate, meta.endDate) : 0;
-            SquadMetricsRollup rollupForGroup = buildRollup(squadId, sprintId, mergedSnapshots, groupRawIssues, meta, sprintWorkdays, syncedAt);
+            int removedCount = sprintId.equals(effectiveSprintId) ? removedFromEffectiveSprint : 0;
+            SquadMetricsRollup rollupForGroup = buildRollup(squadId, sprintId, mergedSnapshots, groupRawIssues, meta, sprintWorkdays, syncedAt, removedCount);
             squadService.saveRollup(rollupForGroup);
 
             if (sprintId.equals(effectiveSprintId)) {
@@ -280,7 +295,14 @@ public class SquadSyncService {
 
         SprintMeta targetMeta = sprintInfo != null ? new SprintMeta(sprintInfo) : null;
         int targetWorkdays = targetMeta != null ? countWorkdays(targetMeta.startDate, targetMeta.endDate) : 0;
-        SquadMetricsRollup rollup = buildRollup(squadId, targetSprintId, snapshots, fetched.issues(), targetMeta, targetWorkdays, syncedAt);
+        int targetRemovedCount = 0;
+        if (targetMeta != null) {
+            Instant targetSprintStart = parseInstantFlexible(targetMeta.startDate);
+            if (targetSprintStart != null) {
+                targetRemovedCount = countRemovedFromSprint(creds.domain(), creds.token(), config.getJiraProjectKey(), targetSprintId, targetSprintStart, fields);
+            }
+        }
+        SquadMetricsRollup rollup = buildRollup(squadId, targetSprintId, snapshots, fetched.issues(), targetMeta, targetWorkdays, syncedAt, targetRemovedCount);
         squadService.saveRollup(rollup);
 
         List<ObjectNode> sprintHistory = loadSprintHistory(config);
@@ -862,7 +884,8 @@ public class SquadSyncService {
     // ===================== Rollup =====================
 
     private SquadMetricsRollup buildRollup(String squadId, String sprintId, List<SquadIssueSnapshot> mergedSnapshots,
-                                            List<ParsedJiraIssue> groupRawIssues, SprintMeta meta, int sprintWorkdays, String syncedAt) {
+                                            List<ParsedJiraIssue> groupRawIssues, SprintMeta meta, int sprintWorkdays,
+                                            String syncedAt, int removedFromSprintCount) {
         int totalIssues = mergedSnapshots.size();
         int doneIssues = (int) mergedSnapshots.stream().filter(s -> "done".equals(s.getStatusCategory())).count();
         int inProgressIssues = (int) mergedSnapshots.stream().filter(s -> "indeterminate".equals(s.getStatusCategory())).count();
@@ -901,7 +924,7 @@ public class SquadSyncService {
             Instant sprintStartInstant = parseInstantFlexible(meta.startDate);
             if (sprintStartInstant != null) {
                 extraMetrics.set("cycleTimeByStatus", buildCycleTimeByStatus(squadId, sprintId, groupRawIssues));
-                extraMetrics.set("scopeChurn", buildScopeChurn(groupRawIssues, sprintId, sprintStartInstant));
+                extraMetrics.set("scopeChurn", buildScopeChurn(groupRawIssues, sprintId, sprintStartInstant, removedFromSprintCount));
             }
         }
 
@@ -1068,7 +1091,7 @@ public class SquadSyncService {
         return Arrays.stream(raw.split("[,\\s]+")).map(String::trim).filter(s -> !s.isEmpty()).toList();
     }
 
-    private ObjectNode buildScopeChurn(List<ParsedJiraIssue> groupRawIssues, String sprintId, Instant sprintStart) {
+    private ObjectNode buildScopeChurn(List<ParsedJiraIssue> groupRawIssues, String sprintId, Instant sprintStart, int removedFromSprintCount) {
         int planned = 0;
         int added = 0;
         int carryover = 0;
@@ -1105,8 +1128,39 @@ public class SquadSyncService {
         node.put("planned", planned);
         node.put("added", added);
         node.put("carryover", carryover);
+        node.put("removed", removedFromSprintCount);
         node.put("total", planned + added);
         return node;
+    }
+
+    // Segunda JQL derivada (JQL sozinha não expressa "estava nesta sprint mas não está
+    // mais"): busca issues do projeto atualizadas desde o início da sprint que hoje NÃO
+    // estão nela, e filtra pelo changelog quais de fato SAÍRAM da sprint atual depois do
+    // início — adaptado de issue-service.js:extractRemovedFromCandidates (jiradash), mas
+    // devolvendo só a contagem (não a lista de issues) pra caber no formato compacto do
+    // rollup. Best-effort: qualquer falha aqui vira 0 (scopeChurn.removed subestimado),
+    // nunca aborta a sync.
+    private int countRemovedFromSprint(String domain, String token, String jiraProjectKey, String sprintId,
+                                        Instant sprintStart, List<String> fields) {
+        if (isBlank(jiraProjectKey)) return 0;
+        try {
+            String jql = "project = " + jiraProjectKey + " AND updated >= \"" + formatForJql(sprintStart.toString())
+                    + "\" AND sprint != " + sprintId;
+            FetchResult result = fetchAllIssues(domain, token, jql, fields, null, true);
+            int count = 0;
+            for (ParsedJiraIssue issue : result.issues()) {
+                for (RawSprintTransition t : sprintFieldTransitions(issue)) {
+                    if (t.fromIds().contains(sprintId) && !t.toIds().contains(sprintId) && t.date().isAfter(sprintStart)) {
+                        count++;
+                        break;
+                    }
+                }
+            }
+            return count;
+        } catch (Exception e) {
+            log.warn("[squad] falha ao buscar issues removidas da sprint {}: {}", sprintId, e.getMessage());
+            return 0;
+        }
     }
 
     // ===================== Métricas por pessoa =====================

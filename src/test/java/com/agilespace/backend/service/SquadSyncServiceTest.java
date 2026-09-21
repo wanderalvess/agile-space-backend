@@ -284,4 +284,42 @@ public class SquadSyncServiceTest {
         com.fasterxml.jackson.databind.JsonNode cycleTime = rollupCaptor.getValue().getExtraMetrics().get("cycleTimeByStatus");
         assertEquals(8.0, cycleTime.get("Em Andamento").asDouble(), 0.01);
     }
+
+    @Test
+    public void forceResyncSprint_countsIssuesRemovedFromSprintViaSecondaryQuery() {
+        Squad squad = baseSquad();
+        when(squadService.getSquad("SQ1")).thenReturn(Optional.of(squad));
+        when(userJiraConfigRepository.findById("u1")).thenReturn(Optional.of(creds()));
+        when(jiraService.getFields(anyString(), anyString())).thenReturn(ResponseEntity.ok("[]"));
+
+        String kept = "{\"key\":\"KEPT-1\",\"fields\":{"
+                + "\"issuetype\":{\"name\":\"Story\"},\"status\":{\"name\":\"To Do\",\"statusCategory\":{\"key\":\"new\"}},"
+                + "\"created\":\"2026-01-15T10:00:00.000-0300\",\"updated\":\"2026-01-15T10:00:00.000-0300\"}}";
+        when(jiraService.searchIssues(argThat(req -> req != null && !req.getJql().contains("sprint !="))))
+                .thenReturn(ResponseEntity.ok("{\"total\":1,\"issues\":[" + kept + "]}"));
+
+        // Saiu da sprint 3 dias depois do início -- é exatamente o que a JQL secundária
+        // (JQL sozinha não expressa "estava nesta sprint mas não está mais") deve achar.
+        String removed = "{\"key\":\"REMOVED-1\",\"fields\":{"
+                + "\"issuetype\":{\"name\":\"Story\"},\"status\":{\"name\":\"To Do\",\"statusCategory\":{\"key\":\"new\"}},"
+                + "\"created\":\"2026-01-15T10:00:00.000-0300\",\"updated\":\"2026-02-04T10:00:00.000-0300\"},"
+                + "\"changelog\":{\"histories\":[{\"created\":\"2026-02-04T09:00:00.000-0300\",\"items\":["
+                + "{\"field\":\"Sprint\",\"from\":\"SPRINT-9\",\"fromString\":\"Sprint 9\",\"to\":\"\",\"toString\":\"\"}]}]}}";
+        when(jiraService.searchIssues(argThat(req -> req != null && req.getJql().contains("sprint !="))))
+                .thenReturn(ResponseEntity.ok("{\"total\":1,\"issues\":[" + removed + "]}"));
+
+        when(jiraService.getSprint(anyString(), anyString(), eq("SPRINT-9"))).thenReturn(ResponseEntity.ok(
+                "{\"id\":\"SPRINT-9\",\"name\":\"Sprint 9\",\"state\":\"CLOSED\",\"startDate\":\"2026-02-01T00:00:00.000Z\",\"endDate\":\"2026-02-14T00:00:00.000Z\"}"));
+        when(squadService.getIssues("SQ1", "SPRINT-9")).thenReturn(List.of());
+        stubCommonSquadServiceCalls();
+
+        syncService.forceResyncSprint("SQ1", "u1", "SPRINT-9");
+
+        ArgumentCaptor<SquadMetricsRollup> rollupCaptor = ArgumentCaptor.forClass(SquadMetricsRollup.class);
+        verify(squadService).saveRollup(rollupCaptor.capture());
+        com.fasterxml.jackson.databind.JsonNode churn = rollupCaptor.getValue().getExtraMetrics().get("scopeChurn");
+        assertEquals(1, churn.get("removed").asInt());
+        // KEPT-1 não deve contaminar a contagem de removidas.
+        assertEquals(1, churn.get("planned").asInt() + churn.get("added").asInt());
+    }
 }
