@@ -276,8 +276,9 @@ public class SquadSyncService {
             }
         }
 
-        SquadMetricsRollup rollup = buildRollup(squadId, targetSprintId, snapshots, sprintInfo != null
-                ? new SprintMeta(sprintInfo) : null, 0, syncedAt);
+        SprintMeta targetMeta = sprintInfo != null ? new SprintMeta(sprintInfo) : null;
+        int targetWorkdays = targetMeta != null ? countWorkdays(targetMeta.startDate, targetMeta.endDate) : 0;
+        SquadMetricsRollup rollup = buildRollup(squadId, targetSprintId, snapshots, targetMeta, targetWorkdays, syncedAt);
         squadService.saveRollup(rollup);
 
         List<ObjectNode> sprintHistory = loadSprintHistory(config);
@@ -410,7 +411,7 @@ public class SquadSyncService {
     private record ParsedJiraIssue(
             String key, String type, boolean isBug, String status, String statusCategory,
             long estimateSec, long remainingSec, long loggedSec,
-            String updatedAtJira, String resolutionDate, String dueDate,
+            String updatedAtJira, String createdAtJira, String resolutionDate, String dueDate,
             String targetStart, String targetEnd, boolean datesAreInferred,
             String assigneeId, String assigneeName, String parentKey, String parentTitle,
             JsonNode sprintRaw, List<String> subtaskKeys, List<WorklogEntry> worklogs
@@ -506,7 +507,7 @@ public class SquadSyncService {
         JsonNode sprintRaw = extractSprintRaw(fields, sprintFieldId);
 
         return new ParsedJiraIssue(key, type, isBug, status, statusCategory, estimateSec, remainingSec, loggedSec,
-                updatedAtJira, resolutionDate, dueDate, targetStart, targetEnd, datesAreInferred,
+                updatedAtJira, created, resolutionDate, dueDate, targetStart, targetEnd, datesAreInferred,
                 assigneeId, assigneeName, parentKey, parentTitle, sprintRaw, subtaskKeys, worklogs);
     }
 
@@ -667,6 +668,7 @@ public class SquadSyncService {
                 .remainingSec(issue.remainingSec())
                 .loggedSec(issue.loggedSec())
                 .updatedAtJira(issue.updatedAtJira())
+                .createdAtJira(issue.createdAtJira())
                 .resolutionDate(issue.resolutionDate())
                 .staleSinceDays((int) daysSince(issue.updatedAtJira()))
                 .dueDate(issue.dueDate())
@@ -862,6 +864,7 @@ public class SquadSyncService {
         if (hasMeta) {
             extraMetrics.put("activeSprintStart", meta.startDate);
             extraMetrics.put("activeSprintEnd", meta.endDate);
+            extraMetrics.set("bugEscapeRate", buildBugEscapeRate(mergedSnapshots, meta));
         }
 
         return SquadMetricsRollup.builder()
@@ -875,6 +878,39 @@ public class SquadSyncService {
                 .workdaysTotal(hasMeta ? sprintWorkdays : null)
                 .extraMetrics(extraMetrics)
                 .build();
+    }
+
+    // Taxa de escape de bugs — adaptado de issue-service.js:getSprintBugs (jiradash).
+    // Simplificações conscientes: sem o "Tipo do Defeito" quebrado por customfield
+    // específico deste tenant (mesma razão de não copiar customfields hardcoded pra cá),
+    // e horas logadas somam a partição inteira de bugs desta sprint (não só o intervalo de
+    // datas exato do worklog) — o schema atual (squad_issue_worklog_cache) guarda hora
+    // total por autor, não por data, então "hora gasta dentro da janela" não é
+    // reconstruível com o dado que já persiste.
+    private ObjectNode buildBugEscapeRate(List<SquadIssueSnapshot> mergedSnapshots, SprintMeta meta) {
+        LocalDate windowStart = parseToLocalDate(meta.startDate);
+        LocalDate windowEnd = parseToLocalDate(meta.endDate);
+        ObjectNode node = objectMapper.createObjectNode();
+        if (windowStart == null || windowEnd == null) return node;
+
+        List<SquadIssueSnapshot> bugs = mergedSnapshots.stream().filter(s -> Boolean.TRUE.equals(s.getIsBug())).toList();
+        List<SquadIssueSnapshot> createdInWindow = bugs.stream()
+                .filter(s -> isWithinWindow(s.getCreatedAtJira(), windowStart, windowEnd)).toList();
+        long resolvedInWindow = createdInWindow.stream()
+                .filter(s -> isWithinWindow(s.getResolutionDate(), windowStart, windowEnd)).count();
+        long stillOpen = createdInWindow.size() - resolvedInWindow;
+        long bugHoursLoggedSec = bugs.stream().mapToLong(s -> s.getLoggedSec() != null ? s.getLoggedSec() : 0).sum();
+
+        node.put("created", createdInWindow.size());
+        node.put("resolvedInSprint", (int) resolvedInWindow);
+        node.put("stillOpen", (int) stillOpen);
+        node.put("loggedSec", bugHoursLoggedSec);
+        return node;
+    }
+
+    private static boolean isWithinWindow(String iso, LocalDate windowStart, LocalDate windowEnd) {
+        LocalDate date = parseToLocalDate(iso);
+        return date != null && !date.isBefore(windowStart) && !date.isAfter(windowEnd);
     }
 
     // ===================== Métricas por pessoa =====================

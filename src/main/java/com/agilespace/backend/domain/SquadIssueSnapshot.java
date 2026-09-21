@@ -104,6 +104,11 @@ public class SquadIssueSnapshot {
     @Column(name = "updated_at_jira")
     private String updatedAtJira;
 
+    // Jira `created` — usado pra taxa de escape de bugs (bug criado dentro da janela da
+    // sprint?), não confundir com syncedAt (quando ESTA linha foi sincronizada).
+    @Column(name = "created_at_jira")
+    private String createdAtJira;
+
     // Jira `resolutiondate` — só muda uma vez, quando a issue resolve/fecha
     // (diferente de updatedAtJira, que muda a qualquer edição). Usado pro
     // sinal "concluiu atrasado" sem falso-positivo de edição tardia.

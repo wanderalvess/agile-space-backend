@@ -67,6 +67,15 @@ public class SquadSyncServiceTest {
         return "{\"total\":" + keys.length + ",\"issues\":[" + issues + "]}";
     }
 
+    private String bugIssueJson(String key, String created, String resolutionDate) {
+        return "{\"key\":\"" + key + "\",\"fields\":{"
+                + "\"issuetype\":{\"name\":\"Bug\"},"
+                + "\"status\":{\"name\":\"To Do\",\"statusCategory\":{\"key\":\"new\"}},"
+                + "\"created\":\"" + created + "\","
+                + (resolutionDate != null ? "\"resolutiondate\":\"" + resolutionDate + "\"," : "")
+                + "\"updated\":\"" + created + "\"}}";
+    }
+
     private void stubCommonSquadServiceCalls() {
         when(squadService.getMembers("SQ1")).thenReturn(List.of());
         when(squadService.batchUpsertIssues(anyString(), any())).thenAnswer(inv -> inv.getArgument(1));
@@ -176,5 +185,35 @@ public class SquadSyncServiceTest {
         // forceResyncSprint nunca deve mexer em activeSprintId — é escape hatch pra sprint
         // encerrada, não pode pisar em qual sprint a tela mostra como "atual".
         verify(squadService, never()).saveSquad(argThat(s -> s.getActiveSprintId() != null));
+    }
+
+    @Test
+    public void forceResyncSprint_computesBugEscapeRateWithinTheSprintWindow() {
+        Squad squad = baseSquad();
+        when(squadService.getSquad("SQ1")).thenReturn(Optional.of(squad));
+        when(userJiraConfigRepository.findById("u1")).thenReturn(Optional.of(creds()));
+        when(jiraService.getFields(anyString(), anyString())).thenReturn(ResponseEntity.ok("[]"));
+        // Bug-1: criado e resolvido dentro da janela da sprint (2026-02-01 a 2026-02-14) —
+        // "escapou" mas já foi corrigido. Bug-2: criado dentro da janela, sem resolutiondate —
+        // ainda aberto. Bug-3: criado ANTES da janela — não conta como escape desta sprint.
+        String issuesJson = "{\"total\":3,\"issues\":["
+                + bugIssueJson("BUG-1", "2026-02-02T10:00:00.000-0300", "2026-02-05T10:00:00.000-0300") + ","
+                + bugIssueJson("BUG-2", "2026-02-10T10:00:00.000-0300", null) + ","
+                + bugIssueJson("BUG-3", "2026-01-20T10:00:00.000-0300", null)
+                + "]}";
+        when(jiraService.searchIssues(any())).thenReturn(ResponseEntity.ok(issuesJson));
+        when(jiraService.getSprint(anyString(), anyString(), eq("SPRINT-9"))).thenReturn(ResponseEntity.ok(
+                "{\"id\":\"SPRINT-9\",\"name\":\"Sprint 9\",\"state\":\"CLOSED\",\"startDate\":\"2026-02-01T00:00:00.000Z\",\"endDate\":\"2026-02-14T00:00:00.000Z\"}"));
+        when(squadService.getIssues("SQ1", "SPRINT-9")).thenReturn(List.of());
+        stubCommonSquadServiceCalls();
+
+        syncService.forceResyncSprint("SQ1", "u1", "SPRINT-9");
+
+        ArgumentCaptor<SquadMetricsRollup> rollupCaptor = ArgumentCaptor.forClass(SquadMetricsRollup.class);
+        verify(squadService).saveRollup(rollupCaptor.capture());
+        com.fasterxml.jackson.databind.JsonNode bugEscapeRate = rollupCaptor.getValue().getExtraMetrics().get("bugEscapeRate");
+        assertEquals(2, bugEscapeRate.get("created").asInt());
+        assertEquals(1, bugEscapeRate.get("resolvedInSprint").asInt());
+        assertEquals(1, bugEscapeRate.get("stillOpen").asInt());
     }
 }
