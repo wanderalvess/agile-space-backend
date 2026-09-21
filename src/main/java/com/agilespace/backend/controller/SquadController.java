@@ -24,6 +24,7 @@ public class SquadController {
     private final SquadService squadService;
     private final com.agilespace.backend.service.SquadSyncService squadSyncService;
     private final com.agilespace.backend.service.SquadSyncGuard squadSyncGuard;
+    private final com.agilespace.backend.service.SquadCapacityService squadCapacityService;
     private final UserRepository userRepository;
     private final com.agilespace.backend.service.UserProjectResolverService userProjectResolverService;
 
@@ -389,6 +390,28 @@ public class SquadController {
         requireSquadWriteAccess(squadId, request);
         squadService.deleteWorklogCacheEntry(squadId, jiraKey);
         return ResponseEntity.noContent().build();
+    }
+
+    // ----- Person Config (papel/capacidade, herança sprint atual -> anterior -> global) -----
+    @GetMapping("/{squadId}/person-config/{jiraAccountId}")
+    public ResponseEntity<com.agilespace.backend.service.SquadCapacityService.ResolvedPersonConfig> getPersonConfig(
+            @PathVariable String squadId,
+            @PathVariable String jiraAccountId,
+            @RequestParam(required = false) String sprintId,
+            HttpServletRequest request) {
+        requireSquadReadAccess(squadId, request);
+        return ResponseEntity.ok(squadCapacityService.resolve(squadId, sprintId, jiraAccountId));
+    }
+
+    @PutMapping("/{squadId}/person-config/{jiraAccountId}")
+    public ResponseEntity<SquadPersonConfig> savePersonConfig(
+            @PathVariable String squadId,
+            @PathVariable String jiraAccountId,
+            @RequestParam(required = false) String sprintId,
+            @RequestBody SquadPersonConfig updates,
+            HttpServletRequest request) {
+        requireSquadWriteAccess(squadId, request);
+        return ResponseEntity.ok(squadCapacityService.save(squadId, jiraAccountId, sprintId, updates));
     }
 
     // ----- Panels -----
