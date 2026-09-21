@@ -1,24 +1,23 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.UserFocusSession;
-import com.agilespace.backend.repository.UserFocusSessionRepository;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
+import com.agilespace.backend.service.UserFocusSessionService;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
-import java.time.LocalDateTime;
+
 import java.util.List;
-import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/focus-sessions")
+@RequiredArgsConstructor
 public class UserFocusSessionController {
 
-    @Autowired
-    private UserFocusSessionRepository repository;
+    private final UserFocusSessionService service;
 
     /**
      * Sessão de foco é dado pessoal: só o próprio usuário (ou um ADMIN) lê e grava.
@@ -38,18 +37,12 @@ public class UserFocusSessionController {
     @GetMapping("/{userId}")
     public ResponseEntity<List<UserFocusSession>> getSessions(@PathVariable String userId, HttpServletRequest request) {
         requireSelfOrAdmin(userId, request);
-        return ResponseEntity.ok(repository.findByUserIdOrderByCreatedAtDesc(userId));
+        return ResponseEntity.ok(service.getSessions(userId));
     }
 
     @PostMapping("/{userId}")
     public ResponseEntity<UserFocusSession> saveSession(@PathVariable String userId, @RequestBody UserFocusSession session, HttpServletRequest request) {
         requireSelfOrAdmin(userId, request);
-        session.setUserId(userId);
-        if (session.getId() == null || session.getId().isEmpty()) {
-            session.setId(UUID.randomUUID().toString());
-        }
-        session.setCreatedAt(LocalDateTime.now());
-        UserFocusSession saved = repository.save(session);
-        return ResponseEntity.ok(saved);
+        return ResponseEntity.ok(service.saveSession(userId, session));
     }
 }

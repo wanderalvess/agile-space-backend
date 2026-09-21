@@ -1,57 +1,47 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.Feedback;
-import com.agilespace.backend.repository.FeedbackRepository;
-import org.springframework.beans.factory.annotation.Autowired;
+import com.agilespace.backend.service.FeedbackService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import java.time.LocalDateTime;
+
 import java.util.List;
-import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/feedbacks")
+@RequiredArgsConstructor
 public class FeedbackController {
 
-    @Autowired
-    private FeedbackRepository repository;
+    private final FeedbackService service;
 
     @GetMapping
     public ResponseEntity<List<Feedback>> getAllFeedbacks() {
-        return ResponseEntity.ok(repository.findByOrderByCreatedAtDesc());
+        return ResponseEntity.ok(service.getAllFeedbacks());
     }
 
     @GetMapping(params = "status")
     public ResponseEntity<List<Feedback>> getFeedbacksByStatus(@RequestParam String status) {
-        return ResponseEntity.ok(repository.findByStatus(status));
+        return ResponseEntity.ok(service.getFeedbacksByStatus(status));
     }
 
     @PostMapping
     public ResponseEntity<Feedback> saveFeedback(@RequestBody Feedback feedback) {
-        if (feedback.getId() == null || feedback.getId().isEmpty()) {
-            feedback.setId(UUID.randomUUID().toString());
-        }
-        feedback.setCreatedAt(LocalDateTime.now());
-        Feedback saved = repository.save(feedback);
-        return ResponseEntity.ok(saved);
+        return ResponseEntity.ok(service.saveFeedback(feedback));
     }
 
     @PatchMapping("/{id}/status")
     public ResponseEntity<Feedback> updateFeedbackStatus(@PathVariable String id, @RequestParam String status) {
-        return repository.findById(id)
-                .map(feedback -> {
-                    feedback.setStatus(status);
-                    return ResponseEntity.ok(repository.save(feedback));
-                })
+        return service.updateFeedbackStatus(id, status)
+                .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteFeedback(@PathVariable String id) {
-        if (!repository.existsById(id)) {
+        if (!service.deleteFeedback(id)) {
             return ResponseEntity.notFound().build();
         }
-        repository.deleteById(id);
         return ResponseEntity.noContent().build();
     }
 }
