@@ -247,10 +247,11 @@ public class JiraService {
             String encodedJql = java.net.URLEncoder.encode(request.getJql().trim(), java.nio.charset.StandardCharsets.UTF_8);
             String encodedFields = java.net.URLEncoder.encode(fieldsStr, java.nio.charset.StandardCharsets.UTF_8);
             
+            String expand = Boolean.TRUE.equals(request.getIncludeChangelog()) ? "renderedFields,changelog" : "renderedFields";
             String urlStr = "https://" + cleanDomain + "/rest/api/2/search"
                     + "?jql=" + encodedJql
                     + "&fields=" + encodedFields
-                    + "&expand=renderedFields"
+                    + "&expand=" + expand
                     + "&maxResults=" + maxResults
                     + "&startAt=" + startAt;
             

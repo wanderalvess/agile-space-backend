@@ -14,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -75,6 +76,7 @@ public class SquadSyncService {
 
     private final SquadService squadService;
     private final JiraService jiraService;
+    private final SquadCapacityService squadCapacityService;
     private final UserJiraConfigRepository userJiraConfigRepository;
     private final ObjectMapper objectMapper;
 
@@ -115,7 +117,7 @@ public class SquadSyncService {
         String deltaJql = isFull ? config.getSyncJql()
                 : "(" + config.getSyncJql() + ") AND updated >= \"" + formatForJql(subtractMinutesToIso(config.getLastSyncAt(), 2)) + "\"";
 
-        FetchResult fetched = fetchAllIssues(creds.domain(), creds.token(), deltaJql, fields, config.getSprintFieldId());
+        FetchResult fetched = fetchAllIssues(creds.domain(), creds.token(), deltaJql, fields, config.getSprintFieldId(), isFull);
         List<ParsedJiraIssue> issues = fetched.issues();
         boolean truncated = fetched.truncated();
 
@@ -134,7 +136,7 @@ public class SquadSyncService {
         if (!isFull && !isBlank(config.getActiveSprintId())
                 && !effectiveSprintId.equals(config.getActiveSprintId()) && !UNMAPPED_SPRINT_ID.equals(effectiveSprintId)) {
             isFull = true;
-            FetchResult full = fetchAllIssues(creds.domain(), creds.token(), config.getSyncJql(), fields, config.getSprintFieldId());
+            FetchResult full = fetchAllIssues(creds.domain(), creds.token(), config.getSyncJql(), fields, config.getSprintFieldId(), true);
             issues = full.issues();
             truncated = truncated || full.truncated();
             mapped = mapIssuesToSnapshots(issues, syncedAt);
@@ -186,7 +188,7 @@ public class SquadSyncService {
 
             SprintMeta meta = sprintMeta.get(sprintId);
             int sprintWorkdays = meta != null ? countWorkdays(meta.startDate, meta.endDate) : 0;
-            SquadMetricsRollup rollupForGroup = buildRollup(squadId, sprintId, mergedSnapshots, meta, sprintWorkdays, syncedAt);
+            SquadMetricsRollup rollupForGroup = buildRollup(squadId, sprintId, mergedSnapshots, groupRawIssues, meta, sprintWorkdays, syncedAt);
             squadService.saveRollup(rollupForGroup);
 
             if (sprintId.equals(effectiveSprintId)) {
@@ -244,7 +246,7 @@ public class SquadSyncService {
                         .matcher(config.getSyncJql()).replaceFirst("sprint = " + Matcher.quoteReplacement(targetSprintId))
                 : "project = " + config.getJiraProjectKey() + " AND sprint = " + targetSprintId;
 
-        FetchResult fetched = fetchAllIssues(creds.domain(), creds.token(), targetJql, fields, config.getSprintFieldId());
+        FetchResult fetched = fetchAllIssues(creds.domain(), creds.token(), targetJql, fields, config.getSprintFieldId(), true);
         if (fetched.truncated()) {
             log.warn("[squad:{}] forceResyncSprint truncado no teto de páginas — pode haver issues fora do escopo sincronizado.", squadId);
         }
@@ -278,7 +280,7 @@ public class SquadSyncService {
 
         SprintMeta targetMeta = sprintInfo != null ? new SprintMeta(sprintInfo) : null;
         int targetWorkdays = targetMeta != null ? countWorkdays(targetMeta.startDate, targetMeta.endDate) : 0;
-        SquadMetricsRollup rollup = buildRollup(squadId, targetSprintId, snapshots, targetMeta, targetWorkdays, syncedAt);
+        SquadMetricsRollup rollup = buildRollup(squadId, targetSprintId, snapshots, fetched.issues(), targetMeta, targetWorkdays, syncedAt);
         squadService.saveRollup(rollup);
 
         List<ObjectNode> sprintHistory = loadSprintHistory(config);
@@ -414,10 +416,24 @@ public class SquadSyncService {
             String updatedAtJira, String createdAtJira, String resolutionDate, String dueDate,
             String targetStart, String targetEnd, boolean datesAreInferred,
             String assigneeId, String assigneeName, String parentKey, String parentTitle,
-            JsonNode sprintRaw, List<String> subtaskKeys, List<WorklogEntry> worklogs
+            JsonNode sprintRaw, List<String> subtaskKeys, List<WorklogEntry> worklogs,
+            List<ChangelogEntry> changelog
     ) {}
 
+    // field usa nomes diferentes conforme o campo do Jira: status manda fromString/toString
+    // (nome de exibição); Sprint manda from/to (IDs separados por vírgula) — por isso os 4.
+    private record ChangelogItem(String field, String from, String fromDisplay, String to, String toDisplay) {}
+    private record ChangelogEntry(Instant created, List<ChangelogItem> items) {}
+
     private FetchResult fetchAllIssues(String domain, String token, String jql, List<String> fields, String sprintFieldId) {
+        return fetchAllIssues(domain, token, jql, fields, sprintFieldId, false);
+    }
+
+    // includeChangelog liga expand=changelog no Jira — payload bem mais pesado (histórico
+    // inteiro de transições por issue), então só o sync FULL pede isso, pra cycle
+    // time/scope churn (ver buildRollup) — nunca no sync delta. Ver plano de unificação
+    // Squad Pulse + jiradash, Fase 7.
+    private FetchResult fetchAllIssues(String domain, String token, String jql, List<String> fields, String sprintFieldId, boolean includeChangelog) {
         List<ParsedJiraIssue> all = new ArrayList<>();
         int total = Integer.MAX_VALUE;
         int startAt = 0;
@@ -430,6 +446,7 @@ public class SquadSyncService {
             req.setMaxResults(PAGE_SIZE);
             req.setStartAt(startAt);
             req.setFields(fields);
+            req.setIncludeChangelog(includeChangelog);
             ResponseEntity<String> resp = jiraService.searchIssues(req);
             if (!resp.getStatusCode().is2xxSuccessful()) {
                 throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
@@ -506,9 +523,25 @@ public class SquadSyncService {
 
         JsonNode sprintRaw = extractSprintRaw(fields, sprintFieldId);
 
+        List<ChangelogEntry> changelog = new ArrayList<>();
+        for (JsonNode history : issueNode.path("changelog").path("histories")) {
+            Instant historyCreated = parseInstantFlexible(history.path("created").asText(""));
+            if (historyCreated == null) continue;
+            List<ChangelogItem> items = new ArrayList<>();
+            for (JsonNode item : history.path("items")) {
+                items.add(new ChangelogItem(
+                        item.path("field").asText(""),
+                        item.hasNonNull("from") ? item.path("from").asText("") : null,
+                        item.hasNonNull("fromString") ? item.path("fromString").asText("") : null,
+                        item.hasNonNull("to") ? item.path("to").asText("") : null,
+                        item.hasNonNull("toString") ? item.path("toString").asText("") : null));
+            }
+            changelog.add(new ChangelogEntry(historyCreated, items));
+        }
+
         return new ParsedJiraIssue(key, type, isBug, status, statusCategory, estimateSec, remainingSec, loggedSec,
                 updatedAtJira, created, resolutionDate, dueDate, targetStart, targetEnd, datesAreInferred,
-                assigneeId, assigneeName, parentKey, parentTitle, sprintRaw, subtaskKeys, worklogs);
+                assigneeId, assigneeName, parentKey, parentTitle, sprintRaw, subtaskKeys, worklogs, changelog);
     }
 
     private static JsonNode extractSprintRaw(JsonNode fields, String sprintFieldId) {
@@ -829,7 +862,7 @@ public class SquadSyncService {
     // ===================== Rollup =====================
 
     private SquadMetricsRollup buildRollup(String squadId, String sprintId, List<SquadIssueSnapshot> mergedSnapshots,
-                                            SprintMeta meta, int sprintWorkdays, String syncedAt) {
+                                            List<ParsedJiraIssue> groupRawIssues, SprintMeta meta, int sprintWorkdays, String syncedAt) {
         int totalIssues = mergedSnapshots.size();
         int doneIssues = (int) mergedSnapshots.stream().filter(s -> "done".equals(s.getStatusCategory())).count();
         int inProgressIssues = (int) mergedSnapshots.stream().filter(s -> "indeterminate".equals(s.getStatusCategory())).count();
@@ -865,6 +898,11 @@ public class SquadSyncService {
             extraMetrics.put("activeSprintStart", meta.startDate);
             extraMetrics.put("activeSprintEnd", meta.endDate);
             extraMetrics.set("bugEscapeRate", buildBugEscapeRate(mergedSnapshots, meta));
+            Instant sprintStartInstant = parseInstantFlexible(meta.startDate);
+            if (sprintStartInstant != null) {
+                extraMetrics.set("cycleTimeByStatus", buildCycleTimeByStatus(squadId, sprintId, groupRawIssues));
+                extraMetrics.set("scopeChurn", buildScopeChurn(groupRawIssues, sprintId, sprintStartInstant));
+            }
         }
 
         return SquadMetricsRollup.builder()
@@ -911,6 +949,164 @@ public class SquadSyncService {
     private static boolean isWithinWindow(String iso, LocalDate windowStart, LocalDate windowEnd) {
         LocalDate date = parseToLocalDate(iso);
         return date != null && !date.isBefore(windowStart) && !date.isAfter(windowEnd);
+    }
+
+    // ===================== Cycle time por status (horas produtivas) =====================
+    // Adaptado de issue-service.js:getStatusEvents/cycleTimeByStatus (jiradash). Só roda
+    // com changelog disponível (sync FULL — ver fetchAllIssues), e só soma issues resolvidas.
+    // Simplificação consciente: o original pula o status TERMINAL nomeando-o via
+    // issueRules.isClosed (lista de nomes PT-BR tipo "Concluído"/"Cancelado", não portada
+    // aqui) — em vez disso, esta versão nunca processa o ÚLTIMO evento de status de uma
+    // issue resolvida, que por construção É o status terminal (é o motivo dela ter
+    // resolutionDate) — mesmo efeito prático, sem depender de nomes de status específicos.
+    private record RawStatusTransition(Instant date, String from, String to) {}
+    private record StatusEvent(Instant date, String status) {}
+
+    private List<StatusEvent> buildStatusEvents(ParsedJiraIssue issue) {
+        Instant created = parseInstantFlexible(issue.createdAtJira());
+        if (created == null) return List.of();
+        List<RawStatusTransition> transitions = new ArrayList<>();
+        for (ChangelogEntry h : issue.changelog()) {
+            for (ChangelogItem item : h.items()) {
+                if ("status".equals(item.field())) {
+                    transitions.add(new RawStatusTransition(h.created(), item.fromDisplay(), item.toDisplay()));
+                }
+            }
+        }
+        transitions.sort(Comparator.comparing(RawStatusTransition::date));
+        String initialStatus = !transitions.isEmpty() ? transitions.get(0).from() : issue.status();
+
+        List<StatusEvent> events = new ArrayList<>();
+        events.add(new StatusEvent(created, initialStatus));
+        for (RawStatusTransition t : transitions) events.add(new StatusEvent(t.date(), t.to()));
+        return events;
+    }
+
+    private void accumulateCycleTime(ParsedJiraIssue issue, double horasProdutivas, Map<String, Double> acc) {
+        if (isBlank(issue.resolutionDate()) || !(horasProdutivas > 0)) return;
+        List<StatusEvent> events = buildStatusEvents(issue);
+        if (events.size() < 2) return; // sem transição nenhuma não há intervalo pra medir
+        for (int i = 0; i < events.size() - 1; i++) {
+            Instant start = events.get(i).date();
+            Instant end = events.get(i + 1).date();
+            if (!end.isAfter(start)) continue;
+            String status = events.get(i).status();
+            if (isBlank(status)) continue;
+            double prodHours = productiveHoursBetween(start, end, horasProdutivas);
+            if (prodHours > 0) acc.merge(status, prodHours, Double::sum);
+        }
+    }
+
+    private ObjectNode buildCycleTimeByStatus(String squadId, String sprintId, List<ParsedJiraIssue> groupRawIssues) {
+        Map<String, Double> totalsByStatus = new LinkedHashMap<>();
+        Map<String, Double> capacityCache = new HashMap<>();
+        for (ParsedJiraIssue issue : groupRawIssues) {
+            if (isBlank(issue.assigneeId())) continue;
+            double horasProdutivas = capacityCache.computeIfAbsent(issue.assigneeId(),
+                    id -> squadCapacityService.resolve(squadId, sprintId, id).horasProdutivas());
+            accumulateCycleTime(issue, horasProdutivas, totalsByStatus);
+        }
+        ObjectNode node = objectMapper.createObjectNode();
+        totalsByStatus.forEach(node::put);
+        return node;
+    }
+
+    // Horas produtivas entre dois instantes: intersecta cada dia útil (seg-sex) com a
+    // janela 8h-18h, escala pelo prodRatio (horasProdutivas / 10h). Fins de semana e
+    // horário fora da janela contam 0. Adaptado de issue-service.js:productiveHoursBetween.
+    private static double productiveHoursBetween(Instant start, Instant end, double horasProdutivasPorDia) {
+        if (!(horasProdutivasPorDia > 0) || !end.isAfter(start)) return 0;
+        int workStartHour = 8;
+        int workEndHour = 18;
+        double prodRatio = horasProdutivasPorDia / (workEndHour - workStartHour);
+        ZoneId zone = ZoneId.systemDefault();
+        ZonedDateTime a = start.atZone(zone);
+        ZonedDateTime b = end.atZone(zone);
+
+        double total = 0;
+        ZonedDateTime cursor = a.toLocalDate().atStartOfDay(zone);
+        while (cursor.isBefore(b)) {
+            DayOfWeek dow = cursor.getDayOfWeek();
+            if (dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY) {
+                ZonedDateTime dayStart = cursor.withHour(workStartHour);
+                ZonedDateTime dayEnd = cursor.withHour(workEndHour);
+                ZonedDateTime segStart = dayStart.isBefore(a) ? a : dayStart;
+                ZonedDateTime segEnd = dayEnd.isAfter(b) ? b : dayEnd;
+                if (segEnd.isAfter(segStart)) {
+                    total += Duration.between(segStart, segEnd).toMillis() / 3_600_000.0 * prodRatio;
+                }
+            }
+            cursor = cursor.plusDays(1);
+        }
+        return total;
+    }
+
+    // ===================== Scope churn =====================
+    // Adaptado de issue-service.js:getSprintChurn (jiradash). Classifica issues de topo
+    // (sem parentKey — jiradash chama de "parents") em planejada vs. adicionada depois do
+    // início, e marca carryover (veio de outra sprint antes de entrar nesta). Não inclui
+    // "removidas da sprint" (extractRemovedFromCandidates no original) — isso precisa de
+    // uma segunda JQL derivada (`project=X AND updated>=inicio AND sprint!=sprintAtual`,
+    // filtrada por changelog), deixada pra um passo futuro.
+    private record RawSprintTransition(Instant date, List<String> fromIds, List<String> toIds) {}
+
+    private List<RawSprintTransition> sprintFieldTransitions(ParsedJiraIssue issue) {
+        List<RawSprintTransition> out = new ArrayList<>();
+        for (ChangelogEntry h : issue.changelog()) {
+            for (ChangelogItem item : h.items()) {
+                if ("Sprint".equals(item.field())) {
+                    out.add(new RawSprintTransition(h.created(), parseIds(item.from()), parseIds(item.to())));
+                }
+            }
+        }
+        out.sort(Comparator.comparing(RawSprintTransition::date));
+        return out;
+    }
+
+    private static List<String> parseIds(String raw) {
+        if (isBlank(raw)) return List.of();
+        return Arrays.stream(raw.split("[,\\s]+")).map(String::trim).filter(s -> !s.isEmpty()).toList();
+    }
+
+    private ObjectNode buildScopeChurn(List<ParsedJiraIssue> groupRawIssues, String sprintId, Instant sprintStart) {
+        int planned = 0;
+        int added = 0;
+        int carryover = 0;
+        for (ParsedJiraIssue issue : groupRawIssues) {
+            if (!isBlank(issue.parentKey())) continue; // churn é só sobre issues de topo, não subtasks
+            List<RawSprintTransition> changes = sprintFieldTransitions(issue);
+
+            Instant addedDate = null;
+            for (RawSprintTransition t : changes) {
+                if (t.toIds().contains(sprintId) && !t.fromIds().contains(sprintId)) {
+                    addedDate = t.date();
+                    break;
+                }
+            }
+            if (addedDate == null) addedDate = parseInstantFlexible(issue.createdAtJira());
+            if (addedDate == null) addedDate = sprintStart;
+
+            if (addedDate.isAfter(sprintStart)) added++; else planned++;
+
+            boolean isCarryover = false;
+            for (RawSprintTransition t : changes) {
+                if (t.date().isAfter(addedDate)) break;
+                if (t.date().isBefore(addedDate)) {
+                    if (t.toIds().stream().anyMatch(id -> !id.equals(sprintId))) { isCarryover = true; break; }
+                } else if (t.fromIds().stream().anyMatch(id -> !id.equals(sprintId))) {
+                    isCarryover = true;
+                    break;
+                }
+            }
+            if (isCarryover) carryover++;
+        }
+
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("planned", planned);
+        node.put("added", added);
+        node.put("carryover", carryover);
+        node.put("total", planned + added);
+        return node;
     }
 
     // ===================== Métricas por pessoa =====================

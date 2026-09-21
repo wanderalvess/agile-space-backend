@@ -33,6 +33,7 @@ public class SquadSyncServiceTest {
 
     @Mock private SquadService squadService;
     @Mock private JiraService jiraService;
+    @Mock private SquadCapacityService squadCapacityService;
     @Mock private UserJiraConfigRepository userJiraConfigRepository;
 
     private SquadSyncService syncService;
@@ -40,7 +41,7 @@ public class SquadSyncServiceTest {
     @BeforeEach
     public void setup() {
         MockitoAnnotations.openMocks(this);
-        syncService = new SquadSyncService(squadService, jiraService, userJiraConfigRepository, new ObjectMapper());
+        syncService = new SquadSyncService(squadService, jiraService, squadCapacityService, userJiraConfigRepository, new ObjectMapper());
     }
 
     private Squad baseSquad() {
@@ -215,5 +216,72 @@ public class SquadSyncServiceTest {
         assertEquals(2, bugEscapeRate.get("created").asInt());
         assertEquals(1, bugEscapeRate.get("resolvedInSprint").asInt());
         assertEquals(1, bugEscapeRate.get("stillOpen").asInt());
+    }
+
+    @Test
+    public void forceResyncSprint_classifiesScopeChurnFromSprintFieldChangelog() {
+        Squad squad = baseSquad();
+        when(squadService.getSquad("SQ1")).thenReturn(Optional.of(squad));
+        when(userJiraConfigRepository.findById("u1")).thenReturn(Optional.of(creds()));
+        when(jiraService.getFields(anyString(), anyString())).thenReturn(ResponseEntity.ok("[]"));
+        // PLANNED-1: criada antes do início da sprint, sem transição de Sprint no changelog
+        // -> addedDate cai no fallback (created), que é antes do início -> planejada.
+        String planned = "{\"key\":\"PLANNED-1\",\"fields\":{"
+                + "\"issuetype\":{\"name\":\"Story\"},\"status\":{\"name\":\"To Do\",\"statusCategory\":{\"key\":\"new\"}},"
+                + "\"created\":\"2026-01-15T10:00:00.000-0300\",\"updated\":\"2026-01-15T10:00:00.000-0300\"}}";
+        // ADDED-1: criada antes do inicio, mas o changelog mostra que só entrou na sprint
+        // DEPOIS do início (2026-02-05 > 2026-02-01) -> adicionada após o início.
+        String added = "{\"key\":\"ADDED-1\",\"fields\":{"
+                + "\"issuetype\":{\"name\":\"Story\"},\"status\":{\"name\":\"To Do\",\"statusCategory\":{\"key\":\"new\"}},"
+                + "\"created\":\"2026-01-10T10:00:00.000-0300\",\"updated\":\"2026-02-05T10:00:00.000-0300\"},"
+                + "\"changelog\":{\"histories\":[{\"created\":\"2026-02-05T09:00:00.000-0300\",\"items\":["
+                + "{\"field\":\"Sprint\",\"from\":\"\",\"fromString\":\"\",\"to\":\"SPRINT-9\",\"toString\":\"Sprint 9\"}]}]}}";
+        when(jiraService.searchIssues(any())).thenReturn(ResponseEntity.ok(
+                "{\"total\":2,\"issues\":[" + planned + "," + added + "]}"));
+        when(jiraService.getSprint(anyString(), anyString(), eq("SPRINT-9"))).thenReturn(ResponseEntity.ok(
+                "{\"id\":\"SPRINT-9\",\"name\":\"Sprint 9\",\"state\":\"CLOSED\",\"startDate\":\"2026-02-01T00:00:00.000Z\",\"endDate\":\"2026-02-14T00:00:00.000Z\"}"));
+        when(squadService.getIssues("SQ1", "SPRINT-9")).thenReturn(List.of());
+        stubCommonSquadServiceCalls();
+
+        syncService.forceResyncSprint("SQ1", "u1", "SPRINT-9");
+
+        ArgumentCaptor<SquadMetricsRollup> rollupCaptor = ArgumentCaptor.forClass(SquadMetricsRollup.class);
+        verify(squadService).saveRollup(rollupCaptor.capture());
+        com.fasterxml.jackson.databind.JsonNode churn = rollupCaptor.getValue().getExtraMetrics().get("scopeChurn");
+        assertEquals(1, churn.get("planned").asInt());
+        assertEquals(1, churn.get("added").asInt());
+        assertEquals(0, churn.get("carryover").asInt());
+    }
+
+    @Test
+    public void forceResyncSprint_computesCycleTimeByStatusUsingAssigneeCapacity() {
+        Squad squad = baseSquad();
+        when(squadService.getSquad("SQ1")).thenReturn(Optional.of(squad));
+        when(userJiraConfigRepository.findById("u1")).thenReturn(Optional.of(creds()));
+        when(jiraService.getFields(anyString(), anyString())).thenReturn(ResponseEntity.ok("[]"));
+        // Issue passou por "Em Andamento" de 2026-02-02 09:00 a 2026-02-03 09:00 (1 dia útil
+        // inteiro), depois resolvida — 8h produtivas/dia, janela 8h-18h (10h) -> prodRatio=0.8
+        // -> 1 dia útil inteiro (10h de janela) * 0.8 = 8h produtivas nesse status.
+        String issueJson = "{\"key\":\"CT-1\",\"fields\":{"
+                + "\"issuetype\":{\"name\":\"Story\"},\"status\":{\"name\":\"Concluído\",\"statusCategory\":{\"key\":\"done\"}},"
+                + "\"assignee\":{\"accountId\":\"acc-1\",\"displayName\":\"Fulano\"},"
+                + "\"created\":\"2026-02-02T09:00:00.000-0300\",\"updated\":\"2026-02-03T09:00:00.000-0300\","
+                + "\"resolutiondate\":\"2026-02-03T09:00:00.000-0300\"},"
+                + "\"changelog\":{\"histories\":[{\"created\":\"2026-02-03T09:00:00.000-0300\",\"items\":["
+                + "{\"field\":\"status\",\"from\":\"3\",\"fromString\":\"Em Andamento\",\"to\":\"10\",\"toString\":\"Concluído\"}]}]}}";
+        when(jiraService.searchIssues(any())).thenReturn(ResponseEntity.ok("{\"total\":1,\"issues\":[" + issueJson + "]}"));
+        when(jiraService.getSprint(anyString(), anyString(), eq("SPRINT-9"))).thenReturn(ResponseEntity.ok(
+                "{\"id\":\"SPRINT-9\",\"name\":\"Sprint 9\",\"state\":\"CLOSED\",\"startDate\":\"2026-02-01T00:00:00.000Z\",\"endDate\":\"2026-02-14T00:00:00.000Z\"}"));
+        when(squadService.getIssues("SQ1", "SPRINT-9")).thenReturn(List.of());
+        when(squadCapacityService.resolve("SQ1", "SPRINT-9", "acc-1")).thenReturn(new SquadCapacityService.ResolvedPersonConfig(
+                "acc-1", "DEV", 5, 0, 8.0, false, false, false, false, null, null, null, null));
+        stubCommonSquadServiceCalls();
+
+        syncService.forceResyncSprint("SQ1", "u1", "SPRINT-9");
+
+        ArgumentCaptor<SquadMetricsRollup> rollupCaptor = ArgumentCaptor.forClass(SquadMetricsRollup.class);
+        verify(squadService).saveRollup(rollupCaptor.capture());
+        com.fasterxml.jackson.databind.JsonNode cycleTime = rollupCaptor.getValue().getExtraMetrics().get("cycleTimeByStatus");
+        assertEquals(8.0, cycleTime.get("Em Andamento").asDouble(), 0.01);
     }
 }
