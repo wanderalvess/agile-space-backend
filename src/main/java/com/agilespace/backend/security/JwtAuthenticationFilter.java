@@ -39,7 +39,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/api/jolt/transform",
             "/api/jolt/engine-info",
             // API pública com API key própria (ApiKeyAuthenticationFilter), não JWT de sessão.
-            "/api/v1"
+            "/api/v1",
+            // Changelog é público por design (visível sem login) — ver ChangelogController.
+            "/api/changelog",
+            // Vault é zero-knowledge por design: a chave de decriptação só existe no fragment
+            // da URL, nunca chega ao servidor, e o destinatário do link pode não ter conta
+            // nenhuma no Agile Space. Exigir JWT aqui quebraria o caso de uso central da
+            // feature (compartilhar segredo com alguém de fora). A segurança vem da posse do
+            // id (UUID) + chave, não de identidade — ver VaultSecretService.
+            "/api/vault-secrets"
     );
 
     private final JwtTokenUtil jwtTokenUtil;

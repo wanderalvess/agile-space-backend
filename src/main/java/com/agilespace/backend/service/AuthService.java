@@ -13,6 +13,7 @@ import com.agilespace.backend.security.JwtTokenUtil;
 import com.agilespace.backend.security.PasswordUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,6 +34,12 @@ public class AuthService {
     private final SquadMemberRepository squadMemberRepository;
     private final UserProjectResolverService userProjectResolverService;
     private final JwtTokenUtil jwtTokenUtil;
+
+    // Vazio (default em application.yml) = autocadastro liberado pra qualquer e-mail — usado em
+    // dev/teste, onde os fixtures usam @empresa.com.br. Em produção (application-prod.yml) tem
+    // default "totvs.com.br", já que essa ferramenta é interna à TOTVS.
+    @Value("${app.security.allowed-email-domain:}")
+    private String allowedEmailDomain;
 
     /**
      * Realiza o login do usuário, valida a senha com PBKDF2 e resolve seus projetos/cargos.
@@ -93,6 +100,12 @@ public class AuthService {
     @Transactional
     public AuthResponseDto register(RegisterRequestDto request) {
         String cleanEmail = request.getEmail().trim().toLowerCase();
+
+        if (allowedEmailDomain != null && !allowedEmailDomain.isBlank()
+                && !cleanEmail.endsWith("@" + allowedEmailDomain.toLowerCase())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Cadastro restrito a e-mails corporativos @" + allowedEmailDomain);
+        }
 
         Optional<User> existingUser = userRepository.findByEmail(cleanEmail);
         if (existingUser.isPresent() && existingUser.get().getPasswordHash() != null) {

@@ -70,5 +70,14 @@ app:
     # Chave de acesso admin para o endpoint GET /api/users (listagem de usuários).
     # Defina APP_ADMIN_KEY no ambiente (ou deixe vazio pra desabilitar endpoint).
     admin-key: ${APP_ADMIN_KEY:}
+    # Vazio = autocadastro (POST /api/auth/register) liberado pra qualquer e-mail — é o
+    # default de dev/teste (fixtures usam @empresa.com.br). Produção restringe via
+    # application-prod.yml.
+    allowed-email-domain: ${ALLOWED_EMAIL_DOMAIN:}
+  cors:
+    # Lista separada por vírgula das origens que podem chamar a API com credenciais
+    # (ver WebCorsConfig/WebSocketConfig). Default cobre só o frontend em dev local
+    # (next dev -p 9002); em produção defina ALLOWED_ORIGINS com o(s) domínio(s) público(s).
+    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:9002}
 
 

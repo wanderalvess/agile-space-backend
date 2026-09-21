@@ -21,6 +21,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.http.HttpStatus;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
@@ -204,6 +205,41 @@ public class AuthServiceTest {
 
         assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
         verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    public void testRegisterAllowsAnyDomainWhenRestrictionIsBlank() {
+        // Default de dev/teste (application.yml): sem restrição de domínio.
+        when(userRepository.findByEmail(anyString())).thenReturn(Optional.empty());
+        when(projectMemberRoleRepository.findByEmailIgnoreCase(anyString())).thenReturn(List.of());
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(userProjectResolverService.resolveUserAccess(any(User.class))).thenReturn(accessWith());
+
+        assertDoesNotThrow(() -> service.register(RegisterRequestDto.builder()
+                .email("novo@empresa.com.br").name("Novo").password(RAW_PASSWORD).build()));
+    }
+
+    @Test
+    public void testRegisterRejectsEmailOutsideAllowedDomain() {
+        ReflectionTestUtils.setField(service, "allowedEmailDomain", "totvs.com.br");
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> service.register(
+                RegisterRequestDto.builder().email("novo@empresa.com.br").name("Novo").password(RAW_PASSWORD).build()));
+
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    public void testRegisterAllowsEmailInsideAllowedDomain() {
+        ReflectionTestUtils.setField(service, "allowedEmailDomain", "totvs.com.br");
+        when(userRepository.findByEmail(anyString())).thenReturn(Optional.empty());
+        when(projectMemberRoleRepository.findByEmailIgnoreCase(anyString())).thenReturn(List.of());
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(userProjectResolverService.resolveUserAccess(any(User.class))).thenReturn(accessWith());
+
+        assertDoesNotThrow(() -> service.register(RegisterRequestDto.builder()
+                .email("novo@totvs.com.br").name("Novo").password(RAW_PASSWORD).build()));
     }
 
     @Test

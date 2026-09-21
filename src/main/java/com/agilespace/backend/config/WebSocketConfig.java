@@ -7,10 +7,13 @@ import com.agilespace.backend.websocket.PokerWebSocketHandler;
 import com.agilespace.backend.websocket.RetroWebSocketHandler;
 import com.agilespace.backend.websocket.ShowcaseWebSocketHandler;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
+
+import java.util.List;
 
 @Configuration
 @EnableWebSocket
@@ -24,27 +27,29 @@ public class WebSocketConfig implements WebSocketConfigurer {
     private final ShowcaseWebSocketHandler showcaseWebSocketHandler;
     private final JwtHandshakeInterceptor jwtHandshakeInterceptor;
 
+    @Value("${app.cors.allowed-origins}")
+    private List<String> allowedOrigins;
+
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        // Registra o handler na rota /ws/retro/{boardId} permitindo conexões de qualquer origem (CORS)
+        String[] origins = allowedOrigins.toArray(new String[0]);
+        // Mesma lista de origens do WebCorsConfig (ALLOWED_ORIGINS) — o handshake já é
+        // autenticado por token (JwtHandshakeInterceptor), isso só evita que qualquer site
+        // abra uma conexão de WebSocket contra a API a partir do browser de um usuário logado.
         registry.addHandler(retroWebSocketHandler, "/ws/retro/*")
                 .addInterceptors(jwtHandshakeInterceptor)
-                .setAllowedOrigins("*");
-        // Registra o handler na rota /ws/poker/{boardId} permitindo conexões de qualquer origem (CORS)
+                .setAllowedOrigins(origins);
         registry.addHandler(pokerWebSocketHandler, "/ws/poker/*")
                 .addInterceptors(jwtHandshakeInterceptor)
-                .setAllowedOrigins("*");
-        // Registra o handler na rota /ws/health-check/{boardId} permitindo conexões de qualquer origem (CORS)
+                .setAllowedOrigins(origins);
         registry.addHandler(healthCheckWebSocketHandler, "/ws/health-check/*")
                 .addInterceptors(jwtHandshakeInterceptor)
-                .setAllowedOrigins("*");
-        // Registra o handler na rota /ws/brainstorming/{boardId} permitindo conexões de qualquer origem (CORS)
+                .setAllowedOrigins(origins);
         registry.addHandler(brainstormingWebSocketHandler, "/ws/brainstorming/*")
                 .addInterceptors(jwtHandshakeInterceptor)
-                .setAllowedOrigins("*");
-        // Registra o handler na rota /ws/showcase/{sessionId} permitindo conexões de qualquer origem (CORS)
+                .setAllowedOrigins(origins);
         registry.addHandler(showcaseWebSocketHandler, "/ws/showcase/*")
                 .addInterceptors(jwtHandshakeInterceptor)
-                .setAllowedOrigins("*");
+                .setAllowedOrigins(origins);
     }
 }

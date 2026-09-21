@@ -18,6 +18,12 @@ export APP_ENCRYPTION_SECRET="$(openssl rand -base64 32)"  # Generate unique key
 # Admin access (optional - leave empty to disable)
 export APP_ADMIN_KEY="secure_admin_key_or_empty"
 
+# CORS/WebSocket (REQUIRED in prod profile - no default, comma-separated)
+export ALLOWED_ORIGINS="https://your-frontend-domain.com"
+
+# Self-registration domain restriction (optional - prod profile already defaults to "totvs.com.br")
+export ALLOWED_EMAIL_DOMAIN="totvs.com.br"
+
 # Application Profile
 export SPRING_PROFILES_ACTIVE="prod"
 
@@ -120,6 +126,29 @@ docker run -d \
 ```bash
 SPRING_PROFILES_ACTIVE=prod docker-compose up -d
 ```
+
+### Reverse Proxy / TLS
+
+`docker-compose.yml` inclui um serviço `reverse-proxy` (Caddy) opcional, atrás do profile `proxy`,
+que termina TLS via Let's Encrypt automaticamente e roteia `/api`, `/ws`, `/actuator`,
+`/v3/api-docs` e `/swagger-ui` pro backend e o resto pro frontend (config em `Caddyfile`). `DOMAIN`
+tem default `localhost` só pra não quebrar o `docker compose up` comum (sem `--profile proxy`) —
+pra valer, exporte `DOMAIN` com o domínio público real, e garanta que o DNS (A/AAAA) já aponte
+pro IP do servidor antes de subir, senão o Let's Encrypt falha o desafio HTTP-01.
+
+```bash
+export DOMAIN="agilespace.totvs.com.br"
+export ALLOWED_ORIGINS="https://${DOMAIN}"
+export SPRING_PROFILES_ACTIVE=prod
+export APP_ENCRYPTION_SECRET="$(openssl rand -base64 32)"
+export DB_URL="jdbc:postgresql://db:5432/espacoagil"
+export DB_PASSWORD="secure_password"
+
+docker compose --profile proxy up -d
+```
+
+Sem domínio real ainda (ex.: testando num servidor por IP), não suba o profile `proxy` — acesse
+o frontend/backend direto nas portas 9002/8002 até o DNS estar pronto.
 
 ### Health Check
 

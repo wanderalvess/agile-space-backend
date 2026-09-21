@@ -1,0 +1,27 @@
+{$DOMAIN} {
+	# API REST, WebSocket, docs e actuator vão pro backend Spring Boot.
+	handle /api/* {
+		reverse_proxy backend:8002
+	}
+	handle /ws/* {
+		# reverse_proxy do Caddy detecta e faz upgrade de WebSocket automaticamente,
+		# sem precisar de config extra pra headers Connection/Upgrade.
+		reverse_proxy backend:8002
+	}
+	handle /actuator/* {
+		reverse_proxy backend:8002
+	}
+	handle /v3/api-docs* {
+		reverse_proxy backend:8002
+	}
+	handle /swagger-ui* {
+		reverse_proxy backend:8002
+	}
+
+	# Resto (app Next.js) vai pro frontend.
+	handle {
+		reverse_proxy frontend:9002
+	}
+
+	encode gzip
+}

@@ -34,6 +34,8 @@ services:
       # container porque nao estava referenciada aqui.
       APP_ENCRYPTION_SECRET: ${APP_ENCRYPTION_SECRET:-AgileSpaceDevMasterKey2026LocalOnly#AES}
       APP_ADMIN_KEY: ${APP_ADMIN_KEY:-}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:9002}
+      ALLOWED_EMAIL_DOMAIN: ${ALLOWED_EMAIL_DOMAIN:-}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
     ports:
       - "8002:8002"
@@ -60,5 +62,36 @@ services:
       retries: 6
       start_period: 15s
 
+  # Reverse proxy + TLS automático (Let's Encrypt) na frente de frontend/backend. Só entra em
+  # jogo com o profile "proxy" (docker compose --profile proxy up -d) — em dev local, sem
+  # domínio real, os serviços continuam acessíveis direto nas portas 8002/9002 como sempre.
+  # Caddy foi escolhido em vez de nginx porque faz proxy de WebSocket (/ws/**) sem config extra
+  # (nginx exige "proxy_set_header Upgrade/Connection" manual pra isso).
+  reverse-proxy:
+    image: caddy:2-alpine
+    container_name: agile-space-proxy
+    restart: unless-stopped
+    profiles: ["proxy"]
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    environment:
+      # Sem default ":?" de propósito: Compose interpola env vars de TODOS os serviços mesmo
+      # com --profile proxy desligado, então um required var aqui quebraria o "docker compose up"
+      # comum (sem o profile). "localhost" é só um placeholder inofensivo — ao rodar de verdade
+      # com --profile proxy, exporte DOMAIN com o domínio público real antes.
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - agile-space-caddy-data:/data
+      - agile-space-caddy-config:/config
+
 volumes:
   agile-space-db-data:
+  agile-space-caddy-data:
+  agile-space-caddy-config:
