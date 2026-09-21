@@ -56,6 +56,15 @@ public class Squad {
     @Column(name = "last_sync_status")
     private String lastSyncStatus;
 
+    @Column(name = "last_sync_by")
+    private String lastSyncBy;
+
+    @Column(name = "last_sync_issue_count")
+    private Integer lastSyncIssueCount;
+
+    @Column(name = "last_sync_error", columnDefinition = "TEXT")
+    private String lastSyncError;
+
     @Column(name = "reconcile_interval_hours")
     private Integer reconcileIntervalHours;
 

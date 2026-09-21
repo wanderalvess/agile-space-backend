@@ -28,6 +28,9 @@ public class SquadControllerTest {
     private SquadService service;
 
     @Mock
+    private com.agilespace.backend.service.SquadSyncService squadSyncService;
+
+    @Mock
     private UserRepository userRepository;
 
     @Mock
@@ -97,6 +100,54 @@ public class SquadControllerTest {
         // requireSquadWriteAccess consulta squadService.getMembers como último fallback
         // (checagem por squad_members) antes de negar — interação esperada, não um bug.
         verify(service).getMembers("sq-1");
+    }
+
+    @Test
+    public void testSyncSquad_admin_delegatesToSyncService() {
+        ResponseEntity<Void> response = controller.syncSquad("sq-1", true, adminRequest());
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        verify(squadSyncService).syncSquad("sq-1", null, true);
+    }
+
+    @Test
+    public void testSyncSquad_usesCallerIdFromToken_neverFromRequestBody() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-1");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+
+        controller.syncSquad("sq-1", false, memberRequest("user-1"));
+
+        // callerUserId sempre vem do token validado (ATTR_USER_ID) — nunca de um campo
+        // que o chamador pudesse controlar, senão daria pra sincronizar com o PAT de outra pessoa.
+        verify(squadSyncService).syncSquad(eq("sq-1"), eq("user-1"), eq(false));
+    }
+
+    @Test
+    public void testSyncSquad_nonMemberOfSquad_forbidden() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-other");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+
+        assertThrows(ResponseStatusException.class,
+                () -> controller.syncSquad("sq-1", false, memberRequest("user-1")));
+
+        verifyNoInteractions(squadSyncService);
+    }
+
+    @Test
+    public void testForceResyncSprint_memberOfSquad_delegatesToSyncService() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-1");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+
+        ResponseEntity<Void> response = controller.forceResyncSprint("sq-1", "SPRINT-42", memberRequest("user-1"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        verify(squadSyncService).forceResyncSprint("sq-1", "user-1", "SPRINT-42");
     }
 
     @Test

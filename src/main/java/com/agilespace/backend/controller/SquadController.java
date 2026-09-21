@@ -22,6 +22,7 @@ import java.util.UUID;
 public class SquadController {
 
     private final SquadService squadService;
+    private final com.agilespace.backend.service.SquadSyncService squadSyncService;
     private final UserRepository userRepository;
     private final com.agilespace.backend.service.UserProjectResolverService userProjectResolverService;
 
@@ -126,6 +127,33 @@ public class SquadController {
     @GetMapping
     public ResponseEntity<List<Squad>> getAllSquads() {
         return ResponseEntity.ok(squadService.getAllSquads());
+    }
+
+    // Motor de sync roda no backend (SquadSyncService) em vez de client-side —
+    // ver plano de unificação Squad Pulse + jiradash, Fase 2. callerUserId vem
+    // sempre do token validado, nunca do corpo da requisição, senão qualquer
+    // chamador autenticado poderia sincronizar usando o PAT salvo de outra
+    // pessoa só citando o userId dela.
+    @PostMapping("/{squadId}/sync")
+    public ResponseEntity<Void> syncSquad(
+            @PathVariable String squadId,
+            @RequestParam(required = false, defaultValue = "false") boolean forceFull,
+            HttpServletRequest request) {
+        requireSquadWriteAccess(squadId, request);
+        String callerUserId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        squadSyncService.syncSquad(squadId, callerUserId, forceFull);
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/{squadId}/force-resync-sprint")
+    public ResponseEntity<Void> forceResyncSprint(
+            @PathVariable String squadId,
+            @RequestParam String sprintId,
+            HttpServletRequest request) {
+        requireSquadWriteAccess(squadId, request);
+        String callerUserId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        squadSyncService.forceResyncSprint(squadId, callerUserId, sprintId);
+        return ResponseEntity.ok().build();
     }
 
     @GetMapping("/{squadId}")

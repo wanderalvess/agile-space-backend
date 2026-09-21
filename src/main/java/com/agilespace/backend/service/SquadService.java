@@ -66,6 +66,9 @@ public class SquadService {
         if (squad.getLastSyncAt() != null) target.setLastSyncAt(squad.getLastSyncAt());
         if (squad.getLastFullReconcileAt() != null) target.setLastFullReconcileAt(squad.getLastFullReconcileAt());
         if (squad.getLastSyncStatus() != null) target.setLastSyncStatus(squad.getLastSyncStatus());
+        if (squad.getLastSyncBy() != null) target.setLastSyncBy(squad.getLastSyncBy());
+        if (squad.getLastSyncIssueCount() != null) target.setLastSyncIssueCount(squad.getLastSyncIssueCount());
+        if (squad.getLastSyncError() != null) target.setLastSyncError(squad.getLastSyncError());
         if (squad.getReconcileIntervalHours() != null) target.setReconcileIntervalHours(squad.getReconcileIntervalHours());
         if (squad.getDefaultDailyCapacityHours() != null) target.setDefaultDailyCapacityHours(squad.getDefaultDailyCapacityHours());
         if (squad.getCapacityCalculationMethod() != null) target.setCapacityCalculationMethod(squad.getCapacityCalculationMethod());
@@ -79,14 +82,34 @@ public class SquadService {
     }
 
     // ----- Metrics Rollup -----
+    // "Atual" = rollup da sprint que o squad marcou como ativa. Antes a PK era
+    // só squadId (1 rollup por squad, não por sprint) — sobrevivia por sorte
+    // enquanto só a última sprint sincronizada importava; agora resolve
+    // explicitamente pela sprint ativa, já que squad_metrics_rollup guarda uma
+    // linha por sprint.
     @Transactional(readOnly = true)
     public Optional<SquadMetricsRollup> getRollup(String squadId) {
-        return rollupRepository.findById(squadId);
+        String activeSprintId = squadRepository.findById(squadId)
+                .map(Squad::getActiveSprintId)
+                .filter(s -> s != null && !s.isBlank())
+                .orElse(null);
+        if (activeSprintId == null) {
+            List<SquadMetricsRollup> all = rollupRepository.findBySquadId(squadId);
+            return all.isEmpty() ? Optional.empty() : Optional.of(all.get(all.size() - 1));
+        }
+        return rollupRepository.findBySquadIdAndSprintId(squadId, activeSprintId);
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<SquadMetricsRollup> getRollup(String squadId, String sprintId) {
+        return rollupRepository.findBySquadIdAndSprintId(squadId, sprintId);
     }
 
     @Transactional
     public SquadMetricsRollup saveRollup(SquadMetricsRollup rollup) {
-        rollup.setSquadId(rollup.getSquadId());
+        if (rollup.getDbId() == null || rollup.getDbId().isBlank()) {
+            rollup.setDbId(rollup.getSquadId() + "_" + rollup.getSprintId());
+        }
         return rollupRepository.save(rollup);
     }
 
