@@ -5,8 +5,10 @@ import com.agilespace.backend.domain.UserWorklog;
 import com.agilespace.backend.repository.DailyReportRepository;
 import com.agilespace.backend.repository.UserWorklogRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -37,9 +39,11 @@ public class DailyFlowService {
     }
 
     @Transactional
-    public void deleteWorklog(String id) {
-        if (!worklogRepository.existsById(id)) {
-            throw new IllegalArgumentException("Worklog not found with id: " + id);
+    public void deleteWorklog(String id, String callerUid, boolean isAdmin) {
+        UserWorklog log = worklogRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Worklog not found with id: " + id));
+        if (!isAdmin && !log.getUserId().equals(callerUid)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito ao próprio usuário.");
         }
         worklogRepository.deleteById(id);
     }
@@ -59,9 +63,11 @@ public class DailyFlowService {
     }
 
     @Transactional
-    public void deleteDailyReport(String id) {
-        if (!reportRepository.existsById(id)) {
-            throw new IllegalArgumentException("Daily report not found with id: " + id);
+    public void deleteDailyReport(String id, String callerUid, boolean isAdmin) {
+        DailyReport report = reportRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Daily report not found with id: " + id));
+        if (!isAdmin && !report.getUserId().equals(callerUid)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito ao próprio usuário.");
         }
         reportRepository.deleteById(id);
     }

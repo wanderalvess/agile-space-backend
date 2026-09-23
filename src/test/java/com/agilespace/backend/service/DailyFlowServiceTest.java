@@ -11,10 +11,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -82,21 +84,43 @@ class DailyFlowServiceTest {
         }
 
         @Test
-        @DisplayName("Deve excluir worklog existente com sucesso")
-        void shouldDeleteWorklogWhenExists() {
-            when(worklogRepository.existsById("w1")).thenReturn(true);
+        @DisplayName("Deve excluir worklog existente do próprio dono com sucesso")
+        void shouldDeleteWorklogWhenOwnedByCaller() {
+            UserWorklog log = UserWorklog.builder().id("w1").userId("user-123").build();
+            when(worklogRepository.findById("w1")).thenReturn(Optional.of(log));
 
-            service.deleteWorklog("w1");
+            service.deleteWorklog("w1", "user-123", false);
 
             verify(worklogRepository).deleteById("w1");
         }
 
         @Test
+        @DisplayName("ADMIN pode excluir worklog de outro usuário")
+        void shouldAllowAdminToDeleteAnyWorklog() {
+            UserWorklog log = UserWorklog.builder().id("w1").userId("user-123").build();
+            when(worklogRepository.findById("w1")).thenReturn(Optional.of(log));
+
+            service.deleteWorklog("w1", "admin-boss", true);
+
+            verify(worklogRepository).deleteById("w1");
+        }
+
+        @Test
+        @DisplayName("Deve rejeitar com 403 exclusão de worklog de outro usuário")
+        void shouldRejectDeleteWorklogFromAnotherUser() {
+            UserWorklog log = UserWorklog.builder().id("w1").userId("user-123").build();
+            when(worklogRepository.findById("w1")).thenReturn(Optional.of(log));
+
+            assertThrows(ResponseStatusException.class, () -> service.deleteWorklog("w1", "intruso", false));
+            verify(worklogRepository, never()).deleteById(anyString());
+        }
+
+        @Test
         @DisplayName("Deve lançar exceção ao tentar excluir worklog que não existe")
         void shouldThrowWhenDeletingNonExistentWorklog() {
-            when(worklogRepository.existsById("inexistente")).thenReturn(false);
+            when(worklogRepository.findById("inexistente")).thenReturn(Optional.empty());
 
-            assertThrows(IllegalArgumentException.class, () -> service.deleteWorklog("inexistente"));
+            assertThrows(IllegalArgumentException.class, () -> service.deleteWorklog("inexistente", "user-123", false));
         }
     }
 
@@ -134,6 +158,35 @@ class DailyFlowServiceTest {
             assertEquals("user-123", saved.getUserId());
             assertEquals("Finalizado refatoração dos controladores", saved.getYesterday());
             verify(reportRepository).save(report);
+        }
+
+        @Test
+        @DisplayName("Deve excluir daily report existente do próprio dono com sucesso")
+        void shouldDeleteDailyReportWhenOwnedByCaller() {
+            DailyReport report = DailyReport.builder().id("user-123_2026-09-01").userId("user-123").build();
+            when(reportRepository.findById("user-123_2026-09-01")).thenReturn(Optional.of(report));
+
+            service.deleteDailyReport("user-123_2026-09-01", "user-123", false);
+
+            verify(reportRepository).deleteById("user-123_2026-09-01");
+        }
+
+        @Test
+        @DisplayName("Deve rejeitar com 403 exclusão de daily report de outro usuário")
+        void shouldRejectDeleteDailyReportFromAnotherUser() {
+            DailyReport report = DailyReport.builder().id("user-123_2026-09-01").userId("user-123").build();
+            when(reportRepository.findById("user-123_2026-09-01")).thenReturn(Optional.of(report));
+
+            assertThrows(ResponseStatusException.class, () -> service.deleteDailyReport("user-123_2026-09-01", "intruso", false));
+            verify(reportRepository, never()).deleteById(anyString());
+        }
+
+        @Test
+        @DisplayName("Deve lançar exceção ao tentar excluir daily report que não existe")
+        void shouldThrowWhenDeletingNonExistentDailyReport() {
+            when(reportRepository.findById("inexistente")).thenReturn(Optional.empty());
+
+            assertThrows(IllegalArgumentException.class, () -> service.deleteDailyReport("inexistente", "user-123", false));
         }
     }
 }
