@@ -1,6 +1,8 @@
 package com.agilespace.backend;
 
+import com.agilespace.backend.domain.AuditLog;
 import com.agilespace.backend.security.JwtTokenUtil;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,6 +11,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -28,11 +31,15 @@ public class E2EAgileCycleTest {
     @Autowired
     private com.agilespace.backend.repository.WorkItemRepository workItemRepository;
 
+    @Autowired
+    private com.agilespace.backend.repository.AuditLogRepository auditLogRepository;
+
     private String token;
 
     @BeforeEach
     public void setup() {
         workItemRepository.deleteAll();
+        auditLogRepository.deleteAll();
         token = jwtTokenUtil.generateToken("test-user-id", "admin@agilespace.com", "Admin User", "ADMIN", "TESTPROJ", "Segment", "Tribe");
     }
 
@@ -43,6 +50,10 @@ public class E2EAgileCycleTest {
                 .header("Authorization", "Bearer " + token)
                 .param("projectKey", "TESTPROJ"))
                 .andExpect(status().is4xxClientError());
+
+        List<AuditLog> auditLogs = auditLogRepository.findByOrderByCreatedAtDesc();
+        assertEquals(1, auditLogs.size());
+        assertEquals("admin@agilespace.com", auditLogs.get(0).getPerformedBy());
 
         // 2. Scrum Poker: Estimar item inexistente (Testa Upsert automático no Postgres)
         mockMvc.perform(put("/api/work-items/TESTPROJ/TEST-101/estimate")
