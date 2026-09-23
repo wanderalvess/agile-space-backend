@@ -1,7 +1,11 @@
 package com.agilespace.backend.service;
 
+import com.agilespace.backend.domain.ShowcaseMember;
 import com.agilespace.backend.domain.ShowcaseSession;
+import com.agilespace.backend.domain.ShowcaseTask;
+import com.agilespace.backend.repository.ShowcaseMemberRepository;
 import com.agilespace.backend.repository.ShowcaseSessionRepository;
+import com.agilespace.backend.repository.ShowcaseTaskRepository;
 import com.agilespace.backend.websocket.ShowcaseWebSocketHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -33,6 +37,12 @@ class ShowcaseSessionServiceTest {
     private ShowcaseSessionRepository repository;
 
     @Mock
+    private ShowcaseTaskRepository taskRepository;
+
+    @Mock
+    private ShowcaseMemberRepository memberRepository;
+
+    @Mock
     private ShowcaseWebSocketHandler webSocketHandler;
 
     @InjectMocks
@@ -58,9 +68,14 @@ class ShowcaseSessionServiceTest {
     class QuerySessionTests {
 
         @Test
-        @DisplayName("Deve retornar os detalhes da sessão quando ID existir")
+        @DisplayName("Deve retornar os detalhes da sessão com tasks e members montados quando ID existir")
         void shouldReturnSessionWhenIdExists() {
+            ShowcaseTask task = ShowcaseTask.builder().id("t1").sessionId("session-456").title("Task 1").order(0).build();
+            ShowcaseMember member = ShowcaseMember.builder().id("m1").sessionId("session-456").name("Dev 1").order(0).build();
+
             when(repository.findById("session-456")).thenReturn(Optional.of(sampleSession));
+            when(taskRepository.findBySessionIdOrderByOrderAsc("session-456")).thenReturn(List.of(task));
+            when(memberRepository.findBySessionIdOrderByOrderAsc("session-456")).thenReturn(List.of(member));
 
             ShowcaseSession result = service.getSession("session-456");
 
@@ -68,7 +83,8 @@ class ShowcaseSessionServiceTest {
             assertEquals("session-456", result.getId());
             assertEquals("Review e Showcase da Sprint 45", result.getName());
             assertEquals("active", result.getStatus());
-            verify(repository).findById("session-456");
+            assertEquals(1, result.getTasks().size());
+            assertEquals(1, result.getMembers().size());
         }
 
         @Test
@@ -130,6 +146,8 @@ class ShowcaseSessionServiceTest {
             assertEquals("Nova Apresentação de Entrega", saved.getName());
 
             verify(repository).save(newSession);
+            verify(taskRepository).deleteBySessionId(saved.getId());
+            verify(memberRepository).deleteBySessionId(saved.getId());
             verify(webSocketHandler).broadcastEvent(eq(saved.getId()), eq("SESSION_UPDATED"), eq(saved));
         }
 
@@ -161,6 +179,33 @@ class ShowcaseSessionServiceTest {
             assertEquals("completed", result.getStatus());
 
             verify(webSocketHandler).broadcastEvent(eq("session-456"), eq("SESSION_UPDATED"), eq(result));
+        }
+
+        @Test
+        @DisplayName("Deve substituir tasks (com evidence/metrics) e members existentes ao salvar")
+        void shouldSaveSessionReplacingChildren() {
+            ShowcaseTask task = ShowcaseTask.builder()
+                    .title("Nova Task")
+                    .evidence(com.agilespace.backend.domain.ShowcaseEvidence.builder().problem("P").solution("S").build())
+                    .metrics(new ArrayList<>(List.of(com.agilespace.backend.domain.ShowcaseImpactMetric.builder().field("Economia").value(10.0).build())))
+                    .build();
+            ShowcaseMember member = ShowcaseMember.builder().name("Dev 1").build();
+            sampleSession.setTasks(new ArrayList<>(List.of(task)));
+            sampleSession.setMembers(new ArrayList<>(List.of(member)));
+
+            when(repository.save(any(ShowcaseSession.class))).thenAnswer(i -> i.getArgument(0));
+            when(taskRepository.findBySessionIdOrderByOrderAsc("session-456")).thenReturn(List.of(task));
+            when(memberRepository.findBySessionIdOrderByOrderAsc("session-456")).thenReturn(List.of(member));
+
+            ShowcaseSession saved = service.saveSession(sampleSession, "user-sm");
+
+            assertEquals("Review e Showcase da Sprint 45", saved.getName());
+            verify(taskRepository).deleteBySessionId("session-456");
+            verify(memberRepository).deleteBySessionId("session-456");
+            verify(taskRepository).saveAll(argThat((List<ShowcaseTask> ts) ->
+                    ts.size() == 1 && "session-456".equals(ts.get(0).getSessionId()) && ts.get(0).getOrder() == 0));
+            verify(memberRepository).saveAll(argThat((List<ShowcaseMember> ms) ->
+                    ms.size() == 1 && "session-456".equals(ms.get(0).getSessionId()) && ms.get(0).getOrder() == 0));
         }
     }
 
