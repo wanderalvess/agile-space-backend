@@ -21,6 +21,7 @@ import java.util.List;
 public class RetroController {
 
     private final RetroService retroService;
+    private final com.agilespace.backend.service.SquadAccessService squadAccessService;
 
     /**
      * Só o próprio usuário (ou ADMIN) sai de um board removendo sua própria participação.
@@ -59,22 +60,30 @@ public class RetroController {
     }
 
     // --- Board Endpoints ---
+    /**
+     * squadId/team são obrigatórios (um dos dois) pra qualquer listagem "de squad" — antes
+     * a ausência de ambos caía num fallback que devolvia boards de TODAS as squads, sem
+     * checagem de pertencimento nenhuma. sprintId continua sem essa exigência (retro de um
+     * sprint específico é um uso mais restrito, já indiretamente escopado pelo sprint).
+     */
     @GetMapping
     public ResponseEntity<List<RetroBoard>> listBoards(
-            @RequestParam(value = "limit", required = false, defaultValue = "1000") int limit,
             @RequestParam(value = "sprintId", required = false) String sprintId,
             @RequestParam(value = "team", required = false) String team,
-            @RequestParam(value = "squadId", required = false) String squadId) {
+            @RequestParam(value = "squadId", required = false) String squadId,
+            HttpServletRequest request) {
         if (sprintId != null && !sprintId.isBlank()) {
             return ResponseEntity.ok(retroService.listBoardsBySprintId(sprintId));
         }
         if (squadId != null && !squadId.isBlank()) {
+            squadAccessService.requireSquadReadAccess(squadId, request);
             return ResponseEntity.ok(retroService.listBoardsBySquadId(squadId));
         }
         if (team != null && !team.isBlank()) {
+            squadAccessService.requireSquadReadAccess(team, request);
             return ResponseEntity.ok(retroService.listBoardsByTeam(team));
         }
-        return ResponseEntity.ok(retroService.listBoards(limit));
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe squadId, team ou sprintId.");
     }
 
     @GetMapping("/{id}")

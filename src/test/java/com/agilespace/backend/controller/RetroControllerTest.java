@@ -5,6 +5,7 @@ import com.agilespace.backend.domain.RetroParticipant;
 import com.agilespace.backend.domain.RetroCard;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.RetroService;
+import com.agilespace.backend.service.SquadAccessService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -13,18 +14,23 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Arrays;
 import java.util.Optional;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*;
 
 public class RetroControllerTest {
 
     @Mock
     private RetroService service;
+
+    @Mock
+    private SquadAccessService squadAccessService;
 
     @InjectMocks
     private RetroController controller;
@@ -81,21 +87,38 @@ public class RetroControllerTest {
         RetroBoard board = new RetroBoard();
         when(service.listBoardsBySprintId("SPRINT-1")).thenReturn(Arrays.asList(board));
 
-        ResponseEntity<List<RetroBoard>> response = controller.listBoards(1000, "SPRINT-1", null, null);
+        ResponseEntity<List<RetroBoard>> response = controller.listBoards("SPRINT-1", null, null, null);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals(1, response.getBody().size());
-        verify(service, never()).listBoards(anyInt());
+        verifyNoInteractions(squadAccessService);
     }
 
     @Test
-    public void testListBoardsWithoutSprintIdFallsBackToLegacy() {
-        when(service.listBoards(1000)).thenReturn(Arrays.asList(new RetroBoard()));
+    public void testListBoardsBySquadId_checksAccess() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(service.listBoardsBySquadId("DDWMISSI")).thenReturn(Arrays.asList(new RetroBoard()));
 
-        ResponseEntity<List<RetroBoard>> response = controller.listBoards(1000, null, null, null);
+        ResponseEntity<List<RetroBoard>> response = controller.listBoards(null, null, "DDWMISSI", request);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
-        verify(service, never()).listBoardsBySprintId(anyString());
+        verify(squadAccessService).requireSquadReadAccess("DDWMISSI", request);
+    }
+
+    @Test
+    public void testListBoards_squadIdNotOwn_forbidden() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        doThrow(new ResponseStatusException(HttpStatus.FORBIDDEN))
+                .when(squadAccessService).requireSquadReadAccess("outra-squad", request);
+
+        assertThrows(ResponseStatusException.class, () -> controller.listBoards(null, null, "outra-squad", request));
+        verify(service, never()).listBoardsBySquadId(anyString());
+    }
+
+    @Test
+    public void testListBoards_withoutAnyFilter_badRequest() {
+        assertThrows(ResponseStatusException.class, () -> controller.listBoards(null, null, null, null));
+        verifyNoInteractions(service);
     }
 
     @Test

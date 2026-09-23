@@ -5,6 +5,7 @@ import com.agilespace.backend.domain.PokerParticipant;
 import com.agilespace.backend.domain.PokerVote;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.PokerService;
+import com.agilespace.backend.service.SquadAccessService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -13,12 +14,14 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*;
 
 public class PokerControllerTest {
@@ -26,12 +29,38 @@ public class PokerControllerTest {
     @Mock
     private PokerService service;
 
+    @Mock
+    private SquadAccessService squadAccessService;
+
     @InjectMocks
     private PokerController controller;
 
     @BeforeEach
     public void setup() {
         MockitoAnnotations.openMocks(this);
+    }
+
+    @Test
+    public void testListRooms_filtersBySquadAndChecksAccess() {
+        PokerRoom room = new PokerRoom();
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(service.listRooms(1000, "DDWMISSI")).thenReturn(List.of(room));
+
+        ResponseEntity<List<PokerRoom>> response = controller.listRooms(1000, "DDWMISSI", request);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(1, response.getBody().size());
+        verify(squadAccessService).requireSquadReadAccess("DDWMISSI", request);
+    }
+
+    @Test
+    public void testListRooms_notMemberOfSquad_forbidden() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        doThrow(new ResponseStatusException(HttpStatus.FORBIDDEN))
+                .when(squadAccessService).requireSquadReadAccess("outra-squad", request);
+
+        assertThrows(ResponseStatusException.class, () -> controller.listRooms(1000, "outra-squad", request));
+        verify(service, never()).listRooms(anyInt(), anyString());
     }
 
     @Test

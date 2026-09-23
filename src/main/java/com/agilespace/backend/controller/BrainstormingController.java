@@ -22,6 +22,7 @@ import java.util.List;
 public class BrainstormingController {
 
     private final BrainstormingService brainstormingService;
+    private final com.agilespace.backend.service.SquadAccessService squadAccessService;
 
     /**
      * Só o próprio usuário (ou ADMIN) sai de um board removendo sua própria participação.
@@ -73,8 +74,9 @@ public class BrainstormingController {
     }
 
     @GetMapping
-    public ResponseEntity<List<BrainstormingBoard>> listBoards() {
-        return ResponseEntity.ok(brainstormingService.listBoards());
+    public ResponseEntity<List<BrainstormingBoard>> listBoards(@RequestParam("squadId") String squadId, HttpServletRequest request) {
+        squadAccessService.requireSquadReadAccess(squadId, request);
+        return ResponseEntity.ok(brainstormingService.listBoards(squadId));
     }
 
     @DeleteMapping("/{id}")

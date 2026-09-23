@@ -9,6 +9,6 @@ import java.util.List;
 @Repository
 public interface RetroBoardRepository extends JpaRepository<RetroBoard, String> {
     List<RetroBoard> findBySprintIdOrderByCreatedAtDesc(String sprintId);
-    List<RetroBoard> findByTeamOrderByCreatedAtDesc(String team);
-    List<RetroBoard> findBySquadIdOrderByCreatedAtDesc(String squadId);
+    List<RetroBoard> findByTeamIgnoreCaseOrderByCreatedAtDesc(String team);
+    List<RetroBoard> findBySquadIdIgnoreCaseOrderByCreatedAtDesc(String squadId);
 }

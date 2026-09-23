@@ -9,4 +9,5 @@ import java.util.List;
 @Repository
 public interface BrainstormingBoardRepository extends JpaRepository<BrainstormingBoard, String> {
     List<BrainstormingBoard> findAllByOrderByCreatedAtDesc();
+    List<BrainstormingBoard> findByTeamIgnoreCaseOrderByCreatedAtDesc(String team);
 }

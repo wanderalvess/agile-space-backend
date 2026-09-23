@@ -22,6 +22,7 @@ import java.util.List;
 public class PokerController {
 
     private final PokerService pokerService;
+    private final com.agilespace.backend.service.SquadAccessService squadAccessService;
 
     /**
      * Só o próprio usuário (ou um ADMIN) mexe no seu heartbeat/participação/voto.
@@ -55,8 +56,11 @@ public class PokerController {
 
     @GetMapping
     public ResponseEntity<List<PokerRoom>> listRooms(
-            @RequestParam(value = "limit", required = false, defaultValue = "1000") int limit) {
-        return ResponseEntity.ok(pokerService.listRooms(limit));
+            @RequestParam(value = "limit", required = false, defaultValue = "1000") int limit,
+            @RequestParam("squadId") String squadId,
+            HttpServletRequest request) {
+        squadAccessService.requireSquadReadAccess(squadId, request);
+        return ResponseEntity.ok(pokerService.listRooms(limit, squadId));
     }
 
     // --- Participants Endpoints ---

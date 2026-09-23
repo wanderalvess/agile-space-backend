@@ -69,17 +69,17 @@ class RetroServiceTest {
     class BoardManagementTests {
 
         @Test
-        @DisplayName("Deve listar quadros respeitando o limite seguro")
-        void shouldListBoardsWithLimit() {
-            when(boardRepository.findAll(any(Pageable.class)))
-                    .thenReturn(new PageImpl<>(Collections.singletonList(sampleBoard)));
+        @DisplayName("Deve listar quadros da squad por squadId")
+        void shouldListBoardsBySquadId() {
+            when(boardRepository.findBySquadIdIgnoreCaseOrderByCreatedAtDesc("DDWMISSI"))
+                    .thenReturn(Collections.singletonList(sampleBoard));
 
-            List<RetroBoard> boards = service.listBoards(10);
+            List<RetroBoard> boards = service.listBoardsBySquadId("DDWMISSI");
 
             assertNotNull(boards);
             assertEquals(1, boards.size());
             assertEquals("retro-123", boards.get(0).getId());
-            verify(boardRepository).findAll(any(Pageable.class));
+            verify(boardRepository).findBySquadIdIgnoreCaseOrderByCreatedAtDesc("DDWMISSI");
         }
 
         @Test

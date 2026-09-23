@@ -50,8 +50,8 @@ public class BrainstormingService {
     }
 
     @Transactional(readOnly = true)
-    public List<BrainstormingBoard> listBoards() {
-        return boardRepository.findAllByOrderByCreatedAtDesc();
+    public List<BrainstormingBoard> listBoards(String squadId) {
+        return boardRepository.findByTeamIgnoreCaseOrderByCreatedAtDesc(squadId);
     }
 
     @Transactional

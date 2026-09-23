@@ -76,9 +76,9 @@ public class PokerService {
     }
 
     @Transactional(readOnly = true)
-    public List<PokerRoom> listRooms(int limit) {
+    public List<PokerRoom> listRooms(int limit, String squadId) {
         int safeLimit = limit > 0 ? limit : 1000;
-        return roomRepository.findAll(PageRequest.of(0, safeLimit)).getContent();
+        return roomRepository.findByTeamIgnoreCaseOrderByCreatedAtDesc(squadId, PageRequest.of(0, safeLimit)).getContent();
     }
 
     // --- Participants Logic ---

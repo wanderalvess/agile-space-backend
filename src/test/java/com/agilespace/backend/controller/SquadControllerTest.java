@@ -9,7 +9,6 @@ import com.agilespace.backend.service.SquadService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.http.HttpStatus;
@@ -40,13 +39,19 @@ public class SquadControllerTest {
     @Mock
     private com.agilespace.backend.service.UserProjectResolverService userProjectResolverService;
 
-    @InjectMocks
     private SquadController controller;
 
     @BeforeEach
     public void setup() {
         MockitoAnnotations.openMocks(this);
         lenient().when(squadSyncGuard.tryAcquire(anyString())).thenReturn(true);
+        // Construído à mão (em vez de @InjectMocks) pra usar uma instância REAL de
+        // SquadAccessService por cima dos mocks — senão a checagem de pertencimento a
+        // squad (extraída pra lá) viraria um mock "sempre passa" e todos os testes de
+        // acesso abaixo (não-membro é barrado, alias DDWMISSI/MISSI, etc.) perderiam o sentido.
+        com.agilespace.backend.service.SquadAccessService squadAccessService =
+                new com.agilespace.backend.service.SquadAccessService(userRepository, service, userProjectResolverService);
+        controller = new SquadController(service, squadSyncService, squadSyncGuard, null, userRepository, userProjectResolverService, squadAccessService);
     }
 
     private HttpServletRequest adminRequest() {

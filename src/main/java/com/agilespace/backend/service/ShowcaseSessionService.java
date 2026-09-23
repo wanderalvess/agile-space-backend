@@ -43,10 +43,10 @@ public class ShowcaseSessionService {
     }
 
     @Transactional(readOnly = true)
-    public List<ShowcaseSession> getLatestSessions(int limit) {
+    public List<ShowcaseSession> getLatestSessions(int limit, String squadId) {
         int safeLimit = limit > 0 ? limit : 50;
         Pageable pageable = PageRequest.of(0, safeLimit);
-        return repository.findLatestSessions(pageable).stream().map(this::attachChildren).toList();
+        return repository.findLatestSessionsBySquad(squadId, pageable).stream().map(this::attachChildren).toList();
     }
 
     @Transactional
@@ -54,6 +54,11 @@ public class ShowcaseSessionService {
         ValidationSupport.requireNonBlank(session.getName(), "name");
         ValidationSupport.requireMaxSize(session.getTasks(), MAX_TASKS, "tasks");
         ValidationSupport.requireMaxSize(session.getMembers(), MAX_MEMBERS, "members");
+        // squadName é texto livre no modal de criação — normaliza espaço sobrando pra não
+        // quebrar o match de findLatestSessionsBySquad (comparação exata, case-insensitive).
+        if (session.getSquadName() != null) {
+            session.setSquadName(session.getSquadName().trim());
+        }
 
         if (session.getId() != null && !session.getId().isEmpty()) {
             repository.findById(session.getId()).ifPresent(existing -> {

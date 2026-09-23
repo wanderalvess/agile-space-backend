@@ -147,12 +147,13 @@ class PokerServiceTest {
         }
 
         @Test
-        @DisplayName("Deve listar salas respeitando o limite fornecido")
+        @DisplayName("Deve listar salas da squad respeitando o limite fornecido")
         void shouldListRoomsWithLimit() {
-            when(roomRepository.findAll(any(Pageable.class)))
+            sampleRoom.setTeam("DDWMISSI");
+            when(roomRepository.findByTeamIgnoreCaseOrderByCreatedAtDesc(eq("DDWMISSI"), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(Collections.singletonList(sampleRoom)));
 
-            List<PokerRoom> rooms = service.listRooms(10);
+            List<PokerRoom> rooms = service.listRooms(10, "DDWMISSI");
 
             assertNotNull(rooms);
             assertEquals(1, rooms.size());

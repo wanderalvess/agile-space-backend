@@ -10,7 +10,6 @@ import com.agilespace.backend.websocket.RetroWebSocketHandler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,24 +31,18 @@ public class RetroService {
 
     // --- Board Logic ---
     @Transactional(readOnly = true)
-    public List<RetroBoard> listBoards(int limit) {
-        int safeLimit = limit > 0 ? limit : 1000;
-        return boardRepository.findAll(PageRequest.of(0, safeLimit)).getContent();
-    }
-
-    @Transactional(readOnly = true)
     public List<RetroBoard> listBoardsBySprintId(String sprintId) {
         return boardRepository.findBySprintIdOrderByCreatedAtDesc(sprintId);
     }
 
     @Transactional(readOnly = true)
     public List<RetroBoard> listBoardsByTeam(String team) {
-        return boardRepository.findByTeamOrderByCreatedAtDesc(team);
+        return boardRepository.findByTeamIgnoreCaseOrderByCreatedAtDesc(team);
     }
 
     @Transactional(readOnly = true)
     public List<RetroBoard> listBoardsBySquadId(String squadId) {
-        return boardRepository.findBySquadIdOrderByCreatedAtDesc(squadId);
+        return boardRepository.findBySquadIdIgnoreCaseOrderByCreatedAtDesc(squadId);
     }
 
     @Transactional(readOnly = true)

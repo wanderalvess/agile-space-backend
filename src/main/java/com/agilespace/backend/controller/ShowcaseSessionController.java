@@ -17,9 +17,16 @@ public class ShowcaseSessionController {
     @Autowired
     private ShowcaseSessionService service;
 
+    @Autowired
+    private com.agilespace.backend.service.SquadAccessService squadAccessService;
+
     @GetMapping
-    public ResponseEntity<List<ShowcaseSession>> getSessions(@RequestParam(defaultValue = "50") int limit) {
-        return ResponseEntity.ok(service.getLatestSessions(limit));
+    public ResponseEntity<List<ShowcaseSession>> getSessions(
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam("squadId") String squadId,
+            HttpServletRequest request) {
+        squadAccessService.requireSquadReadAccess(squadId, request);
+        return ResponseEntity.ok(service.getLatestSessions(limit, squadId));
     }
 
     @GetMapping("/{id}")

@@ -98,26 +98,26 @@ class ShowcaseSessionServiceTest {
         }
 
         @Test
-        @DisplayName("Deve buscar sessões recentes respeitando limite seguro")
+        @DisplayName("Deve buscar sessões recentes da squad respeitando limite seguro")
         void shouldReturnLatestSessionsWithLimit() {
-            when(repository.findLatestSessions(any(Pageable.class)))
+            when(repository.findLatestSessionsBySquad(eq("DDWMISSI"), any(Pageable.class)))
                     .thenReturn(Collections.singletonList(sampleSession));
 
-            List<ShowcaseSession> sessions = service.getLatestSessions(10);
+            List<ShowcaseSession> sessions = service.getLatestSessions(10, "DDWMISSI");
 
             assertNotNull(sessions);
             assertEquals(1, sessions.size());
             assertEquals("session-456", sessions.get(0).getId());
-            verify(repository).findLatestSessions(any(Pageable.class));
+            verify(repository).findLatestSessionsBySquad(eq("DDWMISSI"), any(Pageable.class));
         }
 
         @Test
         @DisplayName("Deve usar limite padrão de 50 quando limite fornecido for zero ou negativo")
         void shouldDefaultTo50WhenLimitIsZeroOrNegative() {
-            when(repository.findLatestSessions(any(Pageable.class)))
+            when(repository.findLatestSessionsBySquad(eq("DDWMISSI"), any(Pageable.class)))
                     .thenReturn(Collections.singletonList(sampleSession));
 
-            List<ShowcaseSession> sessions = service.getLatestSessions(0);
+            List<ShowcaseSession> sessions = service.getLatestSessions(0, "DDWMISSI");
 
             assertNotNull(sessions);
             assertEquals(1, sessions.size());

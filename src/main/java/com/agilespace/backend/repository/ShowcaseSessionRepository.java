@@ -4,6 +4,7 @@ import com.agilespace.backend.domain.ShowcaseSession;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -13,4 +14,7 @@ public interface ShowcaseSessionRepository extends JpaRepository<ShowcaseSession
 
     @Query("SELECT s FROM ShowcaseSession s ORDER BY s.createdAt DESC")
     List<ShowcaseSession> findLatestSessions(Pageable pageable);
+
+    @Query("SELECT s FROM ShowcaseSession s WHERE LOWER(s.squadName) = LOWER(:squadId) ORDER BY s.createdAt DESC")
+    List<ShowcaseSession> findLatestSessionsBySquad(@Param("squadId") String squadId, Pageable pageable);
 }
