@@ -322,4 +322,32 @@ public class SquadSyncServiceTest {
         // KEPT-1 não deve contaminar a contagem de removidas.
         assertEquals(1, churn.get("planned").asInt() + churn.get("added").asInt());
     }
+
+    @Test
+    public void forceResyncSprint_capsAdjustedEstimateAtOriginalWhenWorklogOverruns() {
+        Squad squad = baseSquad();
+        when(squadService.getSquad("SQ1")).thenReturn(Optional.of(squad));
+        when(userJiraConfigRepository.findById("u1")).thenReturn(Optional.of(creds()));
+        when(jiraService.getFields(anyString(), anyString())).thenReturn(ResponseEntity.ok("[]"));
+        // Estimativa original de 6h (21600s), Restante já zerado pelo Jira (estourou), e
+        // 11,75h (42300s) apontadas dentro da janela da sprint. Sem teto, "Ajustada" seria
+        // 42300s (11,75h) — o teto trava em min(ajustada, original - apontado antes) = 21600s.
+        String issueJson = "{\"key\":\"EST-1\",\"fields\":{"
+                + "\"issuetype\":{\"name\":\"Story\"},\"status\":{\"name\":\"To Do\",\"statusCategory\":{\"key\":\"new\"}},"
+                + "\"created\":\"2026-01-15T10:00:00.000-0300\",\"updated\":\"2026-02-05T10:00:00.000-0300\","
+                + "\"timeoriginalestimate\":21600,\"timeestimate\":0,"
+                + "\"worklog\":{\"worklogs\":[{\"timeSpentSeconds\":42300,\"started\":\"2026-02-05T10:00:00.000-0300\","
+                + "\"author\":{\"accountId\":\"acc-1\",\"displayName\":\"Fulano\"}}]}}}";
+        when(jiraService.searchIssues(any())).thenReturn(ResponseEntity.ok("{\"total\":1,\"issues\":[" + issueJson + "]}"));
+        when(jiraService.getSprint(anyString(), anyString(), eq("SPRINT-9"))).thenReturn(ResponseEntity.ok(
+                "{\"id\":\"SPRINT-9\",\"name\":\"Sprint 9\",\"state\":\"CLOSED\",\"startDate\":\"2026-02-01T00:00:00.000Z\",\"endDate\":\"2026-02-14T00:00:00.000Z\"}"));
+        when(squadService.getIssues("SQ1", "SPRINT-9")).thenReturn(List.of());
+        stubCommonSquadServiceCalls();
+
+        syncService.forceResyncSprint("SQ1", "u1", "SPRINT-9");
+
+        ArgumentCaptor<SquadMetricsRollup> rollupCaptor = ArgumentCaptor.forClass(SquadMetricsRollup.class);
+        verify(squadService).saveRollup(rollupCaptor.capture());
+        assertEquals(21600L, rollupCaptor.getValue().getExtraMetrics().get("estimateAdjustedTotalSec").asLong());
+    }
 }

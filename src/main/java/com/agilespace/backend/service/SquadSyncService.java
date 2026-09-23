@@ -430,7 +430,7 @@ public class SquadSyncService {
 
     private record FetchResult(List<ParsedJiraIssue> issues, boolean truncated) {}
 
-    private record WorklogEntry(String authorId, String authorName, long timeSpentSeconds) {}
+    private record WorklogEntry(String authorId, String authorName, long timeSpentSeconds, Instant started) {}
 
     private record ParsedJiraIssue(
             String key, String type, boolean isBug, String status, String statusCategory,
@@ -540,7 +540,8 @@ public class SquadSyncService {
             String wid = firstNonBlank(author.path("accountId").asText(""), author.path("key").asText(""), author.path("name").asText(""));
             if (wid.isBlank()) continue;
             String wname = author.path("displayName").asText("");
-            worklogs.add(new WorklogEntry(wid, wname.isBlank() ? wid : wname, wl.path("timeSpentSeconds").asLong(0)));
+            worklogs.add(new WorklogEntry(wid, wname.isBlank() ? wid : wname, wl.path("timeSpentSeconds").asLong(0),
+                    parseInstantFlexible(wl.path("started").asText(""))));
         }
 
         JsonNode sprintRaw = extractSprintRaw(fields, sprintFieldId);
@@ -925,6 +926,8 @@ public class SquadSyncService {
             if (sprintStartInstant != null) {
                 extraMetrics.set("cycleTimeByStatus", buildCycleTimeByStatus(squadId, sprintId, groupRawIssues));
                 extraMetrics.set("scopeChurn", buildScopeChurn(groupRawIssues, sprintId, sprintStartInstant, removedFromSprintCount));
+                Instant sprintEndInstant = parseInstantFlexible(meta.endDate);
+                extraMetrics.put("estimateAdjustedTotalSec", estimateAdjustedTotalSec(groupRawIssues, sprintStartInstant, sprintEndInstant));
             }
         }
 
@@ -1161,6 +1164,49 @@ public class SquadSyncService {
             log.warn("[squad] falha ao buscar issues removidas da sprint {}: {}", sprintId, e.getMessage());
             return 0;
         }
+    }
+
+    // ===================== Integridade de estimativa =====================
+    // Adaptado de issue-service.js:getEstimatedInSprint (jiradash). "Estimativa Ajustada"
+    // = quanto da estimativa original de fato ENTROU nesta sprint, evitando que estouro
+    // (apontado além do estimado) infle o número: o Jira trava o Restante em 0 quando
+    // alguém aponta além da estimativa, e sem este teto o excesso vazaria direto pra
+    // "estimado" (uma issue de 6h com 12h apontadas viraria 12h de "estimativa").
+    private long sumWorklogSecondsInWindow(ParsedJiraIssue issue, Instant windowStart, Instant windowEndOrNull) {
+        long sum = 0;
+        for (WorklogEntry wl : issue.worklogs()) {
+            if (wl.started() == null) continue;
+            if (wl.started().isBefore(windowStart)) continue;
+            if (windowEndOrNull != null && wl.started().isAfter(windowEndOrNull)) continue;
+            sum += wl.timeSpentSeconds();
+        }
+        return sum;
+    }
+
+    private long sumWorklogSecondsBefore(ParsedJiraIssue issue, Instant windowStart) {
+        long sum = 0;
+        for (WorklogEntry wl : issue.worklogs()) {
+            if (wl.started() != null && wl.started().isBefore(windowStart)) sum += wl.timeSpentSeconds();
+        }
+        return sum;
+    }
+
+    private long estimatedInSprint(ParsedJiraIssue issue, Instant sprintStart, Instant sprintEnd) {
+        long original = issue.estimateSec(); // aggregatetimeoriginalestimate||timeoriginalestimate
+        long remaining = issue.remainingSec(); // aggregatetimeestimate||timeestimate
+        if (original <= 0 && remaining <= 0) return 0; // sem estimativa nenhuma
+        long spentInSprint = sumWorklogSecondsInWindow(issue, sprintStart, sprintEnd);
+        long adjusted = remaining + spentInSprint;
+        if (original <= 0) return adjusted;
+        long spentBefore = sumWorklogSecondsBefore(issue, sprintStart);
+        long enteredSprint = Math.max(0, original - spentBefore);
+        return Math.min(adjusted, enteredSprint);
+    }
+
+    private long estimateAdjustedTotalSec(List<ParsedJiraIssue> groupRawIssues, Instant sprintStart, Instant sprintEnd) {
+        long total = 0;
+        for (ParsedJiraIssue issue : groupRawIssues) total += estimatedInSprint(issue, sprintStart, sprintEnd);
+        return total;
     }
 
     // ===================== Métricas por pessoa =====================
