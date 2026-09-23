@@ -78,6 +78,8 @@ public class SquadService {
         if (squad.getUpdatedAt() != null) target.setUpdatedAt(squad.getUpdatedAt());
         if (squad.getSprintHistory() != null) target.setSprintHistory(squad.getSprintHistory());
         if (squad.getPhases() != null) target.setPhases(squad.getPhases());
+        if (squad.getCeremonyMode() != null) target.setCeremonyMode(squad.getCeremonyMode());
+        if (squad.getCeremonies() != null) target.setCeremonies(squad.getCeremonies());
 
         return squadRepository.save(target);
     }

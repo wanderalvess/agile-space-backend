@@ -99,4 +99,18 @@ public class Squad {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "phases", columnDefinition = "jsonb")
     private JsonNode phases;
+
+    // Fonte do card "Próxima cerimônia" (/painel) — "google_calendar" (default/null) ou
+    // "manual". As duas nunca coexistem: são duas respostas pra mesma pergunta ("quando é
+    // a próxima cerimônia da squad"), então a squad escolhe uma, não as duas ao mesmo tempo.
+    @Column(name = "ceremony_mode")
+    private String ceremonyMode;
+
+    // Cerimônias cadastradas à mão quando ceremonyMode = "manual" — array de objetos
+    // {id, title, daysOfWeek: ["MON",...], startTime: "09:15", durationMinutes, meetLink},
+    // mesmo padrão de `phases` (sem tabela própria). Ignorado quando ceremonyMode não é
+    // "manual".
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "ceremonies", columnDefinition = "jsonb")
+    private JsonNode ceremonies;
 }
