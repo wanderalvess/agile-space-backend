@@ -1,10 +1,10 @@
 package com.agilespace.backend.domain;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.*;
 import lombok.*;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
+
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "sprint_plannings")
@@ -26,20 +26,27 @@ public class SprintPlanning {
 
     private String updatedAt;
 
-    // --- JSONB Fields mapping via Hibernate 6 JSON type ---
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "tasks", columnDefinition = "jsonb")
-    private JsonNode tasks;
+    @Embedded
+    @Builder.Default
+    private SprintPlanningSettings settings = SprintPlanningSettings.builder().build();
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "members", columnDefinition = "jsonb")
-    private JsonNode members;
+    // IDs de salas de poker já importadas pra este planejamento — lista simples, sem precisar
+    // de tabela/entidade própria.
+    @ElementCollection
+    @CollectionTable(name = "sprint_planning_imported_poker_rooms", joinColumns = @JoinColumn(name = "planning_id"))
+    @Column(name = "poker_room_id")
+    @OrderColumn(name = "room_order")
+    @Builder.Default
+    private List<String> importedPokerRoomIds = new ArrayList<>();
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "settings", columnDefinition = "jsonb")
-    private JsonNode settings;
+    // tasks/members viviam como JSONB opaco (JsonNode) até esta migração; agora são tabelas
+    // próprias (sprint_planning_tasks/_subtasks/_members, sem relação JPA — mesmo padrão de
+    // ActionPlanTask/boardId) montadas manualmente pelo SprintPlanningService a cada
+    // load/save, pra manter o contrato JSON idêntico ao que o frontend já espera
+    // (data.tasks/data.members no mesmo objeto retornado por GET /sprint-plannings/{id}).
+    @Transient
+    private List<SprintPlanningTask> tasks;
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "imported_poker_room_ids", columnDefinition = "jsonb")
-    private JsonNode importedPokerRoomIds;
+    @Transient
+    private List<SprintPlanningMember> members;
 }
