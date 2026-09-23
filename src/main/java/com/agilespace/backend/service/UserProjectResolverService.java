@@ -42,6 +42,18 @@ public class UserProjectResolverService {
                 }
             }
         }
+        // Vínculo explícito conta -> linha do roster (OnboardingService.claim, "sou eu").
+        // Sem isso, quem tem e-mail do Jira diferente do login continuaria sem acesso
+        // mesmo depois de se reconhecer na lista — que é justamente o caso que o claim
+        // existe pra resolver.
+        if (user.getId() != null && !user.getId().isBlank()) {
+            List<ProjectMemberRole> byUserId = projectMemberRoleRepository.findByUserId(user.getId());
+            for (ProjectMemberRole r : byUserId) {
+                if (directRoles.stream().noneMatch(existing -> existing.getId().equals(r.getId()))) {
+                    directRoles.add(r);
+                }
+            }
+        }
 
         Map<String, UserProjectAccessDto.ProjectAccessItem> projectMap = new LinkedHashMap<>();
         Set<String> leaderTribes = new HashSet<>();
