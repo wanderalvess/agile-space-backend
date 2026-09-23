@@ -100,7 +100,6 @@ public class AdminService {
         long sprintPlanningsCount = countTableRows("sprint_plannings");
         long healthCheckBoardsCount = countTableRows("health_check_boards");
         long brainstormingBoardsCount = countTableRows("brainstorming_boards");
-        long dailyCheckinsCount = countTableRows("daily_checkins");
 
         stats.put("totalUsers", usersCount);
         stats.put("totalShowcaseSessions", showcaseCount);
@@ -112,10 +111,9 @@ public class AdminService {
         stats.put("totalSprintPlannings", sprintPlanningsCount);
         stats.put("totalHealthCheckBoards", healthCheckBoardsCount);
         stats.put("totalBrainstormingBoards", brainstormingBoardsCount);
-        stats.put("totalDailyCheckins", dailyCheckinsCount);
 
-        // Total de cerimônias em grupo (exclui foco/daily/kanban, que são individuais,
-        // não "sessões" com participantes) — número que o admin usa pra "uso do sistema".
+        // Total de cerimônias em grupo (exclui kanban, que é individual, não uma
+        // "sessão" com participantes) — número que o admin usa pra "uso do sistema".
         stats.put("totalSessions", pokerRoomsCount + retroBoardsCount + sprintPlanningsCount
                 + healthCheckBoardsCount + brainstormingBoardsCount + showcaseCount);
         stats.put("totalParticipations", countTotalParticipations());
