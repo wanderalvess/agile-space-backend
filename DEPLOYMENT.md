@@ -144,11 +144,22 @@ export APP_ENCRYPTION_SECRET="$(openssl rand -base64 32)"
 export DB_URL="jdbc:postgresql://db:5432/espacoagil"
 export DB_PASSWORD="secure_password"
 
-docker compose --profile proxy up -d
+# NEXT_PUBLIC_* do frontend: precisam do domínio público real ANTES do build (ver Dockerfile
+# do frontend) — setar depois via "environment:" não muda o bundle já compilado.
+export NEXT_PUBLIC_API_URL="https://${DOMAIN}/api"
+export NEXT_PUBLIC_SPRING_API_URL="https://${DOMAIN}/api"
+export NEXT_PUBLIC_WS_URL="wss://${DOMAIN}"
+export NEXT_PUBLIC_GOOGLE_CLIENT_ID="..."  # opcional — sem ela, o card de agenda do painel some, resto do app funciona
+
+docker compose --profile proxy up -d --build
 ```
 
 Sem domínio real ainda (ex.: testando num servidor por IP), não suba o profile `proxy` — acesse
 o frontend/backend direto nas portas 9002/8002 até o DNS estar pronto.
+
+**Importante:** sempre que qualquer `NEXT_PUBLIC_*` mudar (domínio, client ID do Google, etc.),
+o frontend precisa ser **rebuildado** (`--build`), não só reiniciado — o valor fica congelado no
+bundle JS desde o momento do `docker build`.
 
 ### Health Check
 
@@ -192,6 +203,27 @@ curl http://localhost:8002/actuator/health
 - Health endpoint: `GET /actuator/health`
 - API key usage tracked: `last_used_at` updated on each request
 - Check logs for failed authentication attempts (401 responses)
+
+### Observability (OpenTelemetry)
+
+Both `agile-space-backend` and `agile-space-frontend` ship with OpenTelemetry instrumentation
+that is present but **inert by default** — vendor-neutral (OTLP), so it works with SigNoz or
+any other OTLP-compatible backend without code changes, just an endpoint.
+
+**Backend** — a Java agent is baked into the image (`Dockerfile`), auto-instrumenting Spring MVC,
+JDBC/Hibernate and outgoing HTTP calls, plus JVM metrics. Enable with:
+```bash
+export OTEL_JAVAAGENT_ENABLED=true
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://your-signoz-collector:4317"
+```
+
+**Frontend** — `src/instrumentation.ts` registers `@vercel/otel` only when an endpoint is set:
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://your-signoz-collector:4317"
+```
+
+Both default to disabled/no-op — safe to leave unset until the observability backend (e.g.
+SigNoz) is actually deployed somewhere. `docker-compose.yml` already wires these through.
 
 ## Deployment Commands
 

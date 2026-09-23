@@ -37,6 +37,14 @@ services:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:9002}
       ALLOWED_EMAIL_DOMAIN: ${ALLOWED_EMAIL_DOMAIN:-}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # OpenTelemetry: agente sempre presente na imagem (ver Dockerfile), inerte até
+      # OTEL_JAVAAGENT_ENABLED=true. Vendor-neutro (OTLP) — funciona com SigNoz ou qualquer
+      # outro backend compatível, só trocando OTEL_EXPORTER_OTLP_ENDPOINT.
+      OTEL_JAVAAGENT_ENABLED: ${OTEL_JAVAAGENT_ENABLED:-false}
+      OTEL_SERVICE_NAME: agile-space-backend
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-grpc}
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=${SPRING_PROFILES_ACTIVE:-dev}
     ports:
       - "8002:8002"
     healthcheck:
@@ -47,12 +55,28 @@ services:
       start_period: 60s
 
   frontend:
-    build: ../agile-space-frontend
+    build:
+      context: ../agile-space-frontend
+      # NEXT_PUBLIC_* precisam ser build args (ver comentário no Dockerfile do frontend) —
+      # setar em "environment:" abaixo não afeta o bundle já compilado. Em produção, exporte
+      # esses valores reais no shell antes de "docker compose up" (ou num .env ao lado deste
+      # arquivo, que o compose lê automaticamente).
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8002/api}
+        NEXT_PUBLIC_SPRING_API_URL: ${NEXT_PUBLIC_SPRING_API_URL:-http://localhost:8002/api}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8002}
+        NEXT_PUBLIC_GEMINI_API_KEY: ${NEXT_PUBLIC_GEMINI_API_KEY:-}
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
     container_name: agile-space-frontend
     restart: unless-stopped
     depends_on:
       backend:
         condition: service_healthy
+    environment:
+      # OTel do frontend roda no servidor Node (instrumentation.ts), não no bundle do browser —
+      # ao contrário de NEXT_PUBLIC_*, isso é runtime normal, não precisa ser build arg.
+      OTEL_SERVICE_NAME: agile-space-frontend
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     ports:
       - "9002:9002"
     healthcheck:
