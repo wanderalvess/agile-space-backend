@@ -51,7 +51,11 @@ public class ActionPlanController {
     }
 
     @PostMapping
-    public ResponseEntity<ActionPlan> createBoard(@Valid @RequestBody ActionPlan board) {
+    public ResponseEntity<ActionPlan> createBoard(@Valid @RequestBody ActionPlan board, HttpServletRequest request) {
+        // creatorId vem sempre do token validado, nunca do corpo — senão qualquer
+        // chamador autenticado poderia criar um board se passando por outra pessoa.
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        board.setCreatorId(callerId);
         return ResponseEntity.status(HttpStatus.CREATED).body(actionPlanService.createBoard(board));
     }
 
@@ -71,8 +75,9 @@ public class ActionPlanController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<ActionPlan> getBoardById(@PathVariable("id") UUID id) {
+    public ResponseEntity<ActionPlan> getBoardById(@PathVariable("id") UUID id, HttpServletRequest request) {
         try {
+            requireBoardAccess(id, request);
             return ResponseEntity.ok(actionPlanService.getBoardById(id));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
@@ -82,8 +87,13 @@ public class ActionPlanController {
     @PostMapping("/{id}/participants")
     public ResponseEntity<ActionPlan> addParticipant(
             @PathVariable("id") UUID id,
-            @RequestParam("participantId") String participantId) {
+            @RequestParam("participantId") String participantId,
+            HttpServletRequest request) {
         try {
+            // Sem essa checagem, addParticipant era a porta dos fundos de requireBoardAccess:
+            // qualquer autenticado se auto-adicionava a um board privado e virava "participante"
+            // legítimo pros checks de updateTask/deleteTask.
+            requireBoardAccess(id, request);
             return ResponseEntity.ok(actionPlanService.addParticipant(id, participantId));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
@@ -92,15 +102,18 @@ public class ActionPlanController {
 
     // Task Mappings
     @GetMapping("/{id}/tasks")
-    public ResponseEntity<List<ActionPlanTask>> listTasks(@PathVariable("id") UUID id) {
+    public ResponseEntity<List<ActionPlanTask>> listTasks(@PathVariable("id") UUID id, HttpServletRequest request) {
+        requireBoardAccess(id, request);
         return ResponseEntity.ok(actionPlanService.listTasks(id));
     }
 
     @PostMapping("/{id}/tasks")
     public ResponseEntity<ActionPlanTask> createTask(
             @PathVariable("id") UUID id,
-            @Valid @RequestBody ActionPlanTask task) {
+            @Valid @RequestBody ActionPlanTask task,
+            HttpServletRequest request) {
         try {
+            requireBoardAccess(id, request);
             return ResponseEntity.status(HttpStatus.CREATED).body(actionPlanService.createTask(id, task));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
