@@ -15,8 +15,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -200,11 +202,14 @@ public class KnowledgeService {
     }
 
     @Transactional
-    public KnowledgeDocument deleteDocument(UUID id, String deletedBy) {
+    public KnowledgeDocument deleteDocument(UUID id, String callerId, boolean isAdmin) {
         KnowledgeDocument doc = getDocumentById(id);
+        if (!isAdmin && !callerId.equals(doc.getAuthorId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Apenas o autor ou um administrador pode apagar este documento.");
+        }
         doc.setStatus("deleted");
         doc.setDeletedAt(LocalDateTime.now());
-        doc.setDeletedBy(deletedBy);
+        doc.setDeletedBy(callerId);
         return knowledgeRepository.save(doc);
     }
 

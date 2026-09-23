@@ -13,6 +13,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -98,19 +99,46 @@ class KnowledgeServiceTest {
         }
 
         @Test
-        @DisplayName("Deve realizar soft-delete gravando autor e data de exclusão")
-        void shouldSoftDeleteDocument() {
+        @DisplayName("Deve realizar soft-delete quando o próprio autor apaga")
+        void shouldSoftDeleteDocumentWhenCallerIsAuthor() {
             UUID docId = UUID.randomUUID();
-            KnowledgeDocument existing = KnowledgeDocument.builder().id(docId).status("published").build();
+            KnowledgeDocument existing = KnowledgeDocument.builder().id(docId).status("published").authorId("autor-original").build();
 
             when(repository.findById(docId)).thenReturn(Optional.of(existing));
             when(repository.save(any(KnowledgeDocument.class))).thenAnswer(i -> i.getArgument(0));
 
-            KnowledgeDocument deleted = service.deleteDocument(docId, "user-admin");
+            KnowledgeDocument deleted = service.deleteDocument(docId, "autor-original", false);
 
             assertEquals("deleted", deleted.getStatus());
-            assertEquals("user-admin", deleted.getDeletedBy());
+            assertEquals("autor-original", deleted.getDeletedBy());
             assertNotNull(deleted.getDeletedAt());
+        }
+
+        @Test
+        @DisplayName("ADMIN pode apagar documento de outro autor")
+        void shouldAllowAdminToDeleteAnyDocument() {
+            UUID docId = UUID.randomUUID();
+            KnowledgeDocument existing = KnowledgeDocument.builder().id(docId).status("published").authorId("autor-original").build();
+
+            when(repository.findById(docId)).thenReturn(Optional.of(existing));
+            when(repository.save(any(KnowledgeDocument.class))).thenAnswer(i -> i.getArgument(0));
+
+            KnowledgeDocument deleted = service.deleteDocument(docId, "admin-boss", true);
+
+            assertEquals("deleted", deleted.getStatus());
+            assertEquals("admin-boss", deleted.getDeletedBy());
+        }
+
+        @Test
+        @DisplayName("Deve rejeitar exclusão por quem não é autor nem ADMIN")
+        void shouldRejectDeleteByNonAuthorNonAdmin() {
+            UUID docId = UUID.randomUUID();
+            KnowledgeDocument existing = KnowledgeDocument.builder().id(docId).status("published").authorId("autor-original").build();
+
+            when(repository.findById(docId)).thenReturn(Optional.of(existing));
+
+            assertThrows(ResponseStatusException.class, () -> service.deleteDocument(docId, "intruso", false));
+            verify(repository, never()).save(any());
         }
 
         @Test

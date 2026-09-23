@@ -64,41 +64,59 @@ public class KnowledgeControllerTest {
     }
 
     @Test
-    public void testSaveOrUpdateDocumentAsAdmin() {
+    public void testSaveOrUpdateDocumentSetsAuthorFromTokenForAnyAuthenticated() {
+        // Criar/editar é aberto a qualquer autenticado — não precisa ser ADMIN.
         KnowledgeDocument doc = new KnowledgeDocument();
         when(service.saveOrUpdateDocument(doc)).thenReturn(doc);
 
-        ResponseEntity<KnowledgeDocument> response = controller.saveOrUpdateDocument(doc, mockRequest("admin-boss", "ADMIN"));
+        ResponseEntity<KnowledgeDocument> response = controller.saveOrUpdateDocument(doc, mockRequest("u1", "MEMBER"));
 
         assertEquals(HttpStatus.CREATED, response.getStatusCode());
-        assertEquals("admin-boss", doc.getAuthorId());
+        assertEquals("u1", doc.getAuthorId(), "authorId deve vir do token, nunca do corpo");
     }
 
     @Test
-    public void testSaveOrUpdateDocumentRejectsNonAdmin() {
-        KnowledgeDocument doc = new KnowledgeDocument();
-
-        assertThrows(ResponseStatusException.class,
-                () -> controller.saveOrUpdateDocument(doc, mockRequest("u1", "MEMBER")));
-        verify(service, never()).saveOrUpdateDocument(any());
-    }
-
-    @Test
-    public void testDeleteDocumentAsAdmin() {
+    public void testUpdateDocumentSetsUpdatedByFromTokenForAnyAuthenticated() {
         UUID id = UUID.randomUUID();
-        when(service.deleteDocument(id, "admin-boss")).thenReturn(new KnowledgeDocument());
+        KnowledgeDocument doc = new KnowledgeDocument();
+        when(service.updateDocument(eq(id), any())).thenReturn(doc);
+
+        ResponseEntity<KnowledgeDocument> response = controller.updateDocument(id, doc, mockRequest("u1", "MEMBER"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals("u1", doc.getUpdatedBy());
+    }
+
+    @Test
+    public void testDeleteDocumentAllowsOwnerNonAdmin() {
+        UUID id = UUID.randomUUID();
+        when(service.deleteDocument(id, "u1", false)).thenReturn(new KnowledgeDocument());
+
+        ResponseEntity<Void> response = controller.deleteDocument(id, mockRequest("u1", "MEMBER"));
+
+        assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
+        verify(service).deleteDocument(id, "u1", false);
+    }
+
+    @Test
+    public void testDeleteDocumentAsAdminPassesAdminFlag() {
+        UUID id = UUID.randomUUID();
+        when(service.deleteDocument(id, "admin-boss", true)).thenReturn(new KnowledgeDocument());
 
         ResponseEntity<Void> response = controller.deleteDocument(id, mockRequest("admin-boss", "ADMIN"));
 
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
+        verify(service).deleteDocument(id, "admin-boss", true);
     }
 
     @Test
-    public void testDeleteDocumentRejectsNonAdmin() {
+    public void testDeleteDocumentPropagatesForbiddenFromServiceForNonOwnerNonAdmin() {
         UUID id = UUID.randomUUID();
+        when(service.deleteDocument(id, "intruso", false))
+                .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN, "Apenas o autor ou um administrador pode apagar este documento."));
 
-        assertThrows(ResponseStatusException.class,
-                () -> controller.deleteDocument(id, mockRequest("u1", "MEMBER")));
-        verify(service, never()).deleteDocument(any(), any());
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> controller.deleteDocument(id, mockRequest("intruso", "MEMBER")));
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
     }
 }

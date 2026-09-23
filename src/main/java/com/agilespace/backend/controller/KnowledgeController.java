@@ -18,7 +18,6 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Map;
@@ -34,19 +33,6 @@ public class KnowledgeController {
     private final KnowledgeService knowledgeService;
     private final KnowledgeTokenUsageRepository knowledgeTokenUsageRepository;
     private final UserRepository userRepository;
-
-    /**
-     * KnowledgeDocument é a base de conhecimento compartilhada da empresa (importada do
-     * TDN/Confluence) — leitura é aberta a qualquer autenticado, mas criar/editar/apagar
-     * exige ADMIN, mesmo corte que a UI já aplica em KnowledgeSidebar (isAdmin). Antes disso
-     * nenhum dos três endpoints de escrita checava nada além de autenticação.
-     */
-    private void requireAdmin(HttpServletRequest request) {
-        String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
-        if (!"ADMIN".equalsIgnoreCase(role)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a administradores.");
-        }
-    }
 
     @GetMapping
     public ResponseEntity<Page<KnowledgeDocument>> listDocuments(
@@ -87,9 +73,11 @@ public class KnowledgeController {
         }
     }
 
+    // Criar/editar é aberto a qualquer autenticado (base de conhecimento colaborativa da
+    // empresa inteira) — só authorId/updatedBy passam a vir sempre do token, nunca do corpo,
+    // pra não dar pra um autor forjar a autoria de outra pessoa.
     @PostMapping
     public ResponseEntity<KnowledgeDocument> saveOrUpdateDocument(@Valid @RequestBody KnowledgeDocument doc, HttpServletRequest request) {
-        requireAdmin(request);
         doc.setAuthorId(resolveUserId(request));
         return ResponseEntity.status(HttpStatus.CREATED).body(knowledgeService.saveOrUpdateDocument(doc));
     }
@@ -99,7 +87,6 @@ public class KnowledgeController {
             @PathVariable("id") UUID id,
             @Valid @RequestBody KnowledgeDocument doc,
             HttpServletRequest request) {
-        requireAdmin(request);
         doc.setUpdatedBy(resolveUserId(request));
         try {
             return ResponseEntity.ok(knowledgeService.updateDocument(id, doc));
@@ -108,11 +95,14 @@ public class KnowledgeController {
         }
     }
 
+    // Apagar é restrito: só o autor original ou um ADMIN — checado no service, que já
+    // busca o documento pra saber o authorId.
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteDocument(@PathVariable("id") UUID id, HttpServletRequest request) {
-        requireAdmin(request);
+        String callerId = resolveUserId(request);
+        String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
         try {
-            knowledgeService.deleteDocument(id, resolveUserId(request));
+            knowledgeService.deleteDocument(id, callerId, "ADMIN".equalsIgnoreCase(role));
             return ResponseEntity.noContent().build();
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
