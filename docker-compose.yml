@@ -1,3 +1,12 @@
+# Sem isso, o driver de log padrão (json-file) não tem limite — um container barulhento
+# pode encher o disco do host sozinho com o tempo (lição aprendida em 2026-09-20/23, ver
+# memória "windows-c-drive-full-docker-vhdx"). 10MB x 3 arquivos = 30MB por serviço, no máximo.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
     image: postgres:17-alpine
@@ -16,6 +25,12 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${DB_CPU_LIMIT:-1}"
+          memory: ${DB_MEMORY_LIMIT:-512M}
 
   backend:
     build: .
@@ -53,6 +68,12 @@ services:
       timeout: 5s
       retries: 6
       start_period: 60s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${BACKEND_CPU_LIMIT:-2}"
+          memory: ${BACKEND_MEMORY_LIMIT:-1024M}
 
   frontend:
     build:
@@ -85,6 +106,12 @@ services:
       timeout: 5s
       retries: 6
       start_period: 15s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${FRONTEND_CPU_LIMIT:-1}"
+          memory: ${FRONTEND_MEMORY_LIMIT:-512M}
 
   # Reverse proxy + TLS automático (Let's Encrypt) na frente de frontend/backend. Só entra em
   # jogo com o profile "proxy" (docker compose --profile proxy up -d) — em dev local, sem
@@ -114,6 +141,12 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - agile-space-caddy-data:/data
       - agile-space-caddy-config:/config
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${PROXY_CPU_LIMIT:-0.5}"
+          memory: ${PROXY_MEMORY_LIMIT:-128M}
 
 volumes:
   agile-space-db-data:

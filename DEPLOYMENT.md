@@ -181,9 +181,12 @@ curl http://localhost:8002/actuator/health
 
 ### Backup & Disaster Recovery
 
-1. **Database backups:**
+1. **Database backups:** `scripts/backup-db.sh` wraps `docker exec ... pg_dump` (não precisa do
+   cliente do Postgres no host) e já aplica retenção (apaga backups com mais de 14 dias por
+   padrão — ajustável via `RETENTION_DAYS`). Agende via cron no host de produção:
    ```bash
-   pg_dump espacoagil | gzip > backup_$(date +%Y%m%d).sql.gz
+   # Todo dia às 3h da manhã
+   0 3 * * * cd /path/to/agile-space-backend && ./scripts/backup-db.sh >> /var/log/agile-space-backup.log 2>&1
    ```
 
 2. **API keys audit:**

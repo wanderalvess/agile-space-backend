@@ -53,3 +53,6 @@ build/
 ### Claude Code (local dev tooling, machine-specific) ###
 .claude/
 run-backend.cmd
+
+### Backups gerados por scripts/backup-db.sh (dump do banco, nunca deve ir pro git) ###
+/backups/
