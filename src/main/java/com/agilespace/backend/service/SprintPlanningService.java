@@ -11,8 +11,10 @@ import com.agilespace.backend.repository.SprintPlanningTaskRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -41,20 +43,25 @@ public class SprintPlanningService {
     }
 
     @Transactional
-    public SprintPlanning saveOrUpdatePlanner(SprintPlanning planner, String callerId) {
+    public SprintPlanning saveOrUpdatePlanner(SprintPlanning planner, String callerId, boolean isAdmin) {
         ValidationSupport.requireNonBlank(planner.getTitle(), "title");
         ValidationSupport.requireMaxSize(planner.getTasks(), MAX_TASKS, "tasks");
         ValidationSupport.requireMaxSize(planner.getMembers(), MAX_MEMBERS, "members");
 
-        if (planner.getId() != null && !planner.getId().trim().isEmpty()) {
-            sprintPlanningRepository.findById(planner.getId()).ifPresent(existing -> {
-                planner.setCreatedBy(existing.getCreatedBy() != null ? existing.getCreatedBy() : callerId);
-                planner.setCreatedAt(existing.getCreatedAt());
-            });
+        Optional<SprintPlanning> existing = planner.getId() != null && !planner.getId().trim().isEmpty()
+                ? sprintPlanningRepository.findById(planner.getId())
+                : Optional.empty();
+        if (existing.isPresent()) {
+            requireOwnerOrAdmin(existing.get(), callerId, isAdmin);
+            // Planejamento legado sem dono (createdBy vazio/"anonymous") é assumido por quem salvar primeiro.
+            planner.setCreatedBy(hasOwner(existing.get()) ? existing.get().getCreatedBy() : callerId);
+            planner.setCreatedAt(existing.get().getCreatedAt());
         } else {
-            planner.setId(UUID.randomUUID().toString());
-        }
-        if (planner.getCreatedBy() == null || planner.getCreatedBy().trim().isEmpty()) {
+            if (planner.getId() == null || planner.getId().trim().isEmpty()) {
+                planner.setId(UUID.randomUUID().toString());
+            }
+            // Autor vem sempre do token validado, nunca do corpo — senão qualquer chamador
+            // criaria um planejamento em nome de outra pessoa.
             planner.setCreatedBy(callerId);
         }
         if (planner.getCreatedAt() == null || planner.getCreatedAt().trim().isEmpty()) {
@@ -68,7 +75,11 @@ public class SprintPlanningService {
     }
 
     @Transactional
-    public void deletePlanner(String id) {
+    public void deletePlanner(String id, String callerId, boolean isAdmin) {
+        SprintPlanning existing = sprintPlanningRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Planejamento não encontrado."));
+        requireOwnerOrAdmin(existing, callerId, isAdmin);
+
         List<SprintPlanningTask> existingTasks = taskRepository.findByPlanningIdOrderByOrderAsc(id);
         if (!existingTasks.isEmpty()) {
             subtaskRepository.deleteByTaskIdIn(existingTasks.stream().map(SprintPlanningTask::getId).toList());
@@ -76,6 +87,26 @@ public class SprintPlanningService {
         taskRepository.deleteByPlanningId(id);
         memberRepository.deleteByPlanningId(id);
         sprintPlanningRepository.deleteById(id);
+    }
+
+    /**
+     * Leitura é por link (o UUID é o convite, igual a board público de Action Plan), mas
+     * escrita é só do autor ou de um ADMIN. Antes disso o "somente leitura" existia só no
+     * navegador — qualquer autenticado sobrescrevia ou apagava o planejamento alheio
+     * mandando o id direto pra API.
+     */
+    private void requireOwnerOrAdmin(SprintPlanning planning, String callerId, boolean isAdmin) {
+        if (isAdmin || !hasOwner(planning)) {
+            return;
+        }
+        if (callerId == null || !callerId.equals(planning.getCreatedBy())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Apenas o autor ou um administrador pode alterar este planejamento.");
+        }
+    }
+
+    private boolean hasOwner(SprintPlanning planning) {
+        String createdBy = planning.getCreatedBy();
+        return createdBy != null && !createdBy.isBlank() && !"anonymous".equalsIgnoreCase(createdBy.trim());
     }
 
     @Transactional(readOnly = true)

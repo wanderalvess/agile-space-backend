@@ -102,7 +102,7 @@ class SprintPlanningServiceTest {
             when(taskRepository.findByPlanningIdOrderByOrderAsc("plan-123")).thenReturn(List.of());
             when(memberRepository.findByPlanningIdOrderByOrderAsc("plan-123")).thenReturn(List.of(member));
 
-            SprintPlanning saved = service.saveOrUpdatePlanner(samplePlan, "user-sm");
+            SprintPlanning saved = service.saveOrUpdatePlanner(samplePlan, "user-sm", false);
 
             assertEquals("Planejamento Sprint 45", saved.getTitle());
             verify(repository, times(1)).save(samplePlan);
@@ -117,10 +117,12 @@ class SprintPlanningServiceTest {
         @Test
         @DisplayName("Deve excluir planejamento e suas tasks, subtasks e members")
         void shouldDeletePlannerCascadingChildren() {
+            samplePlan.setCreatedBy("user-sm");
             SprintPlanningTask task = SprintPlanningTask.builder().id("t1").planningId("plan-123").build();
+            when(repository.findById("plan-123")).thenReturn(Optional.of(samplePlan));
             when(taskRepository.findByPlanningIdOrderByOrderAsc("plan-123")).thenReturn(List.of(task));
 
-            service.deletePlanner("plan-123");
+            service.deletePlanner("plan-123", "user-sm", false);
 
             verify(subtaskRepository).deleteByTaskIdIn(List.of("t1"));
             verify(taskRepository).deleteByPlanningId("plan-123");
@@ -142,6 +144,94 @@ class SprintPlanningServiceTest {
     }
 
     @Nested
+    @DisplayName("Autoria - só o autor ou ADMIN altera/apaga")
+    class OwnershipTests {
+
+        private SprintPlanning storedByOwner() {
+            return SprintPlanning.builder().id("plan-123").title("Original").createdBy("owner-1").createdAt("ontem").build();
+        }
+
+        @Test
+        @DisplayName("Deve ignorar createdBy do corpo ao criar e usar o chamador")
+        void shouldTakeAuthorFromCallerOnCreate() {
+            SprintPlanning incoming = SprintPlanning.builder().title("Novo").createdBy("outra-pessoa").build();
+            when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            SprintPlanning saved = service.saveOrUpdatePlanner(incoming, "user-sm", false);
+
+            assertEquals("user-sm", saved.getCreatedBy());
+        }
+
+        @Test
+        @DisplayName("Deve bloquear outro usuário de sobrescrever planejamento alheio")
+        void shouldForbidNonOwnerUpdate() {
+            when(repository.findById("plan-123")).thenReturn(Optional.of(storedByOwner()));
+
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                    () -> service.saveOrUpdatePlanner(samplePlan, "intruso", false));
+            assertEquals(403, ex.getStatusCode().value());
+            verify(repository, never()).save(any());
+            verify(taskRepository, never()).deleteByPlanningId(any());
+        }
+
+        @Test
+        @DisplayName("Deve permitir ADMIN atualizar mantendo o autor original")
+        void shouldAllowAdminUpdateKeepingAuthor() {
+            when(repository.findById("plan-123")).thenReturn(Optional.of(storedByOwner()));
+            when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            SprintPlanning saved = service.saveOrUpdatePlanner(samplePlan, "admin-1", true);
+
+            assertEquals("owner-1", saved.getCreatedBy());
+            assertEquals("ontem", saved.getCreatedAt());
+        }
+
+        @Test
+        @DisplayName("Deve deixar o primeiro a salvar assumir planejamento legado sem dono")
+        void shouldLetCallerClaimUnownedPlanner() {
+            SprintPlanning legacy = SprintPlanning.builder().id("plan-123").title("Legado").createdBy("anonymous").build();
+            when(repository.findById("plan-123")).thenReturn(Optional.of(legacy));
+            when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            SprintPlanning saved = service.saveOrUpdatePlanner(samplePlan, "user-sm", false);
+
+            assertEquals("user-sm", saved.getCreatedBy());
+        }
+
+        @Test
+        @DisplayName("Deve bloquear outro usuário de apagar planejamento alheio")
+        void shouldForbidNonOwnerDelete() {
+            when(repository.findById("plan-123")).thenReturn(Optional.of(storedByOwner()));
+
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                    () -> service.deletePlanner("plan-123", "intruso", false));
+            assertEquals(403, ex.getStatusCode().value());
+            verify(repository, never()).deleteById(any());
+        }
+
+        @Test
+        @DisplayName("Deve permitir ADMIN apagar planejamento alheio")
+        void shouldAllowAdminDelete() {
+            when(repository.findById("plan-123")).thenReturn(Optional.of(storedByOwner()));
+            when(taskRepository.findByPlanningIdOrderByOrderAsc("plan-123")).thenReturn(List.of());
+
+            service.deletePlanner("plan-123", "admin-1", true);
+
+            verify(repository).deleteById("plan-123");
+        }
+
+        @Test
+        @DisplayName("Deve retornar 404 ao apagar planejamento inexistente")
+        void shouldReturnNotFoundOnDeleteMissing() {
+            when(repository.findById("nao-existe")).thenReturn(Optional.empty());
+
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                    () -> service.deletePlanner("nao-existe", "user-sm", false));
+            assertEquals(404, ex.getStatusCode().value());
+        }
+    }
+
+    @Nested
     @DisplayName("Validação de Entrada")
     class ValidationTests {
 
@@ -150,7 +240,7 @@ class SprintPlanningServiceTest {
         void shouldRejectBlankTitle() {
             SprintPlanning blank = SprintPlanning.builder().title("   ").build();
 
-            assertThrows(ResponseStatusException.class, () -> service.saveOrUpdatePlanner(blank, "user-sm"));
+            assertThrows(ResponseStatusException.class, () -> service.saveOrUpdatePlanner(blank, "user-sm", false));
             verify(repository, never()).save(any());
         }
 
@@ -163,7 +253,7 @@ class SprintPlanningServiceTest {
             }
             SprintPlanning planning = SprintPlanning.builder().title("Sprint 14").tasks(tooMany).build();
 
-            assertThrows(ResponseStatusException.class, () -> service.saveOrUpdatePlanner(planning, "user-sm"));
+            assertThrows(ResponseStatusException.class, () -> service.saveOrUpdatePlanner(planning, "user-sm", false));
             verify(repository, never()).save(any());
         }
     }

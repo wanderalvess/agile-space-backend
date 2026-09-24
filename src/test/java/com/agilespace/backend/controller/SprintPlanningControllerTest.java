@@ -45,7 +45,7 @@ public class SprintPlanningControllerTest {
         SprintPlanning planning = new SprintPlanning();
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("user-1");
-        when(service.saveOrUpdatePlanner(planning, "user-1")).thenReturn(planning);
+        when(service.saveOrUpdatePlanner(planning, "user-1", false)).thenReturn(planning);
 
         ResponseEntity<SprintPlanning> response = controller.saveOrUpdatePlanner(planning, request);
 
@@ -54,10 +54,23 @@ public class SprintPlanningControllerTest {
 
     @Test
     public void testDeletePlanner() {
-        doNothing().when(service).deletePlanner("plan-1");
-        
-        ResponseEntity<Void> response = controller.deletePlanner("plan-1");
-        
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("user-1");
+
+        ResponseEntity<Void> response = controller.deletePlanner("plan-1", request);
+
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
+        verify(service).deletePlanner("plan-1", "user-1", false);
+    }
+
+    @Test
+    public void testDeletePlanner_adminRolePassedToService() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("admin-1");
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE)).thenReturn("ADMIN");
+
+        controller.deletePlanner("plan-1", request);
+
+        verify(service).deletePlanner("plan-1", "admin-1", true);
     }
 }

@@ -38,12 +38,17 @@ public class SprintPlanningController {
     @PostMapping
     public ResponseEntity<SprintPlanning> saveOrUpdatePlanner(@RequestBody SprintPlanning planner, HttpServletRequest request) {
         String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
-        return ResponseEntity.status(HttpStatus.CREATED).body(sprintPlanningService.saveOrUpdatePlanner(planner, callerId));
+        return ResponseEntity.status(HttpStatus.CREATED).body(sprintPlanningService.saveOrUpdatePlanner(planner, callerId, isAdmin(request)));
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deletePlanner(@PathVariable("id") String id) {
-        sprintPlanningService.deletePlanner(id);
+    public ResponseEntity<Void> deletePlanner(@PathVariable("id") String id, HttpServletRequest request) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        sprintPlanningService.deletePlanner(id, callerId, isAdmin(request));
         return ResponseEntity.noContent().build();
+    }
+
+    private boolean isAdmin(HttpServletRequest request) {
+        return "ADMIN".equalsIgnoreCase((String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE));
     }
 }
