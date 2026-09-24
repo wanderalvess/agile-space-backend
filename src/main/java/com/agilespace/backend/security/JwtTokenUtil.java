@@ -10,6 +10,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.Base64;
@@ -23,13 +24,23 @@ import java.util.Map;
 @Slf4j
 public class JwtTokenUtil {
 
+    static final int MIN_SECRET_BYTES = 32;
+
     private final String secretKey;
     private final long expirationSeconds;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public JwtTokenUtil(
-            @Value("${app.security.jwt-secret:AgileSpaceMasterSecretKey2026EnterpriseProductionDefaultJwtSecret#HS256}") String secretKey,
+            @Value("${app.security.jwt-secret}") String secretKey,
             @Value("${app.security.jwt-expiration-seconds:86400}") long expirationSeconds) {
+        // Sem fallback no código: o segredo vem de APP_JWT_SECRET (application.yml tem um default
+        // só pra dev; application-prod.yml não tem nenhum). Quem conhece o segredo forja token de
+        // qualquer usuário, inclusive ADMIN.
+        if (secretKey == null || secretKey.getBytes(StandardCharsets.UTF_8).length < MIN_SECRET_BYTES) {
+            throw new IllegalStateException(
+                    "app.security.jwt-secret (APP_JWT_SECRET) precisa ter pelo menos " + MIN_SECRET_BYTES
+                            + " bytes. Gere com: openssl rand -base64 48");
+        }
         this.secretKey = secretKey;
         this.expirationSeconds = expirationSeconds;
     }
@@ -81,7 +92,8 @@ public class JwtTokenUtil {
         String contentToSign = parts[0] + "." + parts[1];
         String expectedSignature = sign(contentToSign, secretKey);
 
-        if (!expectedSignature.equals(parts[2])) {
+        if (!MessageDigest.isEqual(expectedSignature.getBytes(StandardCharsets.UTF_8),
+                parts[2].getBytes(StandardCharsets.UTF_8))) {
             log.warn("Assinatura do JWT inválida");
             return null;
         }

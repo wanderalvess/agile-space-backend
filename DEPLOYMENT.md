@@ -15,13 +15,16 @@ export DB_PASSWORD="secure_password"
 # Encryption (REQUIRED - NEVER use default)
 export APP_ENCRYPTION_SECRET="$(openssl rand -base64 32)"  # Generate unique key
 
+# JWT signing secret (REQUIRED - no default in prod; whoever knows it can forge any login, incl. ADMIN)
+export APP_JWT_SECRET="$(openssl rand -base64 48)"
+
 # Admin access (optional - leave empty to disable)
 export APP_ADMIN_KEY="secure_admin_key_or_empty"
 
 # CORS/WebSocket (REQUIRED in prod profile - no default, comma-separated)
 export ALLOWED_ORIGINS="https://your-frontend-domain.com"
 
-# Self-registration domain restriction (optional - prod profile already defaults to "totvs.com.br")
+# Self-registration domain restriction (REQUIRED in prod - empty makes the backend refuse to boot)
 export ALLOWED_EMAIL_DOMAIN="totvs.com.br"
 
 # Application Profile
@@ -115,7 +118,7 @@ docker run -d \
   -e DB_URL="jdbc:postgresql://postgres:5432/espacoagil" \
   -e DB_USERNAME="postgres" \
   -e DB_PASSWORD="secure_password" \
-  -e APP_ENCRYPTION_SECRET="$(openssl rand -base64 32)" \
+  -e APP_ENCRYPTION_SECRET="$(openssl rand -base64 32)"   -e APP_JWT_SECRET="$(openssl rand -base64 48)"   -e ALLOWED_EMAIL_DOMAIN="totvs.com.br" \
   -e SPRING_PROFILES_ACTIVE="prod" \
   -p 8002:8002 \
   --name agile-space-backend \
@@ -141,6 +144,8 @@ export DOMAIN="agilespace.totvs.com.br"
 export ALLOWED_ORIGINS="https://${DOMAIN}"
 export SPRING_PROFILES_ACTIVE=prod
 export APP_ENCRYPTION_SECRET="$(openssl rand -base64 32)"
+export APP_JWT_SECRET="$(openssl rand -base64 48)"
+export ALLOWED_EMAIL_DOMAIN="totvs.com.br"
 export DB_URL="jdbc:postgresql://db:5432/espacoagil"
 export DB_PASSWORD="secure_password"
 
@@ -148,7 +153,6 @@ export DB_PASSWORD="secure_password"
 # do frontend) — setar depois via "environment:" não muda o bundle já compilado.
 export NEXT_PUBLIC_API_URL="https://${DOMAIN}/api"
 export NEXT_PUBLIC_SPRING_API_URL="https://${DOMAIN}/api"
-export NEXT_PUBLIC_WS_URL="wss://${DOMAIN}"
 export NEXT_PUBLIC_GOOGLE_CLIENT_ID="..."  # opcional — sem ela, o card de agenda do painel some, resto do app funciona
 
 docker compose --profile proxy up -d --build
@@ -240,6 +244,8 @@ mvn spring-boot:run
 ```bash
 export SPRING_PROFILES_ACTIVE=prod
 export APP_ENCRYPTION_SECRET="$(openssl rand -base64 32)"
+export APP_JWT_SECRET="$(openssl rand -base64 48)"
+export ALLOWED_EMAIL_DOMAIN="totvs.com.br"
 export DB_URL="jdbc:postgresql://prod-host:5432/espacoagil"
 export DB_USERNAME="prod_user"
 export DB_PASSWORD="prod_password"
@@ -255,6 +261,14 @@ java -jar target/backend-4.1.0.jar
 Error: Could not resolve placeholder 'APP_ENCRYPTION_SECRET'
 ```
 **Fix:** Set `APP_ENCRYPTION_SECRET` environment variable before startup.
+
+### "Configuração de produção insegura, recusando subir"
+The `ProductionSecretsValidator` (prod profile only) found `APP_JWT_SECRET` or `APP_ENCRYPTION_SECRET`
+missing/equal to the dev default, or `ALLOWED_EMAIL_DOMAIN` empty. The message lists which ones.
+Note: `docker compose` passes unset variables as empty strings, which bypass the yml defaults —
+so they must be set explicitly in the `.env` next to `docker-compose.yml`.
+
+**Rotating `APP_JWT_SECRET`** logs everyone out (existing tokens stop validating); users just log in again.
 
 ### Flyway migration failed
 ```

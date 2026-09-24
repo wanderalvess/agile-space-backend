@@ -37,8 +37,12 @@ springdoc:
 app:
   security:
     encryption-key: ${APP_ENCRYPTION_SECRET}
+    # Sem default de propósito: sem APP_JWT_SECRET o backend não sobe.
+    jwt-secret: ${APP_JWT_SECRET}
     # Default totvs.com.br em produção (ferramenta interna à TOTVS) — ainda pode ser
-    # sobrescrito via ALLOWED_EMAIL_DOMAIN se necessário.
+    # sobrescrito via ALLOWED_EMAIL_DOMAIN se necessário. Atenção: variável definida porém
+    # vazia (ex.: docker-compose repassando "${ALLOWED_EMAIL_DOMAIN:-}") NÃO cai neste default;
+    # o ProductionSecretsValidator barra o boot nesse caso.
     allowed-email-domain: ${ALLOWED_EMAIL_DOMAIN:totvs.com.br}
   cors:
     # Sem fallback de propósito: obriga a definir o(s) domínio(s) público(s) reais em produção

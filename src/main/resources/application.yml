@@ -67,6 +67,10 @@ app:
     # Em dev local, pode usar um valor padrão. Em produção, nunca use fallback hardcoded.
     # Gerar com: openssl rand -base64 32
     encryption-key: ${APP_ENCRYPTION_SECRET:AgileSpaceDevMasterKey2026LocalOnly#AES}
+    # Segredo HMAC que assina os JWT de sessão. Default só pra dev local; o profile prod não tem
+    # default e o ProductionSecretsValidator recusa subir com este valor.
+    # Gerar com: openssl rand -base64 48
+    jwt-secret: ${APP_JWT_SECRET:AgileSpaceDevJwtSecret2026LocalOnly#NeverUseInProduction}
     # Chave de acesso admin para o endpoint GET /api/users (listagem de usuários).
     # Defina APP_ADMIN_KEY no ambiente (ou deixe vazio pra desabilitar endpoint).
     admin-key: ${APP_ADMIN_KEY:}
