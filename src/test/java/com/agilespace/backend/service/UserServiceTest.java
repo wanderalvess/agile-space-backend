@@ -3,6 +3,7 @@ package com.agilespace.backend.service;
 import com.agilespace.backend.domain.User;
 import com.agilespace.backend.domain.UserJiraConfig;
 import com.agilespace.backend.domain.UserTdnConfig;
+import com.agilespace.backend.dto.UserProjectAccessDto;
 import com.agilespace.backend.repository.UserJiraConfigRepository;
 import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.repository.UserTdnConfigRepository;
@@ -16,6 +17,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -34,6 +36,9 @@ class UserServiceTest {
 
     @Mock
     private UserTdnConfigRepository tdnConfigRepository;
+
+    @Mock
+    private UserProjectResolverService userProjectResolverService;
 
     @InjectMocks
     private UserService service;
@@ -120,23 +125,59 @@ class UserServiceTest {
         }
 
         @Test
-        @DisplayName("Deve permitir ao usuário alterar seu próprio squadId e cargo (jobTitle)")
-        void shouldAllowSelfServiceSquadAndJobTitle() {
-            User incoming = User.builder()
-                    .id("user-123")
-                    .name("Wanderson Alves")
-                    .squadId("SQUAD-NOVA")
-                    .jobTitle("Tech Lead")
-                    .build();
+        @DisplayName("Deve permitir trocar para uma squad com a qual o usuário já tem vínculo")
+        void shouldAllowSquadChangeToLinkedProject() {
+            User incoming = User.builder().id("user-123").squadId("SQUAD-NOVA").build();
+
+            when(userRepository.findById("user-123")).thenReturn(Optional.of(sampleUser));
+            when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+            when(userProjectResolverService.resolveUserAccess(sampleUser)).thenReturn(UserProjectAccessDto.builder()
+                    .projects(List.of(UserProjectAccessDto.ProjectAccessItem.builder().projectId("SQUAD-NOVA").build()))
+                    .build());
+
+            User saved = service.saveUser(incoming, false);
+
+            assertEquals("SQUAD-NOVA", saved.getSquadId());
+        }
+
+        @Test
+        @DisplayName("Não deve deixar um membro se colocar numa squad sem vínculo editando o perfil")
+        void shouldRejectSquadChangeWithoutLink() {
+            User incoming = User.builder().id("user-123").squadId("SQUAD-ALHEIA").build();
+
+            when(userRepository.findById("user-123")).thenReturn(Optional.of(sampleUser));
+            when(userProjectResolverService.resolveUserAccess(sampleUser))
+                    .thenReturn(UserProjectAccessDto.builder().projects(List.of()).build());
+
+            assertThrows(ResponseStatusException.class, () -> service.saveUser(incoming, false));
+            verify(userRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Reenviar a mesma squad não exige checagem de vínculo")
+        void shouldNotCheckAccessWhenSquadUnchanged() {
+            sampleUser.setSquadId("SQUAD-ATUAL");
+            User incoming = User.builder().id("user-123").squadId("SQUAD-ATUAL").name("Novo Nome").build();
 
             when(userRepository.findById("user-123")).thenReturn(Optional.of(sampleUser));
             when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
 
             User saved = service.saveUser(incoming, false);
 
-            assertEquals("SQUAD-NOVA", saved.getSquadId());
-            assertEquals("Tech Lead", saved.getJobTitle());
-            assertEquals("MEMBER", saved.getRole());
+            assertEquals("Novo Nome", saved.getName());
+            verifyNoInteractions(userProjectResolverService);
+        }
+
+        @Test
+        @DisplayName("Cargo (jobTitle) só é alterado por ADMIN")
+        void shouldIgnoreJobTitleFromNonAdmin() {
+            User incoming = User.builder().id("user-123").jobTitle("Tech Lead").build();
+
+            when(userRepository.findById("user-123")).thenReturn(Optional.of(sampleUser));
+            when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+            assertNull(service.saveUser(incoming, false).getJobTitle());
+            assertEquals("Tech Lead", service.saveUser(incoming, true).getJobTitle());
         }
 
         @Test

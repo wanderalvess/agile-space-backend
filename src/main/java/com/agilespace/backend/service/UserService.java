@@ -5,6 +5,7 @@ import com.agilespace.backend.domain.User;
 import com.agilespace.backend.domain.UserJiraConfig;
 import com.agilespace.backend.domain.UserRole;
 import com.agilespace.backend.domain.UserTdnConfig;
+import com.agilespace.backend.dto.UserProjectAccessDto;
 import com.agilespace.backend.repository.SquadMemberRepository;
 import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.repository.UserJiraConfigRepository;
@@ -32,6 +33,9 @@ public class UserService {
     @Autowired
     private SquadMemberRepository squadMemberRepository;
 
+    @Autowired
+    private UserProjectResolverService userProjectResolverService;
+
     @Transactional(readOnly = true)
     public List<User> getAllUsers() {
         return userRepository.findAll();
@@ -46,9 +50,11 @@ public class UserService {
      * Atualiza o perfil de um usuário já existente. Aceita apenas os campos de perfil
      * (nunca role/active/passwordHash/authProvider/email/ssoId a partir do corpo da requisição)
      * para evitar mass assignment; role/active/defaultProjectId (autorização/acesso a projeto)
-     * só são aplicados quando isAdmin=true. squadId/jobTitle são de auto-serviço: cargo de negócio
-     * e squad de exibição não têm nenhum uso em checagem de autorização — só o campo role
-     * (validado contra {@link UserRole}) controla acesso, e por isso fica atrás do isAdmin.
+     * só são aplicados quando isAdmin=true. squadId e jobTitle ENTRAM em checagem de autorização
+     * (SquadAccessService usa squadId; InviteController e SquadLeadership usam jobTitle de
+     * liderança), então: jobTitle só por ADMIN, e squadId só muda pra um projeto ao qual o usuário
+     * já tem vínculo — a mesma regra do /auth/switch-project. Sem isso, um MEMBER se colocava em
+     * qualquer squad (e com cargo de liderança) só editando o próprio perfil.
      * Campos omitidos no corpo da requisição (null) preservam o valor já existente.
      * Retorna null se o usuário não existir.
      */
@@ -65,10 +71,15 @@ public class UserService {
         if (incoming.getJiraAccountId() != null) existing.setJiraAccountId(incoming.getJiraAccountId());
         if (incoming.getSegmentName() != null) existing.setSegmentName(incoming.getSegmentName());
         if (incoming.getTribeName() != null) existing.setTribeName(incoming.getTribeName());
-        if (incoming.getSquadId() != null) existing.setSquadId(incoming.getSquadId());
-        if (incoming.getJobTitle() != null) existing.setJobTitle(incoming.getJobTitle());
+        if (incoming.getSquadId() != null && !incoming.getSquadId().equalsIgnoreCase(existing.getSquadId())) {
+            if (!isAdmin && !incoming.getSquadId().isBlank()) {
+                requireProjectAccess(existing, incoming.getSquadId());
+            }
+            existing.setSquadId(incoming.getSquadId());
+        }
 
         if (isAdmin) {
+            if (incoming.getJobTitle() != null) existing.setJobTitle(incoming.getJobTitle());
             if (incoming.getRole() != null) {
                 if (!UserRole.isValid(incoming.getRole())) {
                     throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -82,6 +93,16 @@ public class UserService {
 
         existing.setUpdatedAt(LocalDateTime.now());
         return userRepository.save(existing);
+    }
+
+    private void requireProjectAccess(User user, String projectId) {
+        UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(user);
+        boolean hasAccess = access != null && access.getProjects() != null
+                && access.getProjects().stream().anyMatch(p -> projectId.equalsIgnoreCase(p.getProjectId()));
+        if (!hasAccess) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Você não tem vínculo com este time. Entre nele pelo onboarding ou peça um convite.");
+        }
     }
 
     @Transactional(readOnly = true)

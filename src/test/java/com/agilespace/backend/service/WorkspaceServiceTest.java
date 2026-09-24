@@ -10,6 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.web.server.ResponseStatusException;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -17,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -68,7 +70,7 @@ class WorkspaceServiceTest {
         @Test
         @DisplayName("Deve excluir cartão kanban pelo identificador")
         void shouldDeleteKanbanCard() {
-            service.deleteKanbanCard("k1");
+            service.deleteKanbanCard("k1", "user-123");
             verify(kanbanRepository).deleteById("k1");
         }
     }
@@ -98,7 +100,7 @@ class WorkspaceServiceTest {
         @Test
         @DisplayName("Deve excluir nota adesiva")
         void shouldDeleteStickyNote() {
-            service.deleteStickyNote("n1");
+            service.deleteStickyNote("n1", "user-123");
             verify(noteRepository).deleteById("n1");
         }
     }
@@ -139,8 +141,46 @@ class WorkspaceServiceTest {
         @Test
         @DisplayName("Deve excluir link rápido")
         void shouldDeleteQuickLink() {
-            service.deleteQuickLink("l1");
+            service.deleteQuickLink("l1", "user-123");
             verify(linkRepository).deleteById("l1");
+        }
+    }
+
+    @Nested
+    @DisplayName("Isolamento entre usuários")
+    class OwnershipTests {
+
+        @Test
+        @DisplayName("Não apaga card de outro usuário")
+        void shouldNotDeleteOthersCard() {
+            when(kanbanRepository.findById("k1"))
+                    .thenReturn(Optional.of(UserKanbanCard.builder().id("k1").userId("dono").build()));
+
+            assertThrows(ResponseStatusException.class, () -> service.deleteKanbanCard("k1", "intruso"));
+            verify(kanbanRepository, never()).deleteById(any());
+        }
+
+        @Test
+        @DisplayName("Não sobrescreve nota de outro usuário reaproveitando o id")
+        void shouldNotOverwriteOthersNote() {
+            when(noteRepository.findById("n1"))
+                    .thenReturn(Optional.of(UserStickyNote.builder().id("n1").userId("dono").build()));
+            UserStickyNote hijack = UserStickyNote.builder().id("n1").userId("intruso").build();
+
+            assertThrows(ResponseStatusException.class, () -> service.saveStickyNote(hijack));
+            verify(noteRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Atualiza item próprio normalmente")
+        void shouldUpdateOwnLink() {
+            when(linkRepository.findById("l1"))
+                    .thenReturn(Optional.of(UserQuickLink.builder().id("l1").userId("user-123").build()));
+            when(linkRepository.save(any(UserQuickLink.class))).thenAnswer(i -> i.getArgument(0));
+
+            UserQuickLink saved = service.saveQuickLink(UserQuickLink.builder().id("l1").userId("user-123").build());
+
+            assertEquals("l1", saved.getId());
         }
     }
 }
