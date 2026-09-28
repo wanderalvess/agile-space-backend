@@ -1,44 +1,63 @@
 # Agile Space Backend 🚀
 
-O **Agile Space Backend** é o motor central (API REST e WebSockets) da plataforma Agile Space. Este repositório foi construído utilizando uma arquitetura moderna e escalável em **Java com Spring Boot**, focado em gerenciar cerimônias ágeis, métricas de squad, segurança de senhas (Vault) e colaboração em tempo real (WebSockets).
+O **Agile Space Backend** é o motor central (API REST, WebSockets e Servidor MCP) da plataforma **Espaço Ágil**. Este repositório foi construído utilizando uma arquitetura escalável e resiliente em **Java 17+ com Spring Boot 3.5**, responsável por gerenciar cerimônias ágeis em tempo real, métricas e consolidação de squads, segurança de segredos (Vault), base de conhecimento com RAG vetorial e integrações para agentes de inteligência artificial.
 
 ---
 
 ## 🛠️ Stack Tecnológica
 
-- **Linguagem:** Java 17+
-- **Framework Core:** Spring Boot 3.x
-- **Documentação de API:** OpenAPI 3 / Swagger (Springdoc OpenAPI UI)
-- **Banco de Dados:** PostgreSQL (Spring Data JPA)
-- **Tempo Real:** Spring WebSockets (Stomp/SockJS)
+- **Linguagem & Runtime:** Java 17+
+- **Framework Core:** Spring Boot 3.5.x
+- **Banco de Dados & ORM:** PostgreSQL, Spring Data JPA / Hibernate (`ddl-auto: validate`)
+- **Migrações de Banco:** Flyway (`classpath:db/migration`, baseline idempotente `V1_1__baseline_schema.sql` e scripts incrementais)
+- **Segurança & Autenticação:**
+  - Autenticação corporativa nativa JWT (HS256 com claims estruturadas e BCrypt)
+  - API Keys com escopo granular (`X-Api-Key` com hash SHA-256) para rotas `/api/v1/**` e `/mcp/**`
+  - Criptografia simétrica AES-256 (GCM) para tokens corporativos do Jira (`APP_ENCRYPTION_SECRET`)
+  - Validação estrita de segredos no boot (`ProductionSecretsValidator`)
+  - Controle de taxa e proteção contra abuso via Bucket4j
+- **Tempo Real & WebSockets:** Spring WebSockets (Stomp/SockJS) com autenticação por token no handshake (`JwtHandshakeInterceptor`)
+- **IA & Model Context Protocol (MCP):** Spring AI com servidor MCP WebMVC embutido (`/mcp/sse`), RAG vetorial autônomo com `pgvector`
+- **Engine de Transformação:** Bazaarvoice JOLT nativo Java (`jolt-core`, `json-utils`)
+- **Documentação de API:** OpenAPI 3 / Swagger (`springdoc-openapi-starter-webmvc-ui`)
+- **Observabilidade:** Spring Boot Actuator (`/actuator/health`), suporte a rastreamento distribuído via OpenTelemetry (OTLP)
 - **Testes:** JUnit 5, Mockito
-- **Build Tool:** Maven
 
 ---
 
 ## 🧩 Principais Módulos do Sistema
 
-A arquitetura do sistema é modularizada para atender a diferentes fluxos ágeis:
+A arquitetura do sistema é modularizada por domínios de negócio ágil:
 
-- **Cerimônias Ágeis:** Serviços em tempo real para `Planning Poker`, `Retrospectivas` (RetroBoards e Cards), `Showcase Sessions` (Reviews) e `Brainstorming`.
-- **Gestão de Squads e Métricas:** Integração com snapshots do Jira, métricas diárias, consolidação (rollups) de saúde do time, capacidade e cache de worklogs.
-- **Health Check & Daily Flow:** Controle de humor e reportes diários do time, facilitando inspeções rápidas.
-- **Vault (Cofre de Segredos):** Serviço de compartilhamento seguro de credenciais com autodestruição baseada em tempo (1h, 24h) ou visualização única (`once`).
-- **Workspace do Usuário:** Quadros Kanban privados, notas adesivas e links rápidos para gestão pessoal (To-Do List pessoal).
-- **Gestão de Conhecimento e Prompts de IA:** Repositório colaborativo de prompts (Scrum Master, Product Owner, etc.) com sistema de forks, comentários e ranqueamento de uso.
-- **RAG & Base de Conhecimento Vetorial (PostgreSQL + pgvector):** Ingestão de documentações técnicas e regras de negócio vetorizadas vindas do **WinThor Dev Manager**, permitindo consultas semânticas no Chat sem custo de IA externa (*Veja [DOCS_RAG_INTEGRATION.md](DOCS_RAG_INTEGRATION.md)*).
+- **Cerimônias Ágeis em Tempo Real:**
+  - `Scrum Poker`: Salas síncronas e assíncronas com votações em tempo real, consenso por papel e varredura visual de divergência.
+  - `Retrospectivas Inteligentes`: Retro boards dinâmicos com colunas configuráveis, limite de votos por membro e fusão inteligente de cards preservando histórico integral (`originalTexts`).
+  - `Sprint Showcase`: Sessões de Sprint Review com suporte ao Modo Teatro, renderização de evidências e proxy autenticado de mídias do Jira.
+  - `Brainstorming Alpha`: Espaço colaborativo síncrono para dinâmicas de ideação.
+- **Gestão de Squads e Métricas (Squad Pulse & Jiradash):** Integração com snapshots do Jira, métricas diárias, consolidação (rollups) de saúde do time, capacidade e cache compartilhado de consultas JQL.
+- **Daily Flow & Health Check:** Controle de humor, reporte de impedimentos e diagnóstico anônimo periódico do clima da squad.
+- **Plano de Ação (Action Plan):** Gestão tática de melhorias derivadas das retrospectivas com metodologia 5W2H, responsáveis e prazos.
+- **Vault (Cofre de Segredos):** Serviço de compartilhamento seguro de credenciais com expiração temporal (1h, 24h) ou visualização única (`once`).
+- **Workspace Pessoal:** Quadros Kanban privados, notas adesivas e links rápidos para gestão individual.
+- **Prompt Hub & Acervo de IA:** Repositório colaborativo de prompts para papéis ágeis (SM, PO, Dev, QA) com versionamento, forks e upload automatizado de skills (`SKILL.md`).
+- **RAG & Base de Conhecimento Vetorial (PostgreSQL + pgvector):** Ingestão de documentações técnicas e regras de negócio vetorizadas, permitindo consultas semânticas no Chat sem custo de IA externa.
+- **Servidor MCP Embutido (`agile-space-mcp-server`):** Servidor Model Context Protocol exposto em `/mcp/sse` e `/mcp/message`, protegido por `X-Api-Key`, permitindo que agentes externos consultem documentações, squads e criem sessões de poker.
+- **API Pública com Escopos Granulares (`/api/v1/**`):** Endpoints REST para integrações máquina-a-máquina autenticadas por chave de API.
+- **Engine JOLT Server-Side:** Execução de transformações de estruturas JSON utilizando a especificação JOLT com o motor Java oficial Bazaarvoice.
 
 ---
 
 ## ⚙️ Arquitetura
 
-O projeto segue os princípios de Arquitetura em Camadas (Layered Architecture):
+O projeto adota uma Arquitetura em Camadas (Layered Architecture) estrita e desacoplada:
 
-- **Domain (`com.agilespace.backend.domain`):** Modelos de dados e mapeamentos das tabelas do PostgreSQL (`@Entity`).
+- **Domain (`com.agilespace.backend.domain`):** Modelos de dados e mapeamentos das tabelas do PostgreSQL (`@Entity`), colunas JSONB gerenciadas via `@JdbcTypeCode(SqlTypes.JSON)`.
 - **Repository (`com.agilespace.backend.repository`):** Interfaces de acesso a dados abstraídas pelo Spring Data JpaRepository.
-- **Service (`com.agilespace.backend.service`):** Onde reside toda a regra de negócio e os limites transacionais (`@Transactional`).
-- **Controller (`com.agilespace.backend.controller`):** Exposição dos endpoints REST para consumo pelo Frontend.
-- **WebSocket (`com.agilespace.backend.websocket`):** Handlers responsáveis pelo broadcast de eventos (ex: virada de cartas no Planning Poker) usando arquitetura Pub/Sub.
+- **Service (`com.agilespace.backend.service`):** Regras de negócio, transações (`@Transactional`) e orquestração de eventos.
+- **Controller (`com.agilespace.backend.controller`):** Exposição dos endpoints REST, segregados entre rotas de sessão de usuário (`/api/**` via JWT) e rotas de integração de serviços (`/api/v1/**` via `X-Api-Key`).
+- **Security (`com.agilespace.backend.security`):** Filtros [`JwtAuthenticationFilter`](src/main/java/com/agilespace/backend/security/JwtAuthenticationFilter.java), [`ApiKeyAuthenticationFilter`](src/main/java/com/agilespace/backend/security/ApiKeyAuthenticationFilter.java), gerador/validador de tokens [`JwtTokenUtil`](src/main/java/com/agilespace/backend/security/JwtTokenUtil.java) e interceptor de WebSockets [`JwtHandshakeInterceptor`](src/main/java/com/agilespace/backend/security/JwtHandshakeInterceptor.java).
+- **MCP (`com.agilespace.backend.mcp`):** Ferramentas expostas via Model Context Protocol para consumo por agentes de IA.
+- **WebSocket (`com.agilespace.backend.websocket`):** Handlers responsáveis pelo broadcast Pub/Sub de eventos em tempo real (`/ws/poker/*`, `/ws/retro/*`, `/ws/showcase/*`, `/ws/health-check/*`, `/ws/brainstorming/*`).
 
 ---
 
@@ -46,8 +65,8 @@ O projeto segue os princípios de Arquitetura em Camadas (Layered Architecture):
 
 ### Pré-requisitos
 - **Java 17** (ou superior) instalado.
-- **Maven** (O projeto já inclui o `mvnw` (Maven Wrapper), então não é obrigatório ter o Maven instalado globalmente).
-- Instância do **PostgreSQL** rodando localmente (porta 5432) ou uma URI de um banco em nuvem.
+- **Maven Wrapper** (já incluído no projeto via `./mvnw` / `./mvnw.cmd`).
+- Instância do **PostgreSQL 14+** em execução (porta 5432) com uma base chamada `espacoagil`.
 
 ### Passos de Execução
 
@@ -57,339 +76,224 @@ O projeto segue os princípios de Arquitetura em Camadas (Layered Architecture):
    cd agile-space-backend
    ```
 
-2. **Configure as Variáveis de Ambiente:**
-   Configure as propriedades do banco de dados no arquivo `src/main/resources/application.yml` ou exporte como variável de ambiente caso utilize um PostgreSQL externo.
+2. **Configuração de Variáveis de Ambiente:**
+   Para desenvolvimento local, o arquivo `src/main/resources/application.yml` já fornece defaults funcionais para PostgreSQL (`postgres/postgres`), JWT e chaves de criptografia. Caso queira sobrescrever, defina as variáveis de ambiente:
+   ```bash
+   export DB_URL="jdbc:postgresql://localhost:5432/espacoagil"
+   export DB_USERNAME="postgres"
+   export DB_PASSWORD="postgres"
+   ```
 
 3. **Inicie o Servidor:**
-   Utilizando o Maven Wrapper:
    ```bash
-   # Em ambiente Windows:
+   # Em ambiente Windows (PowerShell / CMD):
    ./mvnw.cmd spring-boot:run
 
-   # Em ambiente Linux/Mac:
+   # Em ambiente Linux / macOS:
    ./mvnw spring-boot:run
    ```
-   A aplicação subirá por padrão na porta `8002`.
+   A aplicação executará por padrão na porta `8002` (`http://localhost:8002/api`).
+
+   > 💡 **Migrações Automáticas:** Na primeira subida, o **Flyway** aplicará automaticamente o script baseline (`V1_1__baseline_schema.sql`) e todas as migrações subsequentes. O Hibernate valida o schema (`ddl-auto: validate`).
 
 ---
 
 ## 🐳 Rodando com Docker
 
-A stack completa (backend + frontend + PostgreSQL) sobe com um único comando, isolada de qualquer banco ou container que já exista na máquina — é o mesmo processo usado para a instalação limpa em VM.
+A stack completa (**Backend + Frontend + PostgreSQL dedicado**) sobe com um único comando, isolada de outros containers locais:
 
 ### Pré-requisitos
-- Docker Desktop (ou Docker Engine + Compose) instalado.
-- Repositório [`agile-space-frontend`](https://github.com/wanderalvess/agile-space-frontend) clonado **no mesmo diretório pai** que este repositório (o `docker-compose.yml` referencia `../agile-space-frontend` como contexto de build do frontend):
+- Docker Engine e Docker Compose instalados.
+- Repositório [`agile-space-frontend`](https://github.com/wanderalvess/agile-space-frontend) clonado **no mesmo diretório pai** que este repositório:
   ```
-  algum-diretorio/
-  ├── agile-space-backend/   (este repo, contém o docker-compose.yml)
-  └── agile-space-frontend/
+  meus-projetos/
+  ├── agile-space-backend/   (este repositório, contém o docker-compose.yml)
+  └── agile-space-frontend/  (repositório frontend Next.js)
   ```
 
-### Subir a stack
-
+### Subir a Stack Completa
 ```bash
 docker compose up -d --build
 ```
 
-Isso cria:
-- **`agile-space-db`** — PostgreSQL 17 dedicado, banco `espacoagil`, volume nomeado `agile-space-db-data` (dados persistem entre restarts do container).
-- **`agile-space-backend`** — API Spring Boot, porta `8002`. O schema é criado automaticamente pelo Hibernate (`ddl-auto: update`) na primeira subida — não precisa rodar migração manual.
-- **`agile-space-frontend`** — Next.js standalone, porta `9002`.
+Isso inicializa:
+- **`agile-space-db`** — PostgreSQL 17 dedicado, banco `espacoagil`, volume nomeado `agile-space-db-data`.
+- **`agile-space-backend`** — API Spring Boot na porta `8002`. As migrações do Flyway rodam automaticamente durante a inicialização.
+- **`agile-space-frontend`** — Next.js 16 standalone na porta `9002`.
 
-Rede e volume ficam isolados sob o prefixo `agile-space-backend_*` — não reaproveita nem interfere em containers de outros projetos na mesma máquina.
+Os três serviços possuem `healthcheck` ativo no Compose (`db` via `pg_isready`, `backend` via `/actuator/health`, `frontend` via `/`), garantindo que o frontend só inicie após a API Spring Boot estar 100% operacional.
 
-Os três serviços têm `healthcheck` no compose (`db` via `pg_isready`, `backend` via `/actuator/health`, `frontend` via `/`), e `frontend` só inicia depois que `backend` estiver `healthy` — evita a race do frontend subir antes da API terminar de bootar (o Spring Boot leva de 15 a 50s a depender da máquina).
-
-### Verificar
-
+### Verificar Conectividade
 ```bash
-docker compose ps                        # os 3 devem aparecer "healthy" após ~1min
+docker compose ps                        # Todos devem exibir status "healthy"
 curl http://localhost:8002/actuator/health  # {"status":"UP"}
-curl http://localhost:8002/v3/api-docs      # backend
-curl http://localhost:9002                  # frontend
+curl http://localhost:8002/v3/api-docs      # Documentação OpenAPI
+curl http://localhost:9002                  # Frontend Next.js
 ```
 
-Acesse `http://localhost:9002` no navegador — a tela de login/cadastro aparece direto. Como o banco começa vazio, use a aba **Cadastrar** para criar o primeiro usuário.
-
-### Variáveis de ambiente
-
-As credenciais do PostgreSQL usadas pelo `docker-compose.yml` (`postgres`/`postgres`, banco `espacoagil`) são valores de desenvolvimento, iguais aos defaults do `application.yml`. Para um ambiente real, sobrescreva via `environment:` no compose ou um arquivo `.env` — nunca commite credenciais reais. As variáveis obrigatórias em produção (`APP_ENCRYPTION_SECRET`, `APP_ADMIN_KEY`, etc.) continuam valendo — ver seção [Guia de Deploy em Produção](#-guia-de-deploy-em-produção) abaixo.
-
-### Rebuildar após mudança de código
-
-Containers Docker não têm hot-reload — qualquer alteração no `src` do backend ou frontend exige rebuild da imagem correspondente:
-
+### Recompilar após Alterações de Código
 ```bash
-docker compose up -d --build backend    # só o backend
-docker compose up -d --build frontend   # só o frontend
+docker compose up -d --build backend    # Recompilar apenas o backend
+docker compose up -d --build frontend   # Recompilar apenas o frontend
 ```
 
-### Parar / limpar
-
+### Parar / Limpar
 ```bash
-docker compose down          # para os containers, mantém o volume do banco
-docker compose down -v       # para e apaga também os dados do banco
+docker compose down          # Para os containers, preserva os dados do PostgreSQL
+docker compose down -v       # Para e remove os containers e o volume de dados do banco
 ```
+
+---
+
+## 🤖 Servidor MCP Embutido (Model Context Protocol)
+
+O backend possui um servidor MCP nativo via Spring AI (`spring-ai-starter-mcp-server-webmvc`), projetado para integração com agentes de IA (como Claude Desktop, Cursor, Antigravity, etc.):
+
+- **Nome do Servidor:** `agile-space-mcp-server`
+- **Transporte SSE:** `GET /mcp/sse` e `POST /mcp/message`
+- **Autenticação:** Requer o cabeçalho `X-Api-Key` com uma chave de API válida emitida pelo administrador.
+- **Ferramentas Disponíveis no MCP:**
+  - `importSkill`: Importação ou atualização de skills individuais (`SKILL.md`).
+  - `batchImportSkills`: Importação em lote de múltiplas skills a partir de um array JSON.
+  - Leitura e busca semântica na Base de Conhecimento.
+  - Consulta a métricas e status de squads.
+  - Criação e consulta de sessões de Scrum Poker.
+
+---
+
+## 🔑 Autenticação por API Key (`/api/v1/**` e `/mcp/**`)
+
+Para chamadas de máquina ou integrações de terceiros, utilize as API Keys com escopos:
+
+### Gerar API Key (via Admin autenticado com JWT)
+```bash
+curl -X POST http://localhost:8002/api/admin/api-keys \
+  -H "Authorization: Bearer {JWT_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "minha-chave-integracao",
+    "ownerRole": "ADMIN",
+    "scopes": ["KNOWLEDGE_READ", "SQUAD_READ", "PROMPTHUB_WRITE", "POKER_READ"]
+  }'
+```
+
+### Escopos Suportados
+- `KNOWLEDGE_READ` / `KNOWLEDGE_WRITE`: Leitura e escrita de documentos na Base de Conhecimento.
+- `SQUAD_READ` / `SQUAD_WRITE`: Leitura e modificação de dados de squads e projetos.
+- `PROMPTHUB_READ` / `PROMPTHUB_WRITE`: Consulta e publicação de prompts e skills no Prompt Hub.
+- `POKER_READ` / `POKER_WRITE`: Consulta e gerenciamento de salas de Scrum Poker.
 
 ---
 
 ## 📖 Documentação da API (Swagger / OpenAPI)
 
-Com a aplicação em execução, a documentação interativa e os endpoints podem ser acessados em:
+Em ambiente de desenvolvimento, a documentação interativa e as especificações de contrato ficam disponíveis em:
 
-- **Swagger UI (Interface Interativa):** [http://localhost:8002/swagger-ui.html](http://localhost:8002/swagger-ui.html)
+- **Swagger UI:** [http://localhost:8002/swagger-ui.html](http://localhost:8002/swagger-ui.html)
 - **OpenAPI Spec (JSON):** [http://localhost:8002/v3/api-docs](http://localhost:8002/v3/api-docs)
+
+*(Em profile de produção `prod`, o Swagger UI e os endpoints de docs são desabilitados por padrão por motivos de segurança).*
 
 ---
 
-## 🩺 Observabilidade
+## 🩺 Observabilidade & Monitoramento
 
-- **Health check:** `GET /actuator/health` (Spring Boot Actuator) — retorna `{"status":"UP"}`, incluindo verificação de conectividade com o PostgreSQL. Sem autenticação (rota fora de `/api/**`, não passa pelo `JwtAuthenticationFilter`), por isso só expõe `status` (`management.endpoint.health.show-details: never` em `application.yml`) — não vaza detalhe de infra.
-- Nenhum outro endpoint do Actuator está exposto (`management.endpoints.web.exposure.include: health` restringe explicitamente). Para habilitar métricas (`/actuator/metrics`, `/actuator/prometheus`), adicione o endpoint à lista de exposição e o `micrometer-registry-prometheus` no `pom.xml`.
-- **Logs:** só stdout, coletado via `docker logs <container>` — sem agregação centralizada (Loki/ELK) nem rotação configurada no compose ainda.
+- **Health check:** `GET /actuator/health` (Spring Boot Actuator) — retorna `{"status":"UP"}`, verificando a conectividade com o banco PostgreSQL. Não exige autenticação.
+- **OpenTelemetry (OTLP):** A imagem Docker inclui agente Java OTLP integrado, permitindo exportar traces e métricas automaticamente para SigNoz, Jaeger ou qualquer coletor compatível definindo `OTEL_EXPORTER_OTLP_ENDPOINT`.
 
 ---
 
 ## 🧪 Como Rodar os Testes
 
-O projeto possui **100% de cobertura das lógicas de negócio** das camadas de `Controller` e `Service`.
-
 Para executar a suíte completa de testes unitários e de integração:
 
 ```bash
+# Windows:
 ./mvnw.cmd clean test
+
+# Linux / macOS:
+./mvnw clean test
 ```
 
-Os testes estão fortemente focados em:
-- Garantia de persistência correta no PostgreSQL.
-- Emissão de eventos em tempo real (`verify(webSocketHandler.broadcastEvent(...))`).
-- Tratamento de IDs compostos (dbIds) e lógicas de mesclagem (merges).
-- Expiração temporal rigorosa e autodestruição para o módulo Vault.
-
----
-
-## 🤝 Contribuição
-
-1. Crie uma branch para a sua feature (`git checkout -b feature/minha-feature`)
-2. Faça os commits (`git commit -m 'feat: minha nova feature'`)
-3. Faça o push para a branch (`git push origin feature/minha-feature`)
-4. Abra um Pull Request.
-
-**Agile Space Backend** - Feito para potencializar o dia a dia de times ágeis.
+Os testes cobrem:
+- Validação de integridade e transações no PostgreSQL.
+- Verificação de emissão de eventos em WebSockets (`webSocketHandler.broadcastEvent(...)`).
+- Mecanismo de handshake e autenticação via `JwtHandshakeInterceptor`.
+- Autenticação e autorização via `JwtAuthenticationFilter` e `ApiKeyAuthenticationFilter`.
+- Expiração temporal e autodestruição do módulo Vault.
+- Regras de negócio de retrospectivas (fusão de cards, controle de votos).
 
 ---
 
 ## 🚢 Guia de Deploy em Produção
 
-> Este guia consolida **todas as ações obrigatórias** antes e depois de subir o Agile Space em um servidor de produção. Siga a ordem dos passos para evitar falhas de inicialização ou brechas de segurança.
+> Consulte também o documento detalhado [`DEPLOYMENT.md`](./DEPLOYMENT.md) para procedimentos avançados de infraestrutura, TLS e backup.
 
----
+### 1. Variáveis de Ambiente Obrigatórias (Profile `prod`)
 
-### 1. Variáveis de Ambiente (OBRIGATÓRIAS)
+Quando o backend executa com `SPRING_PROFILES_ACTIVE=prod`, a classe [`ProductionSecretsValidator`](src/main/java/com/agilespace/backend/config/ProductionSecretsValidator.java) **bloqueia a inicialização** caso as variáveis abaixo estejam ausentes ou utilizando valores padrão de desenvolvimento:
 
-O servidor **não inicia** sem as variáveis abaixo corretamente configuradas.
-Configure-as no seu ambiente (systemd, Docker Compose, painel do provedor cloud, etc.)
-— **NUNCA coloque valores reais no `application.yml` ou em arquivos versionados no Git**.
+| Variável | Descrição | Como Gerar |
+| :--- | :--- | :--- |
+| `APP_JWT_SECRET` | Chave HMAC (mínimo 48 bytes) usada para assinar os tokens JWT de sessão. | `openssl rand -base64 48` |
+| `APP_ENCRYPTION_SECRET` | Chave AES-256 (32 bytes) para cifrar tokens Jira e segredos salvos no banco. | `openssl rand -base64 32` |
+| `ALLOWED_EMAIL_DOMAIN` | Restrição de domínio para auto-cadastro no `POST /api/auth/register` (ex: `totvs.com.br`). | Definir o domínio corporativo permitido |
+| `ALLOWED_ORIGINS` | Lista separada por vírgula dos domínios autorizados no CORS e no WebSocket (sem wildcard em produção). | `https://agilespace.seudominio.com.br` |
+| `DB_URL` | URL de conexão JDBC com o PostgreSQL. | `jdbc:postgresql://host:5432/espacoagil` |
+| `DB_USERNAME` | Usuário do banco PostgreSQL. | `db_user` |
+| `DB_PASSWORD` | Senha do banco PostgreSQL. | Senha forte |
+| `APP_ADMIN_KEY` | Chave de proteção para o endpoint administrativo `GET /api/users`. | `openssl rand -hex 32` |
+| `PORT` | Porta de escuta da aplicação (padrão: `8002`). | `8002` |
 
-#### 1.1 `APP_ENCRYPTION_SECRET` — Chave AES-256 para tokens Jira
+### 2. Promoção do Primeiro Usuário Administrador de Sistema
 
-Todos os tokens Jira dos usuários são cifrados com essa chave antes de serem salvos no banco.
-Se a chave for trocada, os tokens já salvos **não poderão mais ser descriptografados** — os usuários precisarão re-cadastrar seus tokens.
+Por design de segurança, nenhum seed ou script cria usuários `ADMIN` de sistema automaticamente:
+1. Registre seu usuário normalmente pela interface (`/login` -> Cadastrar).
+2. Conecte ao banco de dados e promova manualmente o usuário:
+   ```sql
+   UPDATE users SET role = 'ADMIN' WHERE email = 'seu-email@totvs.com.br';
+   ```
+3. O perfil com `role = 'ADMIN'` terá acesso liberado ao painel administrativo (`/api/admin/**`).
 
-**Como gerar (escolha um dos métodos):**
+### 3. Banco de Dados e Migrações
 
-```powershell
-# PowerShell (Windows)
-[Convert]::ToBase64String((1..48 | % {[byte](Get-Random -Max 256)}))
-```
+- **Nunca utilize `ddl-auto: create` ou `update` em produção**. O backend utiliza estritamente `hibernate.ddl-auto: validate`.
+- Todas as criações de tabelas, índices e alterações de esquema são executadas de forma versionada e controlada pelo **Flyway**.
+- O script `scripts/backup-db.sh` encapsula rotinas de `pg_dump` com política de retenção para agendamento via Cron.
 
+### 4. Configuração de CORS e WebSockets
+
+Não é necessário alterar código-fonte para configurar CORS. O [`WebCorsConfig`](src/main/java/com/agilespace/backend/config/WebCorsConfig.java) e o [`WebSocketConfig`](src/main/java/com/agilespace/backend/config/WebSocketConfig.java) utilizam a variável de ambiente `ALLOWED_ORIGINS`:
 ```bash
-# Linux / macOS
-openssl rand -base64 48
+export ALLOWED_ORIGINS="https://agilespace.totvs.com.br"
 ```
 
-Exemplo de saída: `k3Hv9Xz2mQpL7rNsYwAoBdFtUcGjEiKl8eDxVyCZn4hP1R0sW5=`
+### 5. Certificado SSL Corporativo (Jira TOTVS)
 
-**Configure no ambiente:**
+Para habilitar a validação estrita de SSL na comunicação com o Jira corporativo da TOTVS (`jiraproducao.totvs.com.br`), importe a CA/certificado corporativo na truststore da JVM:
 ```bash
-# Linux (systemd ou .env)
-export APP_ENCRYPTION_SECRET="k3Hv9Xz2mQpL7rNsYwAoBdFtUcGjEiKl8eDxVyCZn4hP1R0sW5="
-
-# Docker Compose
-environment:
-  APP_ENCRYPTION_SECRET: "k3Hv9Xz2mQpL7rNsYwAoBdFtUcGjEiKl8eDxVyCZn4hP1R0sW5="
-```
-
-> ⚠️ **Salve essa chave em local seguro** (ex: cofre de senhas corporativo, AWS Secrets Manager, Azure Key Vault). Sem ela, todos os tokens do banco ficam inacessíveis.
-
----
-
-#### 1.2 `APP_ADMIN_KEY` — Chave para o endpoint `GET /api/users`
-
-Protege a listagem de todos os usuários. Sem essa variável, o endpoint retorna `403 Forbidden`.
-Use apenas para ferramentas internas de suporte.
-
-```bash
-# Gerar:
-openssl rand -hex 32
-# PowerShell:
--join ((1..32) | % { '{0:x2}' -f (Get-Random -Max 256) })
-```
-
-```bash
-export APP_ADMIN_KEY="a1b2c3d4e5f6..."
-```
-
----
-
-#### 1.3 Variáveis de Banco de Dados
-
-```bash
-export DB_URL="jdbc:postgresql://seu-servidor-db:5432/espacoagil"
-export DB_USERNAME="seu_usuario_db"
-export DB_PASSWORD="senha_forte_do_banco"
-```
-
----
-
-#### 1.4 `PORT` (Opcional)
-
-```bash
-export PORT=8002   # padrão — altere se necessário
-```
-
----
-
-#### 1.5 Bootstrap do primeiro usuário ADMIN (passo manual, não automatizado)
-
-`User.role = ADMIN` é o tier de autorização de **sistema** — só serve pra liberar `/api/admin/**` (configurações globais, API keys, auditoria, etc). É completamente independente do cargo de negócio (Agile Master, Agile Coach, Tribe Lead...), que já vem certo do Jira via Profields.
-
-Não existe (e não deve existir) bootstrap automático de ADMIN — nenhum `CommandLineRunner`/seed grava esse valor. Depois do primeiro deploy, promova manualmente o primeiro administrador direto no banco:
-
-```sql
-UPDATE users SET role = 'ADMIN' WHERE email = '<email do primeiro admin>';
-```
-
-Isso é intencional: fica fora do fluxo de código de propósito, pra não existir nenhum caminho (endpoint, variável de ambiente, seed) que auto-promova alguém a admin de sistema. Trate como item do checklist de smoke-test pós-deploy (item 6 abaixo), não como algo a automatizar.
-
----
-
-### 2. Certificado SSL do Jira Corporativo (TOTVS)
-
-Atualmente o backend ignora toda validação SSL para se comunicar com o Jira da TOTVS (`jiraproducao.totvs.com.br`).
-Isso é um risco de segurança (MITM). **O fix correto é importar o certificado corporativo na JVM:**
-
-```bash
-# 1. Exporte o certificado do servidor Jira (execute no servidor de produção)
 openssl s_client -connect jiraproducao.totvs.com.br:443 -showcerts </dev/null 2>/dev/null \
   | openssl x509 -outform PEM > totvs-jira.crt
 
-# 2. Importe no truststore da JVM que vai rodar o backend
-#    Substitua JAVA_HOME pelo caminho correto (ex: /usr/lib/jvm/java-17-openjdk)
 keytool -importcert \
   -alias totvs-jira \
   -file totvs-jira.crt \
   -keystore $JAVA_HOME/lib/security/cacerts \
   -storepass changeit \
   -noprompt
-
-# 3. Após importar, habilite a validação SSL de volta no JiraService.java
-#    (remova o TrustManager que aceita tudo e o HostnameVerifier permissivo)
-```
-
-> Enquanto o certificado não for importado, o trust-all permanece funcional mas é tecnicamente inseguro em redes não controladas.
-
----
-
-### 3. Banco de Dados
-
-#### 3.1 Verificar `ddl-auto`
-
-Em produção, **nunca use `ddl-auto: create` ou `create-drop`**. O projeto já usa `update`, que é seguro para produção.
-Verifique antes de subir:
-
-```yaml
-# application.yml — deve estar assim:
-jpa:
-  hibernate:
-    ddl-auto: update   # ✅ seguro — só adiciona colunas, não apaga dados
-```
-
-#### 3.2 Migração de tokens existentes
-
-Se você já tinha tokens salvos **antes** da chave `APP_ENCRYPTION_SECRET` ser definida, eles estavam cifrados com a chave padrão pública (`AgileSpaceSecureMasterKey2026Default#AES256GCMKey`).
-
-O `EncryptionUtil.decrypt()` tem fallback de retrocompatibilidade — se a descriptografia falhar com a nova chave, ele retorna o valor original.
-Isso significa que os tokens antigos **não serão descriptografados corretamente** com a nova chave.
-
-**Opções:**
-- **A (recomendada):** Pedir que todos os usuários re-cadastrem seu token Jira após o deploy. É o caminho mais limpo.
-- **B (script de migração):** Decriptografar todos os registros com a chave antiga e re-encriptografar com a nova. Execute antes de trocar a variável de ambiente.
-
----
-
-### 4. Frontend — Variáveis de Ambiente
-
-No servidor/painel onde o Next.js está hospedado, configure:
-
-```bash
-# URL do backend Spring Boot em produção
-NEXT_PUBLIC_API_URL=https://api.seudominio.com.br/api
-
-# Exemplo com porta direta (se não usar reverse proxy):
-NEXT_PUBLIC_API_URL=http://100.200.300.400:8002/api
-```
-
-> O prefixo `NEXT_PUBLIC_` é obrigatório para que a variável seja acessível no lado do cliente (browser).
-
----
-
-### 5. CORS em Produção
-
-Atualmente `WebCorsConfig.java` usa `allowedOriginPatterns("*")` — aceita qualquer origem.
-Quando o domínio de produção estiver definido, restrinja:
-
-```java
-// WebCorsConfig.java — substitua * pelo domínio real:
-registry.addMapping("/**")
-    .allowedOriginPatterns(
-        "https://agile.seudominio.com.br",
-        "https://www.agile.seudominio.com.br"
-    )
-    .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH")
-    .allowedHeaders("*")
-    .allowCredentials(true);
 ```
 
 ---
 
-### 6. Checklist Final — Verificação Pós-Deploy
+## 🤝 Contribuição e Padrões de Commit
 
-Execute este checklist após subir o servidor para confirmar que tudo está funcionando:
-
-| # | Verificação | Como testar |
-|---|---|---|
-| ✅ | Backend subiu sem erros | `curl http://servidor:8002/actuator/health` ou ver logs de inicialização |
-| ✅ | `APP_ENCRYPTION_SECRET` está definida | Tentar salvar um token Jira — deve persistir e carregar sem erro |
-| ✅ | Token Jira funciona | Clicar em "Testar Conexão" na tela de Conexão Jira do frontend |
-| ✅ | Sync do squad funciona | Clicar em "Sincronizar" no Squad Pulse — dados devem aparecer |
-| ✅ | Acesso cruzado bloqueado | `curl GET /api/users/{outroUserId}/jira-config` sem o header `X-Caller-Id` → deve retornar `403` |
-| ✅ | `GET /users` bloqueado | `curl GET /api/users` sem `X-Admin-Key` → deve retornar `403` |
-| ✅ | Primeiro ADMIN de sistema promovido | `UPDATE users SET role='ADMIN' WHERE email='...'` (ver seção 1.5) — sem isso, ninguém acessa `/admin` no frontend |
-| ✅ | Slot legado `localStorage` limpo | Abrir DevTools → Application → Local Storage → não deve existir a chave `agileSpace_jira_config` |
-| ✅ | Frontend conecta no backend certo | Confirmar que `NEXT_PUBLIC_API_URL` aponta para o servidor de produção |
+1. Crie uma branch para a sua feature (`git checkout -b feature/minha-feature`)
+2. Faça os commits seguindo a convenção do projeto (`type(scope): summary`):
+   - Exemplo: `feat(mcp): adiciona ferramenta batchImportSkills`
+   - Exemplo: `fix(security): valida expiracao do token no handshake do websocket`
+3. Faça o push para a branch (`git push origin feature/minha-feature`)
+4. Abra um Pull Request.
 
 ---
 
-### 7. Recomendações Futuras (Pós-Launch)
-
-| Prioridade | Item |
-|---|---|
-| 🔴 Alta | Implementar autenticação real (JWT / OAuth2) no backend — atualmente os endpoints são abertos na rede interna |
-| 🔴 Alta | Importar certificado SSL da TOTVS na JVM e remover o trust-all do `JiraService.java` |
-| 🟠 Média | Migrar rate limit para Redis/Upstash se o frontend tiver múltiplas instâncias (ex: Vercel) |
-| 🟠 Média | Configurar backup automático do banco PostgreSQL |
-| 🟡 Baixa | Restringir CORS para o domínio de produção exato em `WebCorsConfig.java` |
-| 🟡 Baixa | Habilitar `show-sql: false` e configurar log level `WARN` em produção para reduzir verbosidade |
-
+**Agile Space Backend** — Potencializando a colaboração e a engenharia de software de alta performance.
