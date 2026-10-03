@@ -163,4 +163,32 @@ public class PokerController {
         pokerService.sendReaction(roomId, reactionPayload);
         return ResponseEntity.ok().build();
     }
+
+    // --- Chat Endpoints ---
+    @GetMapping("/{roomId}/chat")
+    public ResponseEntity<List<com.agilespace.backend.domain.PokerChatMessage>> getChatMessages(
+            @PathVariable("roomId") String roomId,
+            @RequestParam("channelId") String channelId) {
+        return ResponseEntity.ok(pokerService.getChatMessages(roomId, channelId));
+    }
+
+    @PostMapping("/{roomId}/chat")
+    public ResponseEntity<com.agilespace.backend.domain.PokerChatMessage> sendChatMessage(
+            @PathVariable("roomId") String roomId,
+            @RequestBody com.agilespace.backend.domain.PokerChatMessage message,
+            HttpServletRequest request) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        return ResponseEntity.status(HttpStatus.CREATED).body(pokerService.saveChatMessage(roomId, message, callerId));
+    }
+
+    @DeleteMapping("/{roomId}/chat/{messageId}")
+    public ResponseEntity<Void> deleteChatMessage(
+            @PathVariable("roomId") String roomId,
+            @PathVariable("messageId") String messageId,
+            HttpServletRequest request) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        String callerRole = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        pokerService.deleteChatMessage(roomId, messageId, callerId, callerRole);
+        return ResponseEntity.noContent().build();
+    }
 }

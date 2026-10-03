@@ -4,6 +4,8 @@ import com.agilespace.backend.domain.PokerRoom;
 import com.agilespace.backend.domain.PokerParticipant;
 import com.agilespace.backend.domain.PokerVote;
 import com.agilespace.backend.domain.PokerRound;
+import com.agilespace.backend.domain.PokerChatMessage;
+import com.agilespace.backend.repository.PokerChatMessageRepository;
 import com.agilespace.backend.repository.PokerRoomRepository;
 import com.agilespace.backend.repository.PokerParticipantRepository;
 import com.agilespace.backend.repository.PokerVoteRepository;
@@ -30,6 +32,7 @@ public class PokerService {
     private final PokerParticipantRepository participantRepository;
     private final PokerVoteRepository voteRepository;
     private final PokerRoundRepository roundRepository;
+    private final PokerChatMessageRepository chatMessageRepository;
     private final PokerWebSocketHandler webSocketHandler;
 
     // --- Room Logic ---
@@ -182,5 +185,53 @@ public class PokerService {
         // Dispara o payload direto via WebSocket para as sessões ativas da sala
         // sem persistência em banco para alta performance de animações de emojis
         webSocketHandler.broadcastReaction(roomId, reactionPayload);
+    }
+
+    // --- Chat Messages Logic ---
+    @Transactional(readOnly = true)
+    public List<PokerChatMessage> getChatMessages(String roomId, String channelId) {
+        return chatMessageRepository.findByRoomIdAndChannelIdOrderByTsAsc(roomId, channelId);
+    }
+
+    @Transactional
+    public PokerChatMessage saveChatMessage(String roomId, PokerChatMessage message, String callerId) {
+        if (callerId == null || !callerId.equals(message.getSenderId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só é possível enviar mensagens como o próprio usuário.");
+        }
+        if (message.getId() == null || message.getId().trim().isEmpty()) {
+            message.setId(java.util.UUID.randomUUID().toString());
+        }
+        message.setRoomId(roomId);
+        if (message.getTs() == null || message.getTs().trim().isEmpty()) {
+            message.setTs(new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").format(new java.util.Date()));
+        }
+        PokerChatMessage saved = chatMessageRepository.save(message);
+        webSocketHandler.broadcastEvent(roomId, "CHAT_MESSAGE_SAVED", saved);
+        return saved;
+    }
+
+    @Transactional
+    public void deleteChatMessage(String roomId, String messageId, String callerId, String callerRole) {
+        PokerChatMessage message = chatMessageRepository.findById(messageId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Mensagem não encontrada"));
+
+        boolean isAuthor = callerId != null && callerId.equals(message.getSenderId());
+        boolean isPrivileged = isPrivilegedRole(callerRole);
+        // Facilitador da sala também pode moderar (apagar) mensagens nos canais públicos
+        boolean isFacilitator = false;
+        Optional<PokerRoom> roomOpt = roomRepository.findById(roomId);
+        if (roomOpt.isPresent() && callerId != null && callerId.equals(roomOpt.get().getCreatorId())) {
+            isFacilitator = true;
+        }
+
+        if (!isAuthor && !isPrivileged && !isFacilitator) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Sem permissão para excluir esta mensagem.");
+        }
+
+        chatMessageRepository.delete(message);
+        webSocketHandler.broadcastEvent(roomId, "CHAT_MESSAGE_DELETED", Map.of(
+                "messageId", messageId,
+                "channelId", message.getChannelId()
+        ));
     }
 }
