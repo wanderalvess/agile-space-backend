@@ -2,8 +2,7 @@ package com.agilespace.backend.domain;
 
 import jakarta.persistence.*;
 import lombok.*;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
+import org.hibernate.annotations.UpdateTimestamp;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -31,6 +30,12 @@ public class ShowcaseSession {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
+    // Carimbado a cada escrita real na sessão — usado como proxy de "tempo de uso"
+    // (updatedAt - createdAt) na aba executiva do /admin. Nenhum job/sync toca essa
+    // tabela em background, então é sinal de atividade real, não ruído.
+    @UpdateTimestamp
+    private LocalDateTime updatedAt;
+
     @Column(name = "created_by")
     private String createdBy;
 
@@ -48,11 +53,9 @@ public class ShowcaseSession {
     @Column(name = "default_sort")
     private String defaultSort;
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(columnDefinition = "jsonb")
-    private List<Object> tasks; // Lista rica de ShowcaseTask contendo evidências, aceites e feedbacks
+    @Transient
+    private List<ShowcaseTask> tasks; // Montado pelo Service a partir de showcase_tasks
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(columnDefinition = "jsonb")
-    private List<Object> members; // Participantes/membros vinculados
+    @Transient
+    private List<ShowcaseMember> members; // Montado pelo Service a partir de showcase_members
 }

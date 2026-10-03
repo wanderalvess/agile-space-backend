@@ -9,4 +9,5 @@ import java.util.List;
 @Repository
 public interface HealthCheckBoardRepository extends JpaRepository<HealthCheckBoard, String> {
     List<HealthCheckBoard> findAllByOrderByCreatedAtDesc();
+    List<HealthCheckBoard> findByTeamIgnoreCaseOrderByCreatedAtDesc(String team);
 }

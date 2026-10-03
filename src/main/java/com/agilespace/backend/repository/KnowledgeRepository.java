@@ -18,6 +18,8 @@ public interface KnowledgeRepository extends JpaRepository<KnowledgeDocument, UU
 
     Page<KnowledgeDocument> findByStatusNot(String status, Pageable pageable);
 
+    Page<KnowledgeDocument> findByStatus(String status, Pageable pageable);
+
     @Query("SELECT d FROM KnowledgeDocument d WHERE d.status <> :deletedStatus AND " +
            "(LOWER(d.title) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
            "LOWER(d.content) LIKE LOWER(CONCAT('%', :query, '%')) OR " +

@@ -1,18 +1,25 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.Squad;
+import com.agilespace.backend.domain.SquadPanel;
+import com.agilespace.backend.domain.User;
+import com.agilespace.backend.repository.UserRepository;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.SquadService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*;
 
 public class SquadControllerTest {
@@ -20,12 +27,44 @@ public class SquadControllerTest {
     @Mock
     private SquadService service;
 
-    @InjectMocks
+    @Mock
+    private com.agilespace.backend.service.SquadSyncService squadSyncService;
+
+    @Mock
+    private com.agilespace.backend.service.SquadSyncGuard squadSyncGuard;
+
+    @Mock
+    private UserRepository userRepository;
+
+    @Mock
+    private com.agilespace.backend.service.UserProjectResolverService userProjectResolverService;
+
     private SquadController controller;
 
     @BeforeEach
     public void setup() {
         MockitoAnnotations.openMocks(this);
+        lenient().when(squadSyncGuard.tryAcquire(anyString())).thenReturn(true);
+        // Construído à mão (em vez de @InjectMocks) pra usar uma instância REAL de
+        // SquadAccessService por cima dos mocks — senão a checagem de pertencimento a
+        // squad (extraída pra lá) viraria um mock "sempre passa" e todos os testes de
+        // acesso abaixo (não-membro é barrado, alias DDWMISSI/MISSI, etc.) perderiam o sentido.
+        com.agilespace.backend.service.SquadAccessService squadAccessService =
+                new com.agilespace.backend.service.SquadAccessService(userRepository, service, userProjectResolverService);
+        controller = new SquadController(service, squadSyncService, squadSyncGuard, null, userRepository, userProjectResolverService, squadAccessService);
+    }
+
+    private HttpServletRequest adminRequest() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE)).thenReturn("ADMIN");
+        return request;
+    }
+
+    private HttpServletRequest memberRequest(String userId) {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE)).thenReturn("MEMBER");
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn(userId);
+        return request;
     }
 
     @Test
@@ -33,16 +72,16 @@ public class SquadControllerTest {
         Squad squad = new Squad();
         when(service.getSquad("sq-1")).thenReturn(Optional.of(squad));
         
-        ResponseEntity<Squad> response = controller.getSquad("sq-1");
-        
+        ResponseEntity<Squad> response = controller.getSquad("sq-1", adminRequest());
+
         assertEquals(HttpStatus.OK, response.getStatusCode());
     }
 
     @Test
     public void testGetSquadNotFound() {
         when(service.getSquad("sq-1")).thenReturn(Optional.empty());
-        
-        ResponseEntity<Squad> response = controller.getSquad("sq-1");
+
+        ResponseEntity<Squad> response = controller.getSquad("sq-1", adminRequest());
         
         assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
     }
@@ -52,9 +91,304 @@ public class SquadControllerTest {
         Squad squad = new Squad();
         when(service.saveSquad(squad)).thenReturn(squad);
         
-        ResponseEntity<Squad> response = controller.saveSquad("sq-1", squad);
-        
+        ResponseEntity<Squad> response = controller.saveSquad("sq-1", squad, adminRequest());
+
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals("sq-1", squad.getId());
+    }
+
+    @Test
+    public void testGetSquad_nonMemberOfSquad_forbidden() {
+        // Antes desta checagem, GET de /api/squads/** exigia só autenticação — qualquer
+        // usuário autenticado da aplicação lia dado de qualquer squad.
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-other");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+
+        assertThrows(ResponseStatusException.class, () -> controller.getSquad("sq-1", memberRequest("user-1")));
+        verify(service, never()).getSquad(anyString());
+    }
+
+    @Test
+    public void testGetSquad_memberOfSquad_succeeds() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-1");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+        when(service.getSquad("sq-1")).thenReturn(Optional.of(new Squad()));
+
+        ResponseEntity<Squad> response = controller.getSquad("sq-1", memberRequest("user-1"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+    }
+
+    @Test
+    public void testGetSquad_admin_neverConsultsUserRepository() {
+        ResponseEntity<Squad> response = controller.getSquad("sq-1", adminRequest());
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        verifyNoInteractions(userRepository);
+    }
+
+    @Test
+    public void testGetIssues_nonMemberOfSquad_forbidden() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-other");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+
+        assertThrows(ResponseStatusException.class,
+                () -> controller.getIssues("sq-1", null, memberRequest("user-1")));
+        verify(service, never()).getIssues(anyString(), any());
+    }
+
+    @Test
+    public void testGetMemberMetrics_memberOfSquad_succeeds() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-1");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+        when(service.getMemberMetrics("sq-1")).thenReturn(List.of());
+
+        ResponseEntity<List<com.agilespace.backend.domain.SquadMemberMetric>> response =
+                controller.getMemberMetrics("sq-1", memberRequest("user-1"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+    }
+
+    @Test
+    public void testSaveSquad_nonMemberOfSquad_forbidden() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-other");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+
+        assertThrows(ResponseStatusException.class,
+                () -> controller.saveSquad("sq-1", new Squad(), memberRequest("user-1")));
+
+        // requireSquadWriteAccess consulta squadService.getMembers como último fallback
+        // (checagem por squad_members) antes de negar — interação esperada, não um bug.
+        verify(service).getMembers("sq-1");
+    }
+
+    @Test
+    public void testSyncSquad_admin_delegatesToSyncService() {
+        ResponseEntity<Void> response = controller.syncSquad("sq-1", true, adminRequest());
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        verify(squadSyncService).syncSquad("sq-1", null, true);
+        // Reserva e libera o guarda mesmo no caminho feliz — senão o próximo tick do
+        // agendador (ou um segundo clique) ficaria travado achando que ainda está em voo.
+        verify(squadSyncGuard).tryAcquire("sq-1");
+        verify(squadSyncGuard).release("sq-1");
+    }
+
+    @Test
+    public void testSyncSquad_alreadyInFlight_returnsConflictWithoutCallingSyncService() {
+        when(squadSyncGuard.tryAcquire("sq-1")).thenReturn(false);
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> controller.syncSquad("sq-1", false, adminRequest()));
+
+        assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
+        verifyNoInteractions(squadSyncService);
+        verify(squadSyncGuard, never()).release(anyString());
+    }
+
+    @Test
+    public void testSyncSquad_usesCallerIdFromToken_neverFromRequestBody() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-1");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+
+        controller.syncSquad("sq-1", false, memberRequest("user-1"));
+
+        // callerUserId sempre vem do token validado (ATTR_USER_ID) — nunca de um campo
+        // que o chamador pudesse controlar, senão daria pra sincronizar com o PAT de outra pessoa.
+        verify(squadSyncService).syncSquad(eq("sq-1"), eq("user-1"), eq(false));
+    }
+
+    @Test
+    public void testSyncSquad_nonMemberOfSquad_forbidden() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-other");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+
+        assertThrows(ResponseStatusException.class,
+                () -> controller.syncSquad("sq-1", false, memberRequest("user-1")));
+
+        verifyNoInteractions(squadSyncService);
+    }
+
+    @Test
+    public void testForceResyncSprint_memberOfSquad_delegatesToSyncService() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-1");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+
+        ResponseEntity<Void> response = controller.forceResyncSprint("sq-1", "SPRINT-42", memberRequest("user-1"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        verify(squadSyncService).forceResyncSprint("sq-1", "user-1", "SPRINT-42");
+    }
+
+    @Test
+    public void testCreatePanel_nonMemberOfSquad_forbidden() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-other");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+
+        assertThrows(ResponseStatusException.class,
+                () -> controller.createPanel("sq-1", new SquadPanel(), memberRequest("user-1")));
+
+        // requireSquadWriteAccess consulta squadService.getMembers como último fallback
+        // (checagem por squad_members) antes de negar — interação esperada, não um bug.
+        verify(service).getMembers("sq-1");
+    }
+
+    @Test
+    public void testCreatePanel_memberOfSquad_succeeds() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-1");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+        SquadPanel panel = new SquadPanel();
+        when(service.createPanel(eq("sq-1"), eq("user-1"), eq(panel))).thenReturn(panel);
+
+        ResponseEntity<SquadPanel> response = controller.createPanel("sq-1", panel, memberRequest("user-1"));
+
+        assertEquals(HttpStatus.CREATED, response.getStatusCode());
+    }
+
+    @Test
+    public void testSaveSquad_memberByDefaultProjectId_succeeds() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setDefaultProjectId("DDWMISSI");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+        Squad squad = new Squad();
+        when(service.saveSquad(squad)).thenReturn(squad);
+
+        ResponseEntity<Squad> response = controller.saveSquad("DDWMISSI", squad, memberRequest("user-1"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+    }
+
+    @Test
+    public void testSaveSquad_missiAlias_succeeds() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("MISSI");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+        Squad squad = new Squad();
+        when(service.saveSquad(squad)).thenReturn(squad);
+
+        ResponseEntity<Squad> response = controller.saveSquad("DDWMISSI", squad, memberRequest("user-1"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+    }
+
+    @Test
+    public void testSaveSquad_cleanSlateAutoAssign_succeeds() {
+        User caller = new User();
+        caller.setId("user-1");
+        // squadId and defaultProjectId are null
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+        Squad squad = new Squad();
+        when(service.saveSquad(squad)).thenReturn(squad);
+
+        ResponseEntity<Squad> response = controller.saveSquad("DDWMISSI", squad, memberRequest("user-1"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals("DDWMISSI", caller.getSquadId());
+        assertEquals("DDWMISSI", caller.getDefaultProjectId());
+        verify(userRepository).save(caller);
+    }
+
+    @Test
+    public void testSaveSquad_dbAdminRole_succeeds() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-other");
+        caller.setRole("ADMIN");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+        Squad squad = new Squad();
+        when(service.saveSquad(squad)).thenReturn(squad);
+
+        ResponseEntity<Squad> response = controller.saveSquad("DDWMISSI", squad, memberRequest("user-1"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+    }
+
+    @Test
+    public void testSaveSquad_leadershipJobTitle_succeeds() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("DDWMISSI");
+        caller.setJobTitle("Agile Master");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+        Squad squad = new Squad();
+        when(service.saveSquad(squad)).thenReturn(squad);
+
+        ResponseEntity<Squad> response = controller.saveSquad("DDWMISSI", squad, memberRequest("user-1"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+    }
+
+    @Test
+    public void testSaveSquad_leadershipJobTitle_otherSquad_forbidden() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("sq-other");
+        caller.setJobTitle("Agile Master");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+        when(service.getMembers("DDWMISSI")).thenReturn(java.util.List.of());
+        when(service.getMembers("MISSI")).thenReturn(java.util.List.of());
+        Squad squad = new Squad();
+
+        assertThrows(ResponseStatusException.class,
+                () -> controller.saveSquad("DDWMISSI", squad, memberRequest("user-1")));
+    }
+
+    @Test
+    public void testBatchUpsertMembers_rosterMember_succeeds() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setEmail("wanderson@totvs.com.br");
+        caller.setSquadId("sq-other");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+
+        com.agilespace.backend.domain.SquadMember member = new com.agilespace.backend.domain.SquadMember();
+        member.setEmail("wanderson@totvs.com.br");
+        when(service.getMembers("DDWMISSI")).thenReturn(java.util.List.of(member));
+
+        java.util.List<com.agilespace.backend.domain.SquadMember> toUpsert = java.util.List.of(member);
+        when(service.batchUpsertMembers("DDWMISSI", toUpsert)).thenReturn(toUpsert);
+
+        ResponseEntity<java.util.List<com.agilespace.backend.domain.SquadMember>> response =
+                controller.batchUpsertMembers("DDWMISSI", toUpsert, memberRequest("user-1"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+    }
+
+    @Test
+    public void testSaveSquad_semTimeAutoAssign_succeeds() {
+        User caller = new User();
+        caller.setId("user-1");
+        caller.setSquadId("Sem Time");
+        when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
+        Squad squad = new Squad();
+        when(service.saveSquad(squad)).thenReturn(squad);
+
+        ResponseEntity<Squad> response = controller.saveSquad("DDWMISSI", squad, memberRequest("user-1"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals("DDWMISSI", caller.getSquadId());
+        verify(userRepository).save(caller);
     }
 }

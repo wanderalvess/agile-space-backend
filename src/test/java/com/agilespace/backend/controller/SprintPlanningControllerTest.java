@@ -1,7 +1,9 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.SprintPlanning;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.SprintPlanningService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -41,19 +43,34 @@ public class SprintPlanningControllerTest {
     @Test
     public void testSaveOrUpdatePlanner() {
         SprintPlanning planning = new SprintPlanning();
-        when(service.saveOrUpdatePlanner(planning)).thenReturn(planning);
-        
-        ResponseEntity<SprintPlanning> response = controller.saveOrUpdatePlanner(planning);
-        
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("user-1");
+        when(service.saveOrUpdatePlanner(planning, "user-1", false)).thenReturn(planning);
+
+        ResponseEntity<SprintPlanning> response = controller.saveOrUpdatePlanner(planning, request);
+
         assertEquals(HttpStatus.CREATED, response.getStatusCode());
     }
 
     @Test
     public void testDeletePlanner() {
-        doNothing().when(service).deletePlanner("plan-1");
-        
-        ResponseEntity<Void> response = controller.deletePlanner("plan-1");
-        
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("user-1");
+
+        ResponseEntity<Void> response = controller.deletePlanner("plan-1", request);
+
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
+        verify(service).deletePlanner("plan-1", "user-1", false);
+    }
+
+    @Test
+    public void testDeletePlanner_adminRolePassedToService() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("admin-1");
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE)).thenReturn("ADMIN");
+
+        controller.deletePlanner("plan-1", request);
+
+        verify(service).deletePlanner("plan-1", "admin-1", true);
     }
 }

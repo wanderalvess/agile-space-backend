@@ -1,0 +1,161 @@
+# Sem isso, o driver de log padrão (json-file) não tem limite — um container barulhento
+# pode encher o disco do host sozinho com o tempo (lição aprendida em 2026-09-20/23, ver
+# memória "windows-c-drive-full-docker-vhdx"). 10MB x 3 arquivos = 30MB por serviço, no máximo.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: agile-space-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: espacoagil
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      # Só loopback: com usuário/senha postgres/postgres, publicar em 0.0.0.0 deixava o banco
+      # aberto pra rede inteira. Backend e Caddy falam com ele pela rede interna do compose.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - agile-space-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d espacoagil"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${DB_CPU_LIMIT:-1}"
+          memory: ${DB_MEMORY_LIMIT:-512M}
+
+  backend:
+    build: .
+    container_name: agile-space-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/espacoagil
+      DB_USERNAME: postgres
+      # Vem do .env/shell: antes estava fixo em "postgres" e o DB_PASSWORD do DEPLOYMENT.md era ignorado.
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      # Sem isso, "docker compose up" falha no boot (placeholder nao resolvido) e o profile
+      # prod documentado no DEPLOYMENT.md (SPRING_PROFILES_ACTIVE=prod docker-compose up -d)
+      # nunca chegava a ativar o profile — variavel de ambiente do host nao propagava pro
+      # container porque nao estava referenciada aqui.
+      APP_ENCRYPTION_SECRET: ${APP_ENCRYPTION_SECRET:-AgileSpaceDevMasterKey2026LocalOnly#AES}
+      # Defaults de dev nas duas chaves acima/abaixo: com SPRING_PROFILES_ACTIVE=prod o
+      # ProductionSecretsValidator recusa subir com eles (e também com ALLOWED_EMAIL_DOMAIN vazio).
+      APP_JWT_SECRET: ${APP_JWT_SECRET:-AgileSpaceDevJwtSecret2026LocalOnly#NeverUseInProduction}
+      APP_ADMIN_KEY: ${APP_ADMIN_KEY:-}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:9002}
+      ALLOWED_EMAIL_DOMAIN: ${ALLOWED_EMAIL_DOMAIN:-}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # OpenTelemetry: agente sempre presente na imagem (ver Dockerfile), inerte até
+      # OTEL_JAVAAGENT_ENABLED=true. Vendor-neutro (OTLP) — funciona com SigNoz ou qualquer
+      # outro backend compatível, só trocando OTEL_EXPORTER_OTLP_ENDPOINT.
+      OTEL_JAVAAGENT_ENABLED: ${OTEL_JAVAAGENT_ENABLED:-false}
+      OTEL_SERVICE_NAME: agile-space-backend
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-grpc}
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=${SPRING_PROFILES_ACTIVE:-dev}
+    ports:
+      # Loopback por padrão: em produção o acesso externo passa pelo Caddy (profile "proxy").
+      # PUBLISH_ADDR=0.0.0.0 expõe direto na rede, se precisar sem proxy.
+      - "${PUBLISH_ADDR:-127.0.0.1}:8002:8002"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8002/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${BACKEND_CPU_LIMIT:-2}"
+          memory: ${BACKEND_MEMORY_LIMIT:-1024M}
+
+  frontend:
+    build:
+      context: ../agile-space-frontend
+      # NEXT_PUBLIC_* precisam ser build args (ver comentário no Dockerfile do frontend) —
+      # setar em "environment:" abaixo não afeta o bundle já compilado. Em produção, exporte
+      # esses valores reais no shell antes de "docker compose up" (ou num .env ao lado deste
+      # arquivo, que o compose lê automaticamente).
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8002/api}
+        NEXT_PUBLIC_SPRING_API_URL: ${NEXT_PUBLIC_SPRING_API_URL:-http://localhost:8002/api}
+        NEXT_PUBLIC_GEMINI_API_KEY: ${NEXT_PUBLIC_GEMINI_API_KEY:-}
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
+    container_name: agile-space-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      # OTel do frontend roda no servidor Node (instrumentation.ts), não no bundle do browser —
+      # ao contrário de NEXT_PUBLIC_*, isso é runtime normal, não precisa ser build arg.
+      OTEL_SERVICE_NAME: agile-space-frontend
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    ports:
+      - "${PUBLISH_ADDR:-127.0.0.1}:9002:9002"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:9002/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${FRONTEND_CPU_LIMIT:-1}"
+          memory: ${FRONTEND_MEMORY_LIMIT:-512M}
+
+  # Reverse proxy + TLS automático (Let's Encrypt) na frente de frontend/backend. Só entra em
+  # jogo com o profile "proxy" (docker compose --profile proxy up -d) — em dev local, sem
+  # domínio real, os serviços continuam acessíveis direto nas portas 8002/9002 como sempre.
+  # Caddy foi escolhido em vez de nginx porque faz proxy de WebSocket (/ws/**) sem config extra
+  # (nginx exige "proxy_set_header Upgrade/Connection" manual pra isso).
+  reverse-proxy:
+    image: caddy:2-alpine
+    container_name: agile-space-proxy
+    restart: unless-stopped
+    profiles: ["proxy"]
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    environment:
+      # Sem default ":?" de propósito: Compose interpola env vars de TODOS os serviços mesmo
+      # com --profile proxy desligado, então um required var aqui quebraria o "docker compose up"
+      # comum (sem o profile). "localhost" é só um placeholder inofensivo — ao rodar de verdade
+      # com --profile proxy, exporte DOMAIN com o domínio público real antes.
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - agile-space-caddy-data:/data
+      - agile-space-caddy-config:/config
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${PROXY_CPU_LIMIT:-0.5}"
+          memory: ${PROXY_MEMORY_LIMIT:-128M}
+
+volumes:
+  agile-space-db-data:
+  agile-space-caddy-data:
+  agile-space-caddy-config:

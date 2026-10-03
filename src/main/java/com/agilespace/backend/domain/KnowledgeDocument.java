@@ -1,5 +1,6 @@
 package com.agilespace.backend.domain;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -67,4 +68,11 @@ public class KnowledgeDocument {
     private String updatedBy;
     private LocalDateTime deletedAt;
     private String deletedBy;
+
+    // Embedding local (transformers.js, 384 dims) usado na busca semântica do chat do poker.
+    // WRITE_ONLY: aceito no POST/PUT, nunca sai no JSON de listagem (evitaria ~6-7KB por doc à toa).
+    @Convert(converter = EmbeddingConverter.class)
+    @Column(columnDefinition = "TEXT")
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    private float[] embedding;
 }

@@ -4,6 +4,8 @@ import com.agilespace.backend.domain.PokerRoom;
 import com.agilespace.backend.domain.PokerParticipant;
 import com.agilespace.backend.domain.PokerVote;
 import com.agilespace.backend.domain.PokerRound;
+import com.agilespace.backend.domain.PokerChatMessage;
+import com.agilespace.backend.repository.PokerChatMessageRepository;
 import com.agilespace.backend.repository.PokerRoomRepository;
 import com.agilespace.backend.repository.PokerParticipantRepository;
 import com.agilespace.backend.repository.PokerVoteRepository;
@@ -12,8 +14,10 @@ import com.agilespace.backend.websocket.PokerWebSocketHandler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Map;
@@ -28,6 +32,7 @@ public class PokerService {
     private final PokerParticipantRepository participantRepository;
     private final PokerVoteRepository voteRepository;
     private final PokerRoundRepository roundRepository;
+    private final PokerChatMessageRepository chatMessageRepository;
     private final PokerWebSocketHandler webSocketHandler;
 
     // --- Room Logic ---
@@ -37,15 +42,46 @@ public class PokerService {
     }
 
     @Transactional
-    public PokerRoom saveOrUpdateRoom(PokerRoom room) {
+    public PokerRoom saveOrUpdateRoom(PokerRoom room, String callerId, String callerRole) {
+        Optional<PokerRoom> existing = room.getId() != null ? roomRepository.findById(room.getId()) : Optional.empty();
+        if (existing.isPresent()) {
+            requireRoomParticipant(existing.get(), callerId, callerRole);
+        } else {
+            room.setCreatorId(callerId);
+        }
         PokerRoom saved = roomRepository.save(room);
         webSocketHandler.broadcastEvent(saved.getId(), "ROOM_UPDATED", saved);
         return saved;
     }
 
+    private boolean isPrivilegedRole(String role) {
+        return "ADMIN".equalsIgnoreCase(role) || "LEAD".equalsIgnoreCase(role);
+    }
+
+    /**
+     * Facilitador é transferível (ex.: host cai e outro participante assume), então o gate
+     * aqui é "já entrou na sala" (creatorId, participante com join registrado, ou ADMIN/LEAD) —
+     * não "só o criador original". Isso fecha o buraco real (outsider que nunca entrou na sala
+     * mexendo via roomId adivinhado) sem travar o claim-facilitator do frontend.
+     */
+    private void requireRoomParticipant(PokerRoom room, String callerId, String callerRole) {
+        if (isPrivilegedRole(callerRole)) {
+            return;
+        }
+        if (callerId != null && callerId.equals(room.getCreatorId())) {
+            return;
+        }
+        if (callerId != null && participantRepository.existsById(room.getId() + "_" + callerId)) {
+            return;
+        }
+        throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                "Apenas participantes da sala podem executar esta ação.");
+    }
+
     @Transactional(readOnly = true)
-    public List<PokerRoom> listRooms() {
-        return roomRepository.findAll();
+    public List<PokerRoom> listRooms(int limit, String squadId) {
+        int safeLimit = limit > 0 ? limit : 1000;
+        return roomRepository.findByTeamIgnoreCaseOrderByCreatedAtDesc(squadId, PageRequest.of(0, safeLimit)).getContent();
     }
 
     // --- Participants Logic ---
@@ -85,7 +121,10 @@ public class PokerService {
     }
 
     @Transactional
-    public PokerVote saveVote(PokerVote vote) {
+    public PokerVote saveVote(PokerVote vote, String callerId) {
+        if (callerId == null || !callerId.equals(vote.getParticipantId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só é possível registrar o próprio voto.");
+        }
         String id = vote.getRoomId() + "_" + vote.getParticipantId();
         vote.setId(id);
         PokerVote saved = voteRepository.save(vote);
@@ -100,7 +139,10 @@ public class PokerService {
     }
 
     @Transactional
-    public void clearVotes(String roomId) {
+    public void clearVotes(String roomId, String callerId, String callerRole) {
+        PokerRoom room = roomRepository.findById(roomId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sala não encontrada"));
+        requireRoomParticipant(room, callerId, callerRole);
         voteRepository.deleteByRoomId(roomId);
         webSocketHandler.broadcastEvent(roomId, "VOTES_CLEARED", Map.of());
     }
@@ -124,8 +166,16 @@ public class PokerService {
         return saved;
     }
 
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<PokerRound> searchRounds(String query, org.springframework.data.domain.Pageable pageable) {
+        return roundRepository.searchByTopicOrNote(query, pageable);
+    }
+
     @Transactional
-    public void clearRounds(String roomId) {
+    public void clearRounds(String roomId, String callerId, String callerRole) {
+        PokerRoom room = roomRepository.findById(roomId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sala não encontrada"));
+        requireRoomParticipant(room, callerId, callerRole);
         roundRepository.deleteByRoomId(roomId);
         webSocketHandler.broadcastEvent(roomId, "ROUNDS_CLEARED", Map.of());
     }
@@ -135,5 +185,53 @@ public class PokerService {
         // Dispara o payload direto via WebSocket para as sessões ativas da sala
         // sem persistência em banco para alta performance de animações de emojis
         webSocketHandler.broadcastReaction(roomId, reactionPayload);
+    }
+
+    // --- Chat Messages Logic ---
+    @Transactional(readOnly = true)
+    public List<PokerChatMessage> getChatMessages(String roomId, String channelId) {
+        return chatMessageRepository.findByRoomIdAndChannelIdOrderByTsAsc(roomId, channelId);
+    }
+
+    @Transactional
+    public PokerChatMessage saveChatMessage(String roomId, PokerChatMessage message, String callerId) {
+        if (callerId == null || !callerId.equals(message.getSenderId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só é possível enviar mensagens como o próprio usuário.");
+        }
+        if (message.getId() == null || message.getId().trim().isEmpty()) {
+            message.setId(java.util.UUID.randomUUID().toString());
+        }
+        message.setRoomId(roomId);
+        if (message.getTs() == null || message.getTs().trim().isEmpty()) {
+            message.setTs(new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").format(new java.util.Date()));
+        }
+        PokerChatMessage saved = chatMessageRepository.save(message);
+        webSocketHandler.broadcastEvent(roomId, "CHAT_MESSAGE_SAVED", saved);
+        return saved;
+    }
+
+    @Transactional
+    public void deleteChatMessage(String roomId, String messageId, String callerId, String callerRole) {
+        PokerChatMessage message = chatMessageRepository.findById(messageId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Mensagem não encontrada"));
+
+        boolean isAuthor = callerId != null && callerId.equals(message.getSenderId());
+        boolean isPrivileged = isPrivilegedRole(callerRole);
+        // Facilitador da sala também pode moderar (apagar) mensagens nos canais públicos
+        boolean isFacilitator = false;
+        Optional<PokerRoom> roomOpt = roomRepository.findById(roomId);
+        if (roomOpt.isPresent() && callerId != null && callerId.equals(roomOpt.get().getCreatorId())) {
+            isFacilitator = true;
+        }
+
+        if (!isAuthor && !isPrivileged && !isFacilitator) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Sem permissão para excluir esta mensagem.");
+        }
+
+        chatMessageRepository.delete(message);
+        webSocketHandler.broadcastEvent(roomId, "CHAT_MESSAGE_DELETED", Map.of(
+                "messageId", messageId,
+                "channelId", message.getChannelId()
+        ));
     }
 }

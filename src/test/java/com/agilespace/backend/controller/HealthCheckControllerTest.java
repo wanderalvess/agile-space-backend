@@ -4,6 +4,8 @@ import com.agilespace.backend.domain.HealthCheckBoard;
 import com.agilespace.backend.domain.HealthCheckParticipant;
 import com.agilespace.backend.domain.HealthCheckVote;
 import com.agilespace.backend.service.HealthCheckService;
+import com.agilespace.backend.service.SquadAccessService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -11,12 +13,14 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*;
 
 public class HealthCheckControllerTest {
@@ -24,12 +28,37 @@ public class HealthCheckControllerTest {
     @Mock
     private HealthCheckService service;
 
+    @Mock
+    private SquadAccessService squadAccessService;
+
     @InjectMocks
     private HealthCheckController controller;
 
     @BeforeEach
     public void setup() {
         MockitoAnnotations.openMocks(this);
+    }
+
+    @Test
+    public void testListBoards_filtersBySquadAndChecksAccess() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(service.listBoards("DDWMISSI")).thenReturn(Arrays.asList(new HealthCheckBoard()));
+
+        ResponseEntity<List<HealthCheckBoard>> response = controller.listBoards("DDWMISSI", request);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(1, response.getBody().size());
+        verify(squadAccessService).requireSquadReadAccess("DDWMISSI", request);
+    }
+
+    @Test
+    public void testListBoards_notMemberOfSquad_forbidden() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        doThrow(new ResponseStatusException(HttpStatus.FORBIDDEN))
+                .when(squadAccessService).requireSquadReadAccess("outra-squad", request);
+
+        assertThrows(ResponseStatusException.class, () -> controller.listBoards("outra-squad", request));
+        verify(service, never()).listBoards(anyString());
     }
 
     @Test

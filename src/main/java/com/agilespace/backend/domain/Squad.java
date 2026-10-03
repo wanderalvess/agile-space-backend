@@ -1,5 +1,6 @@
 package com.agilespace.backend.domain;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.*;
 import lombok.*;
@@ -13,10 +14,14 @@ import org.hibernate.type.SqlTypes;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Squad {
 
     @Id
-    private String id; // squadId
+    private String id;
+
+    @Column(nullable = false)
+    private String name;
 
     @Column(name = "jira_project_key")
     private String jiraProjectKey;
@@ -51,11 +56,35 @@ public class Squad {
     @Column(name = "last_sync_status")
     private String lastSyncStatus;
 
+    @Column(name = "last_sync_by")
+    private String lastSyncBy;
+
+    @Column(name = "last_sync_issue_count")
+    private Integer lastSyncIssueCount;
+
+    @Column(name = "last_sync_error", columnDefinition = "TEXT")
+    private String lastSyncError;
+
+    // Opt-in por squad pro sync agendado (SquadSyncScheduler) — null = squad continua
+    // manual mesmo com app.squad.scheduled-sync.enabled ligado globalmente. É o usuário
+    // "dono" cujo UserJiraConfig (PAT) o job agendado usa, já que não há sessão logada.
+    @Column(name = "sync_owner_user_id")
+    private String syncOwnerUserId;
+
     @Column(name = "reconcile_interval_hours")
     private Integer reconcileIntervalHours;
 
     @Column(name = "default_daily_capacity_hours")
     private Double defaultDailyCapacityHours;
+
+    @Column(name = "capacity_calculation_method")
+    private String capacityCalculationMethod;
+
+    @Column(name = "capacity_jql", columnDefinition = "TEXT")
+    private String capacityJql;
+
+    @Column(name = "capacity_formula")
+    private String capacityFormula;
 
     @Column(name = "updated_at")
     private String updatedAt;
@@ -63,4 +92,25 @@ public class Squad {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "sprint_history", columnDefinition = "jsonb")
     private JsonNode sprintHistory;
+
+    // Mapeamento issuetype -> fase de workflow (kind/label/color/ordem) pra
+    // classificar subtarefas na timeline do Jira Plans sem heurística de
+    // texto. Array de objetos, ordem do array = ordem da fase no workflow.
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "phases", columnDefinition = "jsonb")
+    private JsonNode phases;
+
+    // Fonte do card "Próxima cerimônia" (/painel) — "google_calendar" (default/null) ou
+    // "manual". As duas nunca coexistem: são duas respostas pra mesma pergunta ("quando é
+    // a próxima cerimônia da squad"), então a squad escolhe uma, não as duas ao mesmo tempo.
+    @Column(name = "ceremony_mode")
+    private String ceremonyMode;
+
+    // Cerimônias cadastradas à mão quando ceremonyMode = "manual" — array de objetos
+    // {id, title, daysOfWeek: ["MON",...], startTime: "09:15", durationMinutes, meetLink},
+    // mesmo padrão de `phases` (sem tabela própria). Ignorado quando ceremonyMode não é
+    // "manual".
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "ceremonies", columnDefinition = "jsonb")
+    private JsonNode ceremonies;
 }
