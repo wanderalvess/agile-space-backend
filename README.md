@@ -39,6 +39,7 @@ A arquitetura do sistema é modularizada por domínios de negócio ágil:
 - **Plano de Ação (Action Plan):** Gestão tática de melhorias derivadas das retrospectivas com metodologia 5W2H, responsáveis e prazos.
 - **Vault (Cofre de Segredos):** Serviço de compartilhamento seguro de credenciais com expiração temporal (1h, 24h) ou visualização única (`once`).
 - **Workspace Pessoal:** Quadros Kanban privados, notas adesivas e links rápidos para gestão individual.
+- **Gestão de Acessos & Convites:** Convites por link com token seguro (`InviteController`), separando administração do sistema (`role = ADMIN`) da liderança ágil de squad.
 - **Prompt Hub & Acervo de IA:** Repositório colaborativo de prompts para papéis ágeis (SM, PO, Dev, QA) com versionamento, forks e upload automatizado de skills (`SKILL.md`).
 - **RAG & Base de Conhecimento Vetorial (PostgreSQL + pgvector):** Ingestão de documentações técnicas e regras de negócio vetorizadas, permitindo consultas semânticas no Chat sem custo de IA externa.
 - **Servidor MCP Embutido (`agile-space-mcp-server`):** Servidor Model Context Protocol exposto em `/mcp/sse` e `/mcp/message`, protegido por `X-Api-Key`, permitindo que agentes externos consultem documentações, squads e criem sessões de poker.
