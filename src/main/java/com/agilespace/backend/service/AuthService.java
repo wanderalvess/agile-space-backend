@@ -46,9 +46,10 @@ public class AuthService {
      */
     @Transactional
     public AuthResponseDto login(LoginRequestDto request) {
-        String cleanEmail = request.getEmail().trim().toLowerCase();
-        User user = userRepository.findByEmail(cleanEmail)
+        String identifier = request.getEmail().trim().toLowerCase();
+        User user = findUserByIdentifier(identifier)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "E-mail ou senha incorretos"));
+        String cleanEmail = user.getEmail();
 
         if (!user.isActive()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Usuário inativo no sistema");
@@ -90,6 +91,21 @@ public class AuthService {
         }
 
         return buildAuthResponse(user, access);
+    }
+
+    /**
+     * Aceita e-mail completo ou só o usuário (parte antes do "@"). Usuário que bate com mais de uma
+     * conta (domínios diferentes) é ambíguo e tratado como não encontrado — exige o e-mail completo.
+     */
+    private Optional<User> findUserByIdentifier(String identifier) {
+        if (identifier.contains("@")) {
+            return userRepository.findByEmail(identifier);
+        }
+        if (identifier.isBlank()) {
+            return Optional.empty();
+        }
+        List<User> matches = userRepository.findByEmailStartingWithIgnoreCase(identifier + "@");
+        return matches.size() == 1 ? Optional.of(matches.get(0)) : Optional.empty();
     }
 
     /**

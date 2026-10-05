@@ -12,7 +12,8 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class LoginRequestDto {
 
-    @NotBlank(message = "E-mail é obrigatório")
+    // Aceita e-mail completo ou apenas o usuário (parte antes do "@").
+    @NotBlank(message = "E-mail ou usuário é obrigatório")
     private String email;
 
     @NotBlank(message = "Senha é obrigatória")

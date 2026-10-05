@@ -123,6 +123,33 @@ public class AuthServiceTest {
     }
 
     @Test
+    public void testLoginByUsernameResolvesUniqueEmail() {
+        User user = activeUser();
+        user.setDefaultProjectId("DDWMISSI");
+        when(userRepository.findByEmailStartingWithIgnoreCase("joao.silva@")).thenReturn(List.of(user));
+        when(userProjectResolverService.resolveUserAccess(user)).thenReturn(accessWith("DDWMISSI"));
+
+        AuthResponseDto response = service.login(
+                LoginRequestDto.builder().email(" Joao.Silva ").password(RAW_PASSWORD).build());
+
+        assertEquals("jwt-token", response.getToken());
+        verify(userRepository, never()).findByEmail(anyString());
+    }
+
+    @Test
+    public void testLoginByAmbiguousUsernameReturnsUnauthorized() {
+        User other = activeUser();
+        other.setEmail("joao.silva@outra.com.br");
+        when(userRepository.findByEmailStartingWithIgnoreCase("joao.silva@"))
+                .thenReturn(List.of(activeUser(), other));
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> service.login(
+                LoginRequestDto.builder().email("joao.silva").password(RAW_PASSWORD).build()));
+
+        assertEquals(HttpStatus.UNAUTHORIZED, ex.getStatusCode());
+    }
+
+    @Test
     public void testLoginUnknownEmailReturnsUnauthorized() {
         when(userRepository.findByEmail(anyString())).thenReturn(Optional.empty());
 
