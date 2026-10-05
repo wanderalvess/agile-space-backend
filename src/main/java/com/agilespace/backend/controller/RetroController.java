@@ -2,6 +2,7 @@ package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.RetroBoard;
 import com.agilespace.backend.domain.RetroCard;
+import com.agilespace.backend.domain.RetroChatMessage;
 import com.agilespace.backend.domain.RetroParticipant;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.RetroService;
@@ -152,5 +153,34 @@ public class RetroController {
             @RequestBody List<RetroCard> cards) {
         retroService.importActions(boardId, cards);
         return ResponseEntity.ok().build();
+    }
+
+    // --- Chat Endpoints ---
+    @GetMapping("/{id}/chat")
+    public ResponseEntity<List<RetroChatMessage>> getChatMessages(
+            @PathVariable("id") String boardId,
+            @RequestParam("channelId") String channelId,
+            HttpServletRequest request) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        return ResponseEntity.ok(retroService.getChatMessages(boardId, channelId, callerId));
+    }
+
+    @PostMapping("/{id}/chat")
+    public ResponseEntity<RetroChatMessage> sendChatMessage(
+            @PathVariable("id") String boardId,
+            @RequestBody RetroChatMessage message,
+            HttpServletRequest request) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        return ResponseEntity.status(HttpStatus.CREATED).body(retroService.saveChatMessage(boardId, message, callerId));
+    }
+
+    @DeleteMapping("/{id}/chat/{messageId}")
+    public ResponseEntity<Void> deleteChatMessage(
+            @PathVariable("id") String boardId,
+            @PathVariable("messageId") String messageId,
+            HttpServletRequest request) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        retroService.deleteChatMessage(boardId, messageId, callerId);
+        return ResponseEntity.noContent().build();
     }
 }

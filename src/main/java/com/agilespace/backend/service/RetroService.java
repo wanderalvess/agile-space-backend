@@ -2,9 +2,11 @@ package com.agilespace.backend.service;
 
 import com.agilespace.backend.domain.RetroBoard;
 import com.agilespace.backend.domain.RetroCard;
+import com.agilespace.backend.domain.RetroChatMessage;
 import com.agilespace.backend.domain.RetroParticipant;
 import com.agilespace.backend.repository.RetroBoardRepository;
 import com.agilespace.backend.repository.RetroCardRepository;
+import com.agilespace.backend.repository.RetroChatMessageRepository;
 import com.agilespace.backend.repository.RetroParticipantRepository;
 import com.agilespace.backend.websocket.RetroWebSocketHandler;
 import lombok.RequiredArgsConstructor;
@@ -18,6 +20,8 @@ import org.springframework.web.server.ResponseStatusException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
@@ -27,6 +31,7 @@ public class RetroService {
     private final RetroBoardRepository boardRepository;
     private final RetroParticipantRepository participantRepository;
     private final RetroCardRepository cardRepository;
+    private final RetroChatMessageRepository chatMessageRepository;
     private final RetroWebSocketHandler webSocketHandler;
 
     // --- Board Logic ---
@@ -161,5 +166,136 @@ public class RetroService {
             cardRepository.save(card);
         }
         webSocketHandler.broadcastEvent(boardId, "CARDS_IMPORTED", cards);
+    }
+
+    // --- Chat do time ---
+    static final int CHAT_MAX_TEXT = 8000;
+    static final int CHAT_MAX_SENDER_NAME = 120;
+    static final int CHAT_MAX_SENDER_CATEGORY = 255;
+    private static final Set<String> CHAT_KINDS = Set.of("text", "code");
+    private static final Pattern CHAT_PUBLIC_CHANNEL = Pattern.compile("geral|role-(Developer|QA|UX|Designer|Management)");
+    private static final java.time.format.DateTimeFormatter CHAT_TS_FORMAT =
+            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(java.time.ZoneOffset.UTC);
+
+    @Transactional(readOnly = true)
+    public List<RetroChatMessage> getChatMessages(String boardId, String channelId, String callerId) {
+        RetroBoard board = requireChatBoard(boardId);
+        requireChatParticipant(board, callerId);
+        requireChatChannelAccess(channelId, callerId);
+        return chatMessageRepository.findByBoardIdAndChannelIdOrderByTsAsc(boardId, channelId);
+    }
+
+    @Transactional
+    public RetroChatMessage saveChatMessage(String boardId, RetroChatMessage message, String callerId) {
+        if (message == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mensagem inválida.");
+        }
+        RetroBoard board = requireChatBoard(boardId);
+        requireChatParticipant(board, callerId);
+        requireChatChannelAccess(message.getChannelId(), callerId);
+
+        String text = message.getText();
+        if (text == null || text.trim().isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A mensagem não pode ser vazia.");
+        }
+        if (text.length() > CHAT_MAX_TEXT) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "A mensagem excede " + CHAT_MAX_TEXT + " caracteres.");
+        }
+        String kind = message.getKind() == null || message.getKind().isBlank() ? "text" : message.getKind();
+        if (!CHAT_KINDS.contains(kind)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tipo de mensagem inválido.");
+        }
+        String senderName = message.getSenderName();
+        if (senderName == null || senderName.trim().isEmpty() || senderName.length() > CHAT_MAX_SENDER_NAME) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nome do remetente inválido.");
+        }
+        if (message.getSenderCategory() != null && message.getSenderCategory().length() > CHAT_MAX_SENDER_CATEGORY) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Categoria do remetente inválida.");
+        }
+
+        String id = message.getId() == null || message.getId().trim().isEmpty()
+                ? java.util.UUID.randomUUID().toString() : message.getId();
+        // id vindo do cliente nunca sobrescreve uma mensagem existente (de outro autor ou board)
+        if (chatMessageRepository.existsById(id)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma mensagem com este id.");
+        }
+
+        RetroChatMessage toSave = RetroChatMessage.builder()
+                .id(id)
+                .boardId(boardId)
+                .channelId(message.getChannelId())
+                .senderId(callerId) // sempre o caller autenticado, nunca o corpo
+                .senderName(senderName)
+                .senderCategory(message.getSenderCategory())
+                .text(text)
+                .kind(kind)
+                .ts(CHAT_TS_FORMAT.format(java.time.Instant.now()))
+                .build();
+        RetroChatMessage saved = chatMessageRepository.save(toSave);
+        webSocketHandler.broadcastEvent(boardId, "CHAT_MESSAGE_SAVED", saved);
+        return saved;
+    }
+
+    @Transactional
+    public void deleteChatMessage(String boardId, String messageId, String callerId) {
+        RetroBoard board = requireChatBoard(boardId);
+        requireChatParticipant(board, callerId);
+        RetroChatMessage message = chatMessageRepository.findById(messageId)
+                .filter(m -> boardId.equals(m.getBoardId()))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Mensagem não encontrada"));
+
+        boolean isAuthor = callerId.equals(message.getSenderId());
+        boolean isDm = message.getChannelId() != null && message.getChannelId().startsWith("dm_");
+        // Em DM só o autor apaga; nos canais públicos o criador do board também modera.
+        boolean isModerator = !isDm && callerId.equals(board.getCreatorId());
+        if (!isAuthor && !isModerator) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Sem permissão para excluir esta mensagem.");
+        }
+
+        chatMessageRepository.delete(message);
+        webSocketHandler.broadcastEvent(boardId, "CHAT_MESSAGE_DELETED", Map.of(
+                "messageId", messageId,
+                "channelId", message.getChannelId()
+        ));
+    }
+
+    private RetroBoard requireChatBoard(String boardId) {
+        return boardRepository.findById(boardId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Board não encontrado"));
+    }
+
+    private void requireChatParticipant(RetroBoard board, String callerId) {
+        if (callerId == null || callerId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a participantes deste board.");
+        }
+        boolean isCreator = callerId.equals(board.getCreatorId());
+        boolean isParticipant = isCreator || participantRepository.findByBoardId(board.getId()).stream()
+                .anyMatch(p -> callerId.equals(p.getId()));
+        if (!isParticipant) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a participantes deste board.");
+        }
+    }
+
+    /** Canais válidos: geral, role-categoria e dm_uidA_uidB (só os dois uids acessam). */
+    private static void requireChatChannelAccess(String channelId, String callerId) {
+        if (channelId == null || channelId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Canal inválido.");
+        }
+        if (CHAT_PUBLIC_CHANNEL.matcher(channelId).matches()) {
+            return;
+        }
+        if (channelId.startsWith("dm_")) {
+            String rest = channelId.substring(3);
+            String asFirst = callerId + "_";
+            String asSecond = "_" + callerId;
+            boolean callerFirst = rest.startsWith(asFirst) && rest.length() > asFirst.length();
+            boolean callerSecond = rest.endsWith(asSecond) && rest.length() > asSecond.length();
+            if (callerFirst || callerSecond) {
+                return;
+            }
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Sem acesso a esta conversa privada.");
+        }
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Canal inválido.");
     }
 }

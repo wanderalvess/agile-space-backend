@@ -3,6 +3,7 @@ package com.agilespace.backend.controller;
 import com.agilespace.backend.domain.RetroBoard;
 import com.agilespace.backend.domain.RetroParticipant;
 import com.agilespace.backend.domain.RetroCard;
+import com.agilespace.backend.domain.RetroChatMessage;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.RetroService;
 import com.agilespace.backend.service.SquadAccessService;
@@ -130,5 +131,53 @@ public class RetroControllerTest {
         ResponseEntity<Void> response = controller.deleteCard("123", "card1", request);
 
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
+    }
+
+    @Test
+    public void testGetChatMessages_usesCallerFromRequest() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("ana");
+        List<RetroChatMessage> list = Arrays.asList(new RetroChatMessage());
+        when(service.getChatMessages("123", "geral", "ana")).thenReturn(list);
+
+        ResponseEntity<List<RetroChatMessage>> response = controller.getChatMessages("123", "geral", request);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(list, response.getBody());
+    }
+
+    @Test
+    public void testSendChatMessage_returnsCreated() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("ana");
+        RetroChatMessage message = new RetroChatMessage();
+        when(service.saveChatMessage("123", message, "ana")).thenReturn(message);
+
+        ResponseEntity<RetroChatMessage> response = controller.sendChatMessage("123", message, request);
+
+        assertEquals(HttpStatus.CREATED, response.getStatusCode());
+        assertEquals(message, response.getBody());
+    }
+
+    @Test
+    public void testSendChatMessage_propagatesForbidden() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("intruso");
+        RetroChatMessage message = new RetroChatMessage();
+        when(service.saveChatMessage("123", message, "intruso"))
+                .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
+
+        assertThrows(ResponseStatusException.class, () -> controller.sendChatMessage("123", message, request));
+    }
+
+    @Test
+    public void testDeleteChatMessage_returnsNoContent() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("ana");
+
+        ResponseEntity<Void> response = controller.deleteChatMessage("123", "m1", request);
+
+        assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
+        verify(service).deleteChatMessage("123", "m1", "ana");
     }
 }
