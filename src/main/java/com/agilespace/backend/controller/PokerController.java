@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/poker")
@@ -52,6 +53,17 @@ public class PokerController {
         String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
         String callerRole = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
         return ResponseEntity.status(HttpStatus.CREATED).body(pokerService.saveOrUpdateRoom(room, callerId, callerRole));
+    }
+
+    @PatchMapping("/{roomId}/issues/{issueId}/notes")
+    public ResponseEntity<PokerRoom> updateIssueNotes(
+            @PathVariable("roomId") String roomId,
+            @PathVariable("issueId") String issueId,
+            @RequestBody Map<String, String> notes,
+            HttpServletRequest request) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        String callerRole = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        return ResponseEntity.ok(pokerService.updateIssueNotes(roomId, issueId, notes, callerId, callerRole));
     }
 
     @GetMapping

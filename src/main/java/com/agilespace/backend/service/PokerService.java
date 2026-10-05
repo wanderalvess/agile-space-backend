@@ -1,5 +1,9 @@
 package com.agilespace.backend.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
 import com.agilespace.backend.domain.PokerRoom;
 import com.agilespace.backend.domain.PokerParticipant;
 import com.agilespace.backend.domain.PokerVote;
@@ -49,6 +53,55 @@ public class PokerService {
         } else {
             room.setCreatorId(callerId);
         }
+        PokerRoom saved = roomRepository.save(room);
+        webSocketHandler.broadcastEvent(saved.getId(), "ROOM_UPDATED", saved);
+        return saved;
+    }
+
+    private static final int MAX_REFINEMENT_NOTES_LENGTH = 20_000;
+
+    /**
+     * Notas de refinamento (Dev/QA) editáveis por qualquer participante da sala. Mescla só os
+     * campos enviados no item informado — o resto da fila e as notas do outro campo ficam
+     * intactos, então quem digita com uma cópia desatualizada da sala não apaga nada.
+     */
+    @Transactional
+    public PokerRoom updateIssueNotes(String roomId, String issueId, Map<String, String> notes, String callerId, String callerRole) {
+        PokerRoom room = roomRepository.findByIdForUpdate(roomId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sala não encontrada"));
+        requireRoomParticipant(room, callerId, callerRole);
+
+        JsonNode current = room.getIssuesQueue();
+        if (current == null || !current.isArray()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tarefa não encontrada");
+        }
+        // Cópia profunda + setter: não depende do dirty-checking do Hibernate para JSON mutado no lugar.
+        ArrayNode queue = ((ArrayNode) current).deepCopy();
+        ObjectNode target = null;
+        for (JsonNode item : queue) {
+            if (item.isObject() && issueId.equals(item.path("id").asText(null))) {
+                target = (ObjectNode) item;
+                break;
+            }
+        }
+        if (target == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tarefa não encontrada");
+        }
+
+        for (String field : List.of("devNotes", "qaNotes")) {
+            if (!notes.containsKey(field)) continue;
+            String value = notes.get(field) == null ? "" : notes.get(field).trim();
+            if (value.length() > MAX_REFINEMENT_NOTES_LENGTH) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Notas muito longas (máx. " + MAX_REFINEMENT_NOTES_LENGTH + " caracteres).");
+            }
+            if (value.isEmpty()) {
+                target.putNull(field);
+            } else {
+                target.set(field, TextNode.valueOf(value));
+            }
+        }
+
+        room.setIssuesQueue(queue);
         PokerRoom saved = roomRepository.save(room);
         webSocketHandler.broadcastEvent(saved.getId(), "ROOM_UPDATED", saved);
         return saved;
