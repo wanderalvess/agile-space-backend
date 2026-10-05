@@ -47,8 +47,10 @@ class RetroChatServiceTest {
         lenient().when(boardRepository.findById(BOARD)).thenReturn(Optional.of(board));
         RetroParticipant ana = new RetroParticipant();
         ana.setId("ana");
+        ana.setNickname("Ana Souza");
         RetroParticipant bia = new RetroParticipant();
         bia.setId("bia");
+        bia.setNickname("Bia");
         lenient().when(participantRepository.findByBoardId(BOARD)).thenReturn(List.of(ana, bia));
     }
 
@@ -128,7 +130,7 @@ class RetroChatServiceTest {
         assertStatus(HttpStatus.FORBIDDEN, () -> service.getChatMessages(BOARD, "dm_ana_creator", "bia"));
         assertStatus(HttpStatus.FORBIDDEN, () -> service.saveChatMessage(BOARD, msg("dm_ana_creator", "x"), "bia"));
         assertStatus(HttpStatus.FORBIDDEN, () -> service.saveChatMessage(BOARD, msg("dm_ana_", "x"), "ana"));
-        verify(chatMessageRepository, never()).findByBoardIdAndChannelIdOrderByTsAsc(any(), any());
+        verify(chatMessageRepository, never()).findByBoardIdAndChannelIdOrderByTsDesc(any(), any(), any());
     }
 
     @Test
@@ -142,7 +144,8 @@ class RetroChatServiceTest {
         assertStatus(HttpStatus.BAD_REQUEST, () -> service.saveChatMessage(BOARD, badKind, "ana"));
         RetroChatMessage longName = msg("geral", "x");
         longName.setSenderName("n".repeat(121));
-        assertStatus(HttpStatus.BAD_REQUEST, () -> service.saveChatMessage(BOARD, longName, "ana"));
+        // criador sem registro de participante usa o nome do corpo, que é validado
+        assertStatus(HttpStatus.BAD_REQUEST, () -> service.saveChatMessage(BOARD, longName, "creator"));
         verify(chatMessageRepository, never()).save(any());
     }
 
@@ -168,9 +171,56 @@ class RetroChatServiceTest {
     @Test
     @DisplayName("Lista mensagens do canal para participante")
     void listMessages() {
-        List<RetroChatMessage> list = List.of(stored("m1", "geral", "ana"));
-        when(chatMessageRepository.findByBoardIdAndChannelIdOrderByTsAsc(BOARD, "geral")).thenReturn(list);
-        assertEquals(list, service.getChatMessages(BOARD, "geral", "bia"));
+        RetroChatMessage newest = stored("m2", "geral", "bia");
+        RetroChatMessage oldest = stored("m1", "geral", "ana");
+        // o repositório devolve da mais nova para a mais antiga; o service entrega em ordem cronológica
+        when(chatMessageRepository.findByBoardIdAndChannelIdOrderByTsDesc(eq(BOARD), eq("geral"), any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(List.of(newest, oldest));
+        assertEquals(List.of(oldest, newest), service.getChatMessages(BOARD, "geral", "bia"));
+    }
+
+    @Test
+    @DisplayName("Histórico pede só as últimas mensagens do canal")
+    void historyIsLimited() {
+        service.getChatMessages(BOARD, "geral", "ana");
+        org.mockito.ArgumentCaptor<org.springframework.data.domain.Pageable> page =
+                org.mockito.ArgumentCaptor.forClass(org.springframework.data.domain.Pageable.class);
+        verify(chatMessageRepository).findByBoardIdAndChannelIdOrderByTsDesc(eq(BOARD), eq("geral"), page.capture());
+        assertEquals(RetroService.CHAT_HISTORY_LIMIT, page.getValue().getPageSize());
+    }
+
+    @Test
+    @DisplayName("Nome exibido vem do cadastro do participante, não do corpo")
+    void senderNameComesFromParticipant() {
+        when(chatMessageRepository.save(any(RetroChatMessage.class))).thenAnswer(i -> i.getArgument(0));
+        RetroChatMessage spoof = msg("geral", "oi");
+        spoof.setSenderName("Bia");
+        assertEquals("Ana Souza", service.saveChatMessage(BOARD, spoof, "ana").getSenderName());
+    }
+
+    @Test
+    @DisplayName("DM só é entregue por WebSocket aos dois participantes; canal público vai ao board todo")
+    void dmIsBroadcastOnlyToItsTwoUsers() {
+        when(chatMessageRepository.save(any(RetroChatMessage.class))).thenAnswer(i -> i.getArgument(0));
+
+        RetroChatMessage dm = service.saveChatMessage(BOARD, msg("dm_ana_bia", "segredo"), "ana");
+        verify(webSocketHandler).broadcastEventToUsers(BOARD, "CHAT_MESSAGE_SAVED", dm, java.util.Set.of("ana", "bia"));
+        verify(webSocketHandler, never()).broadcastEvent(eq(BOARD), eq("CHAT_MESSAGE_SAVED"), eq(dm));
+
+        RetroChatMessage pub = service.saveChatMessage(BOARD, msg("geral", "oi"), "bia");
+        verify(webSocketHandler).broadcastEvent(BOARD, "CHAT_MESSAGE_SAVED", pub);
+    }
+
+    @Test
+    @DisplayName("Remoção de mensagem de DM também só é avisada aos dois participantes")
+    void dmDeleteIsTargeted() {
+        RetroChatMessage dm = stored("m5", "dm_ana_bia", "bia");
+        when(chatMessageRepository.findById("m5")).thenReturn(Optional.of(dm));
+
+        service.deleteChatMessage(BOARD, "m5", "bia");
+
+        verify(webSocketHandler).broadcastEventToUsers(BOARD, "CHAT_MESSAGE_DELETED",
+                Map.of("messageId", "m5", "channelId", "dm_ana_bia"), java.util.Set.of("ana", "bia"));
     }
 
     @Test

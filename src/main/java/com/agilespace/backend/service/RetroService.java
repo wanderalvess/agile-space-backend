@@ -172,6 +172,7 @@ public class RetroService {
     static final int CHAT_MAX_TEXT = 8000;
     static final int CHAT_MAX_SENDER_NAME = 120;
     static final int CHAT_MAX_SENDER_CATEGORY = 255;
+    static final int CHAT_HISTORY_LIMIT = 100;
     private static final Set<String> CHAT_KINDS = Set.of("text", "code");
     private static final Pattern CHAT_PUBLIC_CHANNEL = Pattern.compile("geral|role-(Developer|QA|UX|Designer|Management)");
     private static final java.time.format.DateTimeFormatter CHAT_TS_FORMAT =
@@ -182,7 +183,12 @@ public class RetroService {
         RetroBoard board = requireChatBoard(boardId);
         requireChatParticipant(board, callerId);
         requireChatChannelAccess(channelId, callerId);
-        return chatMessageRepository.findByBoardIdAndChannelIdOrderByTsAsc(boardId, channelId);
+        // Só as últimas mensagens do canal (a carga inicial é uma chamada por canal).
+        List<RetroChatMessage> latest = new java.util.ArrayList<>(chatMessageRepository
+                .findByBoardIdAndChannelIdOrderByTsDesc(boardId, channelId,
+                        org.springframework.data.domain.PageRequest.of(0, CHAT_HISTORY_LIMIT)));
+        java.util.Collections.reverse(latest);
+        return latest;
     }
 
     @Transactional
@@ -191,7 +197,7 @@ public class RetroService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mensagem inválida.");
         }
         RetroBoard board = requireChatBoard(boardId);
-        requireChatParticipant(board, callerId);
+        Optional<RetroParticipant> participant = requireChatParticipant(board, callerId);
         requireChatChannelAccess(message.getChannelId(), callerId);
 
         String text = message.getText();
@@ -206,7 +212,12 @@ public class RetroService {
         if (!CHAT_KINDS.contains(kind)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tipo de mensagem inválido.");
         }
-        String senderName = message.getSenderName();
+        // O nome exibido vem do cadastro do participante: o corpo da requisição não pode
+        // fazer uma mensagem aparecer como se fosse de outra pessoa. Só o criador sem
+        // registro de participante cai no nome informado (validado).
+        String senderName = participant.map(RetroParticipant::getNickname)
+                .filter(n -> n != null && !n.isBlank())
+                .orElse(message.getSenderName());
         if (senderName == null || senderName.trim().isEmpty() || senderName.length() > CHAT_MAX_SENDER_NAME) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nome do remetente inválido.");
         }
@@ -233,7 +244,7 @@ public class RetroService {
                 .ts(CHAT_TS_FORMAT.format(java.time.Instant.now()))
                 .build();
         RetroChatMessage saved = chatMessageRepository.save(toSave);
-        webSocketHandler.broadcastEvent(boardId, "CHAT_MESSAGE_SAVED", saved);
+        publishChatEvent(boardId, "CHAT_MESSAGE_SAVED", saved, saved.getChannelId(), callerId);
         return saved;
     }
 
@@ -254,10 +265,10 @@ public class RetroService {
         }
 
         chatMessageRepository.delete(message);
-        webSocketHandler.broadcastEvent(boardId, "CHAT_MESSAGE_DELETED", Map.of(
+        publishChatEvent(boardId, "CHAT_MESSAGE_DELETED", Map.of(
                 "messageId", messageId,
                 "channelId", message.getChannelId()
-        ));
+        ), message.getChannelId(), callerId);
     }
 
     private RetroBoard requireChatBoard(String boardId) {
@@ -265,15 +276,33 @@ public class RetroService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Board não encontrado"));
     }
 
-    private void requireChatParticipant(RetroBoard board, String callerId) {
+    /** Exige que o caller seja o criador ou um participante; devolve o registro de participante, se houver. */
+    private Optional<RetroParticipant> requireChatParticipant(RetroBoard board, String callerId) {
         if (callerId == null || callerId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a participantes deste board.");
         }
-        boolean isCreator = callerId.equals(board.getCreatorId());
-        boolean isParticipant = isCreator || participantRepository.findByBoardId(board.getId()).stream()
-                .anyMatch(p -> callerId.equals(p.getId()));
-        if (!isParticipant) {
+        Optional<RetroParticipant> participant = participantRepository.findByBoardId(board.getId()).stream()
+                .filter(p -> callerId.equals(p.getId()))
+                .findFirst();
+        if (participant.isEmpty() && !callerId.equals(board.getCreatorId())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a participantes deste board.");
+        }
+        return participant;
+    }
+
+    /**
+     * Canais públicos vão para o board inteiro; DM só para as duas pessoas do canal
+     * (o texto não pode trafegar para as sessões dos demais participantes).
+     */
+    private void publishChatEvent(String boardId, String eventType, Object payload, String channelId, String callerId) {
+        if (channelId != null && channelId.startsWith("dm_")) {
+            String rest = channelId.substring(3);
+            String peer = rest.startsWith(callerId + "_")
+                    ? rest.substring(callerId.length() + 1)
+                    : rest.substring(0, rest.length() - callerId.length() - 1);
+            webSocketHandler.broadcastEventToUsers(boardId, eventType, payload, new java.util.HashSet<>(List.of(callerId, peer)));
+        } else {
+            webSocketHandler.broadcastEvent(boardId, eventType, payload);
         }
     }
 

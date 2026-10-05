@@ -54,7 +54,22 @@ public class RetroWebSocketHandler extends TextWebSocketHandler {
     }
 
     public void broadcastEvent(String boardId, String eventType, Object payload) {
+        broadcastEventToUsers(boardId, eventType, payload, null);
+    }
+
+    /**
+     * Como {@link #broadcastEvent}, mas entrega só às sessões dos usuários informados
+     * (o userId vem do JWT, gravado nos atributos pelo JwtHandshakeInterceptor).
+     * {@code userIds == null} significa o board inteiro. Usado nas DMs do chat, cujo
+     * texto não pode chegar aos demais participantes.
+     */
+    public void broadcastEventToUsers(String boardId, String eventType, Object payload, Set<String> userIds) {
         Set<WebSocketSession> sessions = boardSessions.get(boardId);
+        if (sessions != null && userIds != null) {
+            sessions = sessions.stream()
+                    .filter(s -> userIds.contains(String.valueOf(s.getAttributes().get("userId"))))
+                    .collect(java.util.stream.Collectors.toSet());
+        }
         if (sessions != null && !sessions.isEmpty()) {
             try {
                 Map<String, Object> messageMap = new HashMap<>();
