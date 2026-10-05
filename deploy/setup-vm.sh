@@ -29,6 +29,8 @@ cd "$HOME"
 [ -d agile-space-backend ]  || git clone https://github.com/wanderalvess/agile-space-backend.git
 [ -d agile-space-frontend ] || git clone https://github.com/wanderalvess/agile-space-frontend.git
 
-echo "Pronto. Reconecte o SSH (grupo docker), depois:"
-echo "  cd ~/agile-space-backend && cp .env.prod.example .env && nano .env"
-echo "  docker compose -f docker-compose.prod.yml up -d --build"
+echo "Pronto. Reconecte o SSH (grupo docker), depois crie ~/agile-space-backend/.env com:"
+echo "  DOMAIN, ALLOWED_ORIGINS=https://<DOMAIN>, DB_PASSWORD, APP_ENCRYPTION_SECRET, APP_JWT_SECRET,"
+echo "  ALLOWED_EMAIL_DOMAIN, SPRING_PROFILES_ACTIVE=prod, NEXT_PUBLIC_API_URL=https://<DOMAIN>/api,"
+echo "  NEXT_PUBLIC_SPRING_API_URL=https://<DOMAIN>/api, NEXT_PUBLIC_GOOGLE_CLIENT_ID (ver DEPLOYMENT.md)"
+echo "  cd ~/agile-space-backend && docker compose --profile proxy up -d --build"
