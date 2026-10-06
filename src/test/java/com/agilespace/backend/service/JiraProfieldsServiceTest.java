@@ -261,4 +261,82 @@ class JiraProfieldsServiceTest {
             assertFalse(shape.contains("SEGREDO"));
         }
     }
+
+    @Nested
+    @DisplayName("Confirmação da importação com escolhas da prévia")
+    class ConfirmationTests {
+
+        private ProjectMemberRole member(String acc, String name, String email, String role, boolean lead, String userId) {
+            return ProjectMemberRole.builder().projectId("DDW").jiraAccountId(acc).displayName(name).email(email)
+                    .roleName(role).roleKey(role.toUpperCase().replace(' ', '_')).isLeadership(lead).userId(userId).build();
+        }
+
+        private JiraProfieldsService.ProfieldsSnapshot snapshot() {
+            ProjectConfig project = ProjectConfig.builder().id("DDW").name("DDW").build();
+            return new JiraProfieldsService.ProfieldsSnapshot(project, new java.util.ArrayList<>(List.of(
+                    member("po1", "Ana PO", "ana@x.com", "Product Owner", true, null),
+                    member("dev1", "Beto Dev", "beto@x.com", "Developer", false, null),
+                    member("dev2", "Caio QA", "caio@x.com", "Developer", false, null))));
+        }
+
+        private com.agilespace.backend.dto.ProjectImportConfirmRequest.Member req(String acc, String role, boolean me) {
+            return com.agilespace.backend.dto.ProjectImportConfirmRequest.Member.builder().jiraAccountId(acc).roleName(role).linkToMe(me).build();
+        }
+
+        @Test
+        @DisplayName("Só entram as pessoas selecionadas e o cargo pode mudar para um cargo sem governança")
+        void selectionAndRoleChange() {
+            User me = User.builder().id("u-me").name("Eu").email("eu@x.com").build();
+            var request = com.agilespace.backend.dto.ProjectImportConfirmRequest.builder()
+                    .segmentName("Distribuição").locality("").devTeamSize(12)
+                    .members(List.of(req("dev2", "QA", false), req("po1", "Product Owner", false)))
+                    .build();
+
+            var applied = service.applyConfirmation(snapshot(), request, me);
+
+            assertEquals("Distribuição", applied.project().getSegmentName());
+            assertNull(applied.project().getLocality());          // vazio vira "não informado"
+            assertEquals(12, applied.project().getDevTeamSize());
+            // PO + Caio(QA) + o próprio usuário como Developer (não se selecionou)
+            assertEquals(3, applied.members().size());
+            assertTrue(applied.members().stream().anyMatch(m -> "dev2".equals(m.getJiraAccountId()) && "QA".equals(m.getRoleName()) && !m.isLeadership()));
+            assertTrue(applied.members().stream().noneMatch(m -> "dev1".equals(m.getJiraAccountId())));
+            ProjectMemberRole self = applied.members().stream().filter(m -> "u-me".equals(m.getUserId())).findFirst().orElseThrow();
+            assertEquals("Developer", self.getRoleName());
+            assertFalse(self.isLeadership());
+        }
+
+        @Test
+        @DisplayName("Ninguém se promove a liderança pela prévia: cargo de liderança só se vier do Jira")
+        void noSelfPromotion() {
+            User me = User.builder().id("u-me").name("Eu").email("eu@x.com").build();
+            var request = com.agilespace.backend.dto.ProjectImportConfirmRequest.builder()
+                    .members(List.of(req("dev1", "Agile Master", true)))
+                    .build();
+
+            var applied = service.applyConfirmation(snapshot(), request, me);
+
+            ProjectMemberRole beto = applied.members().stream().filter(m -> "dev1".equals(m.getJiraAccountId())).findFirst().orElseThrow();
+            assertEquals("Developer", beto.getRoleName());       // pedido de Agile Master ignorado
+            assertFalse(beto.isLeadership());
+            assertEquals("u-me", beto.getUserId());              // "sou eu" vincula a conta
+        }
+
+        @Test
+        @DisplayName("Pessoa que o Jira não devolveu não entra e 'sou eu' não rouba conta já vinculada")
+        void unknownIgnoredAndLinkedAccountsProtected() {
+            User me = User.builder().id("u-me").name("Eu").email("eu@x.com").build();
+            var snap = snapshot();
+            snap.members().set(1, member("dev1", "Beto Dev", "beto@x.com", "Developer", false, "u-outro"));
+            var request = com.agilespace.backend.dto.ProjectImportConfirmRequest.builder()
+                    .members(List.of(req("fantasma", "Developer", false), req("dev1", "Developer", true)))
+                    .build();
+
+            var applied = service.applyConfirmation(snap, request, me);
+
+            assertTrue(applied.members().stream().noneMatch(m -> "fantasma".equals(m.getJiraAccountId())));
+            ProjectMemberRole beto = applied.members().stream().filter(m -> "dev1".equals(m.getJiraAccountId())).findFirst().orElseThrow();
+            assertEquals("u-outro", beto.getUserId());           // continua da outra conta
+        }
+    }
 }

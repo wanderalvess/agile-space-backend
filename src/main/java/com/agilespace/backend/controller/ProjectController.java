@@ -108,6 +108,22 @@ public class ProjectController {
         return ResponseEntity.ok(synced);
     }
 
+
+    /**
+     * Confirma a importação com as escolhas do usuário na prévia (campos editados, pessoas selecionadas,
+     * cargos ajustados e vínculo "sou eu"). Reconsulta o Jira; ver JiraProfieldsService#confirmImportFromProfields.
+     */
+    @PostMapping("/sync/{projectKey}/confirm")
+    public ResponseEntity<ProjectDetailDto> confirmSyncProject(
+            @PathVariable String projectKey,
+            @RequestParam(required = false) String domain,
+            @RequestHeader(value = "X-Jira-Token", required = false) String token,
+            @RequestBody com.agilespace.backend.dto.ProjectImportConfirmRequest body,
+            HttpServletRequest httpRequest) {
+        User user = currentUser(httpRequest);
+        return ResponseEntity.ok(jiraProfieldsService.confirmImportFromProfields(domain, projectKey, token, body, user));
+    }
+
     /**
      * Dry-run do sync Profields: devolve o que SERIA importado sem gravar nada.
      */

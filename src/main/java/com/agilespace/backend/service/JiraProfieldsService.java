@@ -103,6 +103,117 @@ public class JiraProfieldsService {
         return toDetailDto(project, members);
     }
 
+
+    /** Cargos sem governança: qualquer um pode ser escolhido na prévia da importação. */
+    private static final Set<String> SELF_ASSIGNABLE_ROLES = Set.of(
+            "DEVELOPER", "DESENVOLVEDOR(A)", "QA", "ANALISTA DE QA", "DESIGNER", "UX", "SME", "STAKEHOLDER / OBSERVADOR");
+
+    /**
+     * Confirma a importação com as escolhas do usuário na prévia. Reconsulta o Jira (fonte de verdade) e só aceita:
+     * (1) editar campos do projeto; (2) escolher QUAIS pessoas entram — somente pessoas que o Jira devolveu;
+     * (3) trocar o cargo para um cargo sem governança, ou manter exatamente o cargo de liderança que o Jira trouxe
+     * (ninguém se promove a liderança pela prévia); (4) marcar "sou eu" numa pessoa ainda sem conta vinculada.
+     * Quem importa e não se selecionou entra como Developer, nunca como liderança.
+     */
+    @Transactional
+    public ProjectDetailDto confirmImportFromProfields(String domain, String projectKey, String token,
+                                                       com.agilespace.backend.dto.ProjectImportConfirmRequest request, User creator) {
+        if (request == null) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, "Dados da importação ausentes");
+        }
+        ProfieldsSnapshot base = fetchProfieldsSnapshot(domain, projectKey, token, creator, false);
+        ProfieldsSnapshot applied = applyConfirmation(base, request, creator);
+        String cleanKey = applied.project().getId();
+        ProjectConfig project = applied.project();
+        List<ProjectMemberRole> chosen = applied.members();
+
+        ProjectConfig saved = projectConfigRepository.save(project);
+        projectMemberRoleRepository.deleteByProjectId(cleanKey);
+        projectMemberRoleRepository.flush();
+        List<ProjectMemberRole> members = projectMemberRoleRepository.saveAll(chosen);
+        projectMemberRoleRepository.flush();
+        return toDetailDto(saved, members);
+    }
+
+
+    /** Parte pura da confirmação: aplica edições e seleção sobre o que o Jira devolveu. Sem acesso a banco ou rede. */
+    ProfieldsSnapshot applyConfirmation(ProfieldsSnapshot snapshot, com.agilespace.backend.dto.ProjectImportConfirmRequest request, User creator) {
+        String cleanKey = snapshot.project().getId();
+        ProjectConfig project = snapshot.project();
+
+        // Campos editados na prévia (vazio = não informado)
+        project.setSegmentName(blankToNull(request.getSegmentName()));
+        project.setTribeName(blankToNull(request.getTribeName()));
+        project.setLocality(blankToNull(request.getLocality()));
+        project.setVicePresident(blankToNull(request.getVicePresident()));
+        project.setVpArea(blankToNull(request.getVpArea()));
+        project.setStatus(blankToNull(request.getStatus()));
+        project.setCreationDate(blankToNull(request.getCreationDate()));
+        if (request.getDevTeamSize() != null && request.getDevTeamSize() > 0) {
+            project.setDevTeamSize(request.getDevTeamSize());
+        }
+
+        Map<String, ProjectMemberRole> byAccount = new HashMap<>();
+        Map<String, ProjectMemberRole> byEmail = new HashMap<>();
+        for (ProjectMemberRole m : snapshot.members()) {
+            if (m.getJiraAccountId() != null && !m.getJiraAccountId().isBlank()) byAccount.putIfAbsent(m.getJiraAccountId(), m);
+            if (m.getEmail() != null && !m.getEmail().isBlank()) byEmail.putIfAbsent(m.getEmail().toLowerCase(java.util.Locale.ROOT), m);
+        }
+
+        List<ProjectMemberRole> chosen = new ArrayList<>();
+        Set<String> taken = new HashSet<>();
+        boolean creatorLinked = false;
+        for (com.agilespace.backend.dto.ProjectImportConfirmRequest.Member req :
+                request.getMembers() == null ? List.<com.agilespace.backend.dto.ProjectImportConfirmRequest.Member>of() : request.getMembers()) {
+            ProjectMemberRole base = req.getJiraAccountId() != null ? byAccount.get(req.getJiraAccountId()) : null;
+            if (base == null && req.getEmail() != null) base = byEmail.get(req.getEmail().toLowerCase(java.util.Locale.ROOT));
+            if (base == null) continue; // pessoa que o Jira não devolveu: não entra
+            String dedupe = base.getJiraAccountId() != null ? base.getJiraAccountId() : String.valueOf(base.getEmail());
+            if (!taken.add(dedupe)) continue;
+
+            String requestedRole = req.getRoleName() == null ? "" : req.getRoleName().trim();
+            String finalRole = base.getRoleName();
+            if (!requestedRole.isEmpty()) {
+                boolean sameAsJira = requestedRole.equalsIgnoreCase(base.getRoleName());
+                boolean selfAssignable = SELF_ASSIGNABLE_ROLES.contains(requestedRole.toUpperCase(java.util.Locale.ROOT));
+                if (sameAsJira || selfAssignable) finalRole = requestedRole;
+            }
+            String upper = finalRole.toUpperCase(java.util.Locale.ROOT);
+            String userId = base.getUserId();
+            if (req.isLinkToMe() && creator != null && (userId == null || userId.equals(creator.getId()))) {
+                userId = creator.getId();
+            }
+            if (creator != null && creator.getId().equals(userId)) creatorLinked = true;
+
+            chosen.add(ProjectMemberRole.builder()
+                    .projectId(cleanKey)
+                    .roleName(finalRole)
+                    .roleKey(upper.replaceAll("[^A-Z0-9]+", "_"))
+                    .jiraAccountId(base.getJiraAccountId())
+                    .displayName(base.getDisplayName())
+                    .email(base.getEmail())
+                    .avatarUrl(base.getAvatarUrl())
+                    .userId(userId)
+                    .isLeadership(LEADERSHIP_ROLE_NAMES.contains(upper))
+                    .build());
+        }
+
+        if (creator != null && !creatorLinked) {
+            chosen.add(ProjectMemberRole.builder()
+                    .projectId(cleanKey)
+                    .roleName("Developer")
+                    .roleKey("DEVELOPER")
+                    .jiraAccountId(creator.getJiraAccountId())
+                    .displayName(creator.getName())
+                    .email(creator.getEmail())
+                    .userId(creator.getId())
+                    .isLeadership(false)
+                    .build());
+        }
+
+        return new ProfieldsSnapshot(project, chosen);
+    }
+
     /**
      * Dry-run do sync: consulta o Profields, monta projeto + membros (inclusive vínculo com usuários
      * já cadastrados e fallback Agile Master do criador) e devolve o DTO SEM gravar nada.
@@ -114,12 +225,16 @@ public class JiraProfieldsService {
         return toDetailDto(snapshot.project(), snapshot.members());
     }
 
-    private record ProfieldsSnapshot(ProjectConfig project, List<ProjectMemberRole> members) {}
+    record ProfieldsSnapshot(ProjectConfig project, List<ProjectMemberRole> members) {}
 
     /**
      * Busca o projeto no Profields e monta as entidades em memória. Não persiste.
      */
     private ProfieldsSnapshot fetchProfieldsSnapshot(String domain, String projectKey, String token, User creator) {
+        return fetchProfieldsSnapshot(domain, projectKey, token, creator, true);
+    }
+
+    private ProfieldsSnapshot fetchProfieldsSnapshot(String domain, String projectKey, String token, User creator, boolean creatorFallback) {
         if (token == null || token.isBlank()) {
             throw new org.springframework.web.server.ResponseStatusException(
                     HttpStatus.BAD_REQUEST, "Token do Jira é obrigatório para sincronizar o projeto");
@@ -186,7 +301,7 @@ public class JiraProfieldsService {
             }
         }
 
-        if (creator != null && members.stream().noneMatch(m -> creator.getId().equals(m.getUserId()))) {
+        if (creatorFallback && creator != null && members.stream().noneMatch(m -> creator.getId().equals(m.getUserId()))) {
             log.warn("Usuário {} ({}) disparou o sync do projeto {} mas não bateu com nenhum membro retornado pelo Profields — vinculando como Agile Master fallback pra não travar o onboarding.",
                     creator.getId(), creator.getEmail(), cleanKey);
             members.add(ProjectMemberRole.builder()
