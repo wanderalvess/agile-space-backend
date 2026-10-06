@@ -157,6 +157,12 @@ public class JiraProfieldsService {
 
         ProjectConfig project = parseProfieldsJson(cleanKey, rootNode);
         List<ProjectMemberRole> members = parseProfieldsMembers(cleanKey, rootNode);
+        // Diagnóstico: só rótulos/estrutura, sem valores. Ajuda a mapear campos que o parser não reconheceu.
+        log.info("Profields {}: estrutura recebida: {}", cleanKey, describeStructure(rootNode));
+        log.info("Profields {}: segmento={} tribo={} localidade={} vp={} status={} devTeam={} membros={}",
+                cleanKey, project.getSegmentName() != null, project.getTribeName() != null,
+                project.getLocality() != null, project.getVpArea() != null, project.getStatus() != null,
+                project.getDevTeamSize(), members.size());
 
         for (ProjectMemberRole m : members) {
             // Tenta vincular com usuário do banco se já existir
@@ -285,36 +291,27 @@ public class JiraProfieldsService {
         // Profields Layout contém "fields" ou "sections"
         Map<String, JsonNode> fieldMap = new HashMap<>();
         collectFields(root, fieldMap);
+        Map<String, JsonNode> norm = normalizeKeys(fieldMap);
 
-        // 1. Informações Gerais
-        if (fieldMap.containsKey("Segmento Projeto")) {
-            project.setSegmentName(extractTextValue(fieldMap.get("Segmento Projeto")));
-        }
-        if (fieldMap.containsKey("Localidade")) {
-            project.setLocality(extractTextValue(fieldMap.get("Localidade")));
-        }
-        if (fieldMap.containsKey("Tribo")) {
-            project.setTribeName(extractTextValue(fieldMap.get("Tribo")));
-        }
-        if (fieldMap.containsKey("Vice-Presidente")) {
-            project.setVicePresident(extractUserOrText(fieldMap.get("Vice-Presidente")));
-        }
-        if (fieldMap.containsKey("VP")) {
-            project.setVpArea(extractTextValue(fieldMap.get("VP")));
-        }
+        // 1. Informações Gerais (rótulos comparados sem acento/caixa/pontuação, com sinônimos)
+        JsonNode segment = findField(norm, "Segmento Projeto", "Segmento do Projeto", "Segmento");
+        if (segment != null) project.setSegmentName(extractTextValue(segment));
+        JsonNode locality = findField(norm, "Localidade", "Localização", "Local");
+        if (locality != null) project.setLocality(extractTextValue(locality));
+        JsonNode tribe = findField(norm, "Tribo", "Tribe", "Tribo do Projeto");
+        if (tribe != null) project.setTribeName(extractTextValue(tribe));
+        JsonNode vicePresident = findField(norm, "Vice-Presidente", "Vice Presidente", "Vice-Presidência");
+        if (vicePresident != null) project.setVicePresident(extractUserOrText(vicePresident));
+        JsonNode vpArea = findField(norm, "VP", "Área VP", "Area do VP", "VP Área");
+        if (vpArea != null) project.setVpArea(extractTextValue(vpArea));
 
         // 2. Status e Números
-        if (fieldMap.containsKey("Dev Team") || fieldMap.containsKey("Número de Pessoas no DevTeam")) {
-            JsonNode devTeamNode = fieldMap.getOrDefault("Dev Team", fieldMap.get("Número de Pessoas no DevTeam"));
-            project.setDevTeamSize(extractNumericValue(devTeamNode));
-        }
-        if (fieldMap.containsKey("Status Projeto") || fieldMap.containsKey("Status")) {
-            JsonNode statusNode = fieldMap.getOrDefault("Status Projeto", fieldMap.get("Status"));
-            project.setStatus(extractTextValue(statusNode));
-        }
-        if (fieldMap.containsKey("Data de Criação")) {
-            project.setCreationDate(extractTextValue(fieldMap.get("Data de Criação")));
-        }
+        JsonNode devTeamNode = findField(norm, "Dev Team", "Número de Pessoas no DevTeam", "Numero de Pessoas no Dev Team", "DevTeam");
+        if (devTeamNode != null) project.setDevTeamSize(extractNumericValue(devTeamNode));
+        JsonNode statusNode = findField(norm, "Status Projeto", "Status do Projeto", "Status");
+        if (statusNode != null) project.setStatus(extractTextValue(statusNode));
+        JsonNode created = findField(norm, "Data de Criação", "Data Criação", "Criado em");
+        if (created != null) project.setCreationDate(extractTextValue(created));
 
         // 3. Campos de Validações de Fluxo
         if (fieldMap.containsKey("Documentação Automática TDN")) {
@@ -346,6 +343,7 @@ public class JiraProfieldsService {
         List<ProjectMemberRole> members = new ArrayList<>();
         Map<String, JsonNode> fieldMap = new HashMap<>();
         collectFields(root, fieldMap);
+        Map<String, JsonNode> norm = normalizeKeys(fieldMap);
 
         // Mapeamento dos papéis oficiais
         Map<String, String> roleDefinitions = new LinkedHashMap<>();
@@ -362,8 +360,8 @@ public class JiraProfieldsService {
             String roleName = entry.getKey();
             String roleKey = entry.getValue();
 
-            if (fieldMap.containsKey(roleName)) {
-                JsonNode valNode = fieldMap.get(roleName);
+            JsonNode valNode = findField(norm, roleName, roleName + "s", roleName.replace(" ", "-"));
+            if (valNode != null) {
                 List<MemberExtracted> extracted = extractUsersFromNode(valNode);
                 for (MemberExtracted m : extracted) {
                     members.add(ProjectMemberRole.builder()
@@ -383,13 +381,23 @@ public class JiraProfieldsService {
         return members;
     }
 
+    /** Chaves que costumam guardar o rótulo do campo no layout do Profields. */
+    private static final List<String> LABEL_KEYS = List.of("name", "label", "title", "fieldName", "displayName");
+    /** Chaves que costumam guardar o valor do campo. */
+    private static final List<String> VALUE_KEYS = List.of("value", "values", "text", "displayValue", "selectedValue");
+
     private void collectFields(JsonNode node, Map<String, JsonNode> fieldMap) {
         if (node == null) return;
-        if (node.has("name") && (node.has("value") || node.has("values") || node.has("text"))) {
-            fieldMap.put(node.get("name").asText().trim(), node);
-        }
-        if (node.has("label") && (node.has("value") || node.has("values"))) {
-            fieldMap.put(node.get("label").asText().trim(), node);
+        if (node.isObject()) {
+            boolean hasValue = VALUE_KEYS.stream().anyMatch(node::has);
+            if (hasValue) {
+                for (String key : LABEL_KEYS) {
+                    JsonNode label = node.get(key);
+                    if (label != null && label.isTextual() && !label.asText().isBlank()) {
+                        fieldMap.putIfAbsent(label.asText().trim(), node);
+                    }
+                }
+            }
         }
         if (node.isArray()) {
             for (JsonNode child : node) {
@@ -404,16 +412,91 @@ public class JiraProfieldsService {
         }
     }
 
+    /** "Área do VP:" -> "areadovp": sem acento, caixa, espaço ou pontuação. */
+    static String normalizeLabel(String label) {
+        if (label == null) return "";
+        String decomposed = java.text.Normalizer.normalize(label, java.text.Normalizer.Form.NFD);
+        return decomposed.replaceAll("\\p{M}+", "").toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]", "");
+    }
+
+    private static Map<String, JsonNode> normalizeKeys(Map<String, JsonNode> fieldMap) {
+        Map<String, JsonNode> norm = new LinkedHashMap<>();
+        fieldMap.forEach((label, node) -> norm.putIfAbsent(normalizeLabel(label), node));
+        return norm;
+    }
+
+    private static JsonNode findField(Map<String, JsonNode> norm, String... labels) {
+        for (String label : labels) {
+            JsonNode node = norm.get(normalizeLabel(label));
+            if (node != null) return node;
+        }
+        return null;
+    }
+
+    /**
+     * Resumo da forma do JSON do Profields para diagnóstico: caminhos e rótulos de campo, NUNCA valores
+     * (os valores podem conter nomes de pessoas). Limitado a ~4000 caracteres.
+     */
+    static String describeStructure(JsonNode root) {
+        Set<String> paths = new LinkedHashSet<>();
+        walkStructure(root, "$", paths, 0);
+        String joined = String.join(" ; ", paths);
+        return joined.length() > 4000 ? joined.substring(0, 4000) + "…" : joined;
+    }
+
+    private static void walkStructure(JsonNode node, String path, Set<String> paths, int depth) {
+        if (node == null || depth > 8) return;
+        if (node.isArray()) {
+            for (JsonNode child : node) walkStructure(child, path + "[]", paths, depth + 1);
+        } else if (node.isObject()) {
+            for (String key : LABEL_KEYS) {
+                JsonNode label = node.get(key);
+                if (label != null && label.isTextual()) {
+                    paths.add(path + "{" + key + "=" + label.asText() + ", chaves=" + keyNames(node) + "}");
+                }
+            }
+            node.fields().forEachRemaining(e -> {
+                if (e.getValue().isContainerNode()) walkStructure(e.getValue(), path + "." + e.getKey(), paths, depth + 1);
+            });
+        }
+    }
+
+    private static String keyNames(JsonNode node) {
+        List<String> names = new ArrayList<>();
+        node.fieldNames().forEachRemaining(names::add);
+        return names.toString();
+    }
+
     private String extractTextValue(JsonNode node) {
         if (node == null || node.isNull()) return null;
-        if (node.has("value")) {
-            JsonNode v = node.get("value");
-            if (v.isTextual()) return v.asText();
-            if (v.has("name")) return v.get("name").asText();
-            if (v.has("value")) return v.get("value").asText();
+        for (String key : VALUE_KEYS) {
+            if (!node.has(key)) continue;
+            String text = textOf(node.get(key));
+            if (text != null && !text.isBlank()) return text;
         }
-        if (node.has("text")) return node.get("text").asText();
-        if (node.isTextual()) return node.asText();
+        return node.isTextual() ? node.asText() : null;
+    }
+
+    /** Texto de um valor que pode ser string, número, objeto de opção ({name|label|value|displayName}) ou lista deles. */
+    private String textOf(JsonNode v) {
+        if (v == null || v.isNull()) return null;
+        if (v.isTextual() || v.isNumber() || v.isBoolean()) return v.asText();
+        if (v.isArray()) {
+            List<String> parts = new ArrayList<>();
+            for (JsonNode item : v) {
+                String t = textOf(item);
+                if (t != null && !t.isBlank()) parts.add(t);
+            }
+            return parts.isEmpty() ? null : String.join(", ", parts);
+        }
+        if (v.isObject()) {
+            for (String key : List.of("name", "label", "value", "displayName", "title", "text")) {
+                if (v.has(key)) {
+                    String t = textOf(v.get(key));
+                    if (t != null && !t.isBlank()) return t;
+                }
+            }
+        }
         return null;
     }
 

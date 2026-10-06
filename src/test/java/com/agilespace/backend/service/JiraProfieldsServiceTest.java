@@ -20,6 +20,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -130,6 +133,58 @@ class JiraProfieldsServiceTest {
             verify(projectMemberRoleRepository).save(captor.capture());
             assertFalse(captor.getValue().isLeadership());
             assertEquals("DEVELOPER", captor.getValue().getRoleKey());
+        }
+    }
+
+    @Nested
+    @DisplayName("Parser tolerante do layout do Profields")
+    class ParserTests {
+
+        private final ObjectMapper mapper = new ObjectMapper();
+
+        private ProjectConfig parse(String json) throws Exception {
+            when(projectConfigRepository.findById("DDW")).thenReturn(Optional.empty());
+            Method m = JiraProfieldsService.class.getDeclaredMethod("parseProfieldsJson", String.class, JsonNode.class);
+            m.setAccessible(true);
+            return (ProjectConfig) m.invoke(service, "DDW", mapper.readTree(json));
+        }
+
+        @Test
+        @DisplayName("Normaliza rótulos: sem acento, caixa ou pontuação")
+        void normalizesLabels() {
+            assertEquals("areadovp", JiraProfieldsService.normalizeLabel("Área do VP:"));
+            assertEquals("segmentoprojeto", JiraProfieldsService.normalizeLabel("  SEGMENTO   Projeto "));
+            assertEquals("vicepresidente", JiraProfieldsService.normalizeLabel("Vice-Presidente"));
+        }
+
+        @Test
+        @DisplayName("Reconhece campos com acento/caixa diferentes e valores em objeto ou lista")
+        void parsesVariantLabelsAndValueShapes() throws Exception {
+            ProjectConfig p = parse("""
+                {"sections":[{"title":"Geral","fields":[
+                  {"label":"SEGMENTO PROJETO","value":{"name":"Varejo"}},
+                  {"title":"Tribo:","values":[{"label":"Distribuição"}]},
+                  {"fieldName":"Localização","text":"Joinville"},
+                  {"name":"Área VP","value":"Operações"},
+                  {"name":"Número de Pessoas no Dev Team","value":"12 pessoas"},
+                  {"name":"Status do Projeto","value":{"value":"EM ANDAMENTO"}}
+                ]}]}
+                """);
+            assertEquals("Varejo", p.getSegmentName());
+            assertEquals("Distribuição", p.getTribeName());
+            assertEquals("Joinville", p.getLocality());
+            assertEquals("Operações", p.getVpArea());
+            assertEquals(12, p.getDevTeamSize());
+            assertEquals("EM ANDAMENTO", p.getStatus());
+        }
+
+        @Test
+        @DisplayName("Resumo de diagnóstico traz rótulos e chaves, nunca valores")
+        void describeStructureHasNoValues() throws Exception {
+            JsonNode root = mapper.readTree("{\"fields\":[{\"name\":\"Tribo\",\"value\":\"SEGREDO-NOME-DE-PESSOA\"}]}");
+            String outline = JiraProfieldsService.describeStructure(root);
+            assertTrue(outline.contains("name=Tribo"));
+            assertFalse(outline.contains("SEGREDO-NOME-DE-PESSOA"));
         }
     }
 }
