@@ -19,9 +19,11 @@ if ! command -v docker >/dev/null; then
 fi
 
 # Imagem Ubuntu da Oracle vem com iptables REJECT antes das regras; inserir 80/443 antes dele.
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
-sudo apt-get install -y iptables-persistent
+REJECT_N=$(sudo iptables -L INPUT --line-numbers -n | awk '/REJECT/ {print $1; exit}')
+REJECT_N=${REJECT_N:-5}
+sudo iptables -I INPUT "$REJECT_N" -m state --state NEW -p tcp --dport 80 -j ACCEPT
+sudo iptables -I INPUT "$REJECT_N" -m state --state NEW -p tcp --dport 443 -j ACCEPT
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
 sudo netfilter-persistent save
 
 # Repos lado a lado (o compose usa ../agile-space-frontend)
