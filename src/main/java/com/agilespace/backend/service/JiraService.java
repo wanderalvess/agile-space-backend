@@ -355,6 +355,42 @@ public class JiraService {
     }
 
 
+
+    /**
+     * Busca um caso de teste do Zephyr Scale/ATM (/rest/atm/1.0/testcase/{key}). Só leitura, com o token do próprio usuário.
+     */
+    public ResponseEntity<String> getTestCase(String domain, String token, String testCaseKey) {
+        String cleanDomain = domain.trim().replace("https://", "").replace("http://", "");
+        String key = testCaseKey.trim();
+        if (!key.matches("[A-Za-z0-9_-]{1,60}")) {
+            return ResponseEntity.badRequest().body("{\"error\": \"Código de caso de teste inválido.\"}");
+        }
+        URI jiraUri;
+        try {
+            jiraUri = new URI("https://" + cleanDomain + "/rest/atm/1.0/testcase/" + key);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("{\"error\": \"Erro ao construir URL do Jira: " + e.getMessage() + "\"}");
+        }
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", "Bearer " + token.trim());
+        headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+        headers.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+        headers.set("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7");
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+        try {
+            ResponseEntity<String> response = exchangeSecure(jiraUri, entity, String.class);
+            return ResponseEntity.ok(response.getBody());
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            log.warn("Jira testcase {} failed with status {}", key, e.getStatusCode());
+            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+        } catch (Exception e) {
+            log.warn("Jira testcase {} failed: {}", key, e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("{\"error\": \"Erro ao buscar o caso de teste no Jira: " + e.getMessage() + "\"}");
+        }
+    }
+
     /**
      * Lista os quadros Scrum de um projeto (/rest/agile/1.0/board?projectKeyOrId=KEY&type=scrum), para descobrir o
      * rapidViewId sem o usuário precisar digitar. Devolve o JSON do Jira ({values:[{id,name,type}]}).

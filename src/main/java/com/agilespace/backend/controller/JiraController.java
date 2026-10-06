@@ -85,4 +85,15 @@ public class JiraController {
         }
         return jiraService.listScrumBoards(domain, token, projectKey);
     }
+
+    @PostMapping("/testcase")
+    public ResponseEntity<String> getTestCase(@RequestBody java.util.Map<String, String> body) {
+        String domain = body.get("domain");
+        String token = body.getOrDefault("pat", body.get("token"));
+        String key = body.get("testCaseKey");
+        if (domain == null || domain.isBlank() || token == null || token.isBlank() || key == null || key.isBlank()) {
+            return ResponseEntity.badRequest().body("{\"error\": \"Domínio do Jira, token e código do caso de teste são obrigatórios.\"}");
+        }
+        return jiraService.getTestCase(domain, token, key);
+    }
 }
