@@ -28,6 +28,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -175,12 +176,19 @@ class PokerServiceTest {
                     .role("SCRUM_MASTER")
                     .build();
 
-            when(participantRepository.save(any(PokerParticipant.class))).thenAnswer(i -> i.getArgument(0));
+            when(participantRepository.findById("room-123_user-wanderson")).thenAnswer(i -> Optional.of(participant));
 
             PokerParticipant joined = service.joinRoom(participant);
 
             assertEquals("room-123_user-wanderson", joined.getDbId());
-            verify(participantRepository).save(participant);
+            // upsert idempotente: duas entradas simultâneas não violam a PK
+            verify(participantRepository).upsertParticipant(
+                    eq("room-123_user-wanderson"), eq("user-wanderson"), eq("room-123"), eq("Wanderson"),
+                    any(), eq("SCRUM_MASTER"), any(), any(), anyString());
+            // lastSeen deve ser UTC de verdade (sufixo Z), não hora local rotulada como Z
+            assertTrue(joined.getLastSeen().endsWith("Z"));
+            long driftMs = Math.abs(java.time.Instant.parse(joined.getLastSeen()).toEpochMilli() - System.currentTimeMillis());
+            assertTrue(driftMs < 5000, "lastSeen fora do instante atual: " + driftMs + "ms");
             verify(webSocketHandler).broadcastEvent(eq("room-123"), eq("PARTICIPANT_JOINED"), eq(joined));
         }
 
@@ -209,6 +217,8 @@ class PokerServiceTest {
             service.updateHeartbeat("room-123", "user-1");
 
             assertNotNull(participant.getLastSeen());
+            long driftMs = Math.abs(java.time.Instant.parse(participant.getLastSeen()).toEpochMilli() - System.currentTimeMillis());
+            assertTrue(driftMs < 5000, "heartbeat fora do instante atual: " + driftMs + "ms");
             verify(participantRepository).save(participant);
         }
 

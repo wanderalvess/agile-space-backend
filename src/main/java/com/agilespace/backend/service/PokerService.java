@@ -147,16 +147,34 @@ public class PokerService {
     public PokerParticipant joinRoom(PokerParticipant participant) {
         String dbId = participant.getRoomId() + "_" + participant.getId();
         participant.setDbId(dbId);
-        PokerParticipant saved = participantRepository.save(participant);
+        participant.setLastSeen(nowUtcIso());
+        participantRepository.upsertParticipant(
+                dbId,
+                participant.getId(),
+                participant.getRoomId(),
+                participant.getNickname(),
+                participant.getEmail(),
+                participant.getRole(),
+                participant.getIsFacilitator(),
+                participant.getGlobalRole(),
+                participant.getLastSeen());
+        PokerParticipant saved = participantRepository.findById(dbId).orElse(participant);
         webSocketHandler.broadcastEvent(participant.getRoomId(), "PARTICIPANT_JOINED", saved);
         return saved;
+    }
+
+    /** Instante atual em UTC no formato ISO-8601 com milissegundos e sufixo Z (o 'Z' precisa ser verdadeiro). */
+    private static String nowUtcIso() {
+        return java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+                .withZone(java.time.ZoneOffset.UTC)
+                .format(java.time.Instant.now());
     }
 
     @Transactional
     public void updateHeartbeat(String roomId, String userId) {
         String dbId = roomId + "_" + userId;
         participantRepository.findById(dbId).ifPresent(p -> {
-            p.setLastSeen(new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").format(new java.util.Date()));
+            p.setLastSeen(nowUtcIso());
             participantRepository.save(p);
         });
     }
