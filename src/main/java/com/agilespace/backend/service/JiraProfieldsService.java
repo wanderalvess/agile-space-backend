@@ -158,6 +158,9 @@ public class JiraProfieldsService {
         ProjectConfig project = parseProfieldsJson(cleanKey, rootNode);
         List<ProjectMemberRole> members = parseProfieldsMembers(cleanKey, rootNode);
         // Diagnóstico: só rótulos/estrutura, sem valores. Ajuda a mapear campos que o parser não reconheceu.
+        Map<String, JsonNode> receivedFields = new HashMap<>();
+        collectFields(rootNode, receivedFields);
+        log.info("Profields {}: rotulos de campo recebidos: {}", cleanKey, receivedFields.keySet());
         log.info("Profields {}: estrutura recebida: {}", cleanKey, describeStructure(rootNode));
         log.info("Profields {}: segmento={} tribo={} localidade={} vp={} status={} devTeam={} membros={}",
                 cleanKey, project.getSegmentName() != null, project.getTribeName() != null,
@@ -441,11 +444,11 @@ public class JiraProfieldsService {
         Set<String> paths = new LinkedHashSet<>();
         walkStructure(root, "$", paths, 0);
         String joined = String.join(" ; ", paths);
-        return joined.length() > 4000 ? joined.substring(0, 4000) + "…" : joined;
+        return joined.length() > 9000 ? joined.substring(0, 9000) + "…" : joined;
     }
 
     private static void walkStructure(JsonNode node, String path, Set<String> paths, int depth) {
-        if (node == null || depth > 8) return;
+        if (node == null || depth > 20) return;
         if (node.isArray()) {
             for (JsonNode child : node) walkStructure(child, path + "[]", paths, depth + 1);
         } else if (node.isObject()) {
