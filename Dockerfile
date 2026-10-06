@@ -9,10 +9,11 @@ COPY src ./src
 RUN mvn -B clean package -DskipTests
 
 # --- Runtime stage ---
-FROM eclipse-temurin:17-jre-alpine
+# noble (Ubuntu) em vez de alpine: 17-jre-alpine nao tem manifest arm64 (falha em VM ARM, ex. Oracle A1).
+FROM eclipse-temurin:17-jre-noble
 WORKDIR /app
 
-RUN addgroup -S spring && adduser -S spring -G spring
+RUN groupadd -r spring && useradd -r -g spring spring
 
 # Agente Java do OpenTelemetry: sempre presente na imagem, mas inerte por padrão. Ativado só
 # via OTEL_JAVAAGENT_ENABLED=true (ver docker-compose.yml/DEPLOYMENT.md) — sem isso, o agente
