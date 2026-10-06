@@ -53,6 +53,33 @@ Limites do que isso prova: foi o mesmo usuário nas duas conexões e o canal foi
 
 ---
 
+## 2b. Teste funcional pela interface — executado em 2026-10-06
+
+Feito no navegador, com a sessão ADMIN, criando só dados de teste ("SMOKE TEST ... (apagar)").
+
+| # | Fluxo | Resultado |
+|---|---|---|
+| ✅ | **Poker**: criar sala, adicionar tarefa manual, iniciar refinamento, votar, revelar | funcionou; estimativa calculada (5 h) |
+| ✅ | Validação de formulário (título obrigatório na sala) | bloqueia e avisa |
+| ✅ | **Retro**: criar quadro, escrever card, revelar cards | funcionou |
+| ✅ | Persistência: recarregar a página da retro | card e estado mantidos |
+| ✅ | **Chat da retro**: enviar mensagem | enviada e exibida |
+| ✅ | Carga sem erro de API: `/painel`, `/admin`, `/retro`, `/room`, `/showcase`, `/health-check`, `/brainstorming`, `/action-plan`, `/workspace`, `/prompt-hub`, `/squad`, `/squad/roster`, `/squad/dashboards`, `/jiradash`, `/governance`, `/changelog`, `/sprint-planner` | todas renderizam |
+
+### Bugs e pontos encontrados
+
+1. 🟡 **Chamada inútil com 400 no chat de conhecimento** (`/knowledge`). A landing gera um slug local de 10 caracteres (`crypto.randomUUID().slice(0, 10)`, [knowledge/chat/page.tsx:11](../agile-space-frontend/src/app/knowledge/chat/page.tsx)) e a página chama `GET /api/knowledge/conversations/{id}`, que exige UUID, então sempre dá `400`. **Não quebra o chat**: o erro cai num `catch`, a sessão abre vazia e a conversa é criada no backend (com UUID real) no primeiro envio. Correção feita no frontend (ainda sem deploy): não buscar quando o id não é UUID. Não verificado em produção; o chat de IA também não foi exercitado (sem chave de IA na VM).
+2. 🟠 **Jira acessível da VM?** A sincronização exige domínio Jira e token (PAT). Se o Jira da TOTVS for interno ou atrás de VPN, esta VM na internet pública **não alcança**. Não testado (sem credenciais). Confirmar antes de produção.
+3. 🟡 **404 recorrentes no console**: `/api/users/{id}/jira-config` e `/tdn-config` devolvem 404 quando o usuário não configurou. Funciona, mas polui o console e os logs. Melhor devolver 200 vazio ou 204.
+4. 🟡 **Requisições com id vazio** ao abrir o painel: `GET /api/squads//rollup`, `/issues`, `/members` (404) disparam antes de o squad ser resolvido. Inofensivo, mas indica carga antes da hora.
+5. 🟡 **`GET /api/squads/DDWMISSI` e `/rollup` retornam 404** no squad novo sem Jira conectado. Esperado sem sincronização, mas as telas de squad ficam vazias; confirmar com o Jira conectado.
+6. 🟡 **Poker e Retro não têm endpoint para apagar sala/quadro** (só participantes, votos, cards). Salas de teste só saem com a limpeza do banco. Para produção, avaliar se é intencional.
+7. 🟡 **Telas lentas na primeira pintura**: `/room`, `/retro` e o modal "Nova sessão" demoram alguns segundos animando o fade-in antes de ficarem clicáveis (observado no navegador embutido, 2 OCPU). Vale medir em máquina comum.
+
+Não coberto: Showcase (criação), Brainstorming pela interface, sprint-planner (criação), Jolt, Prompt Hub (criar item), Workspace (criar quadro), importação do Jira, chat de IA (sem chave de IA configurada na VM).
+
+---
+
 ## 3. Testes manuais — 🔒 ainda pendentes (precisam de conta de teste ou de outra pessoa)
 
 - ⬜ Cadastro com e-mail `@totvs.com.br` funciona e entra.
