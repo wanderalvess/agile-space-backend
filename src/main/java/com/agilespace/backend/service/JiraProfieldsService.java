@@ -148,8 +148,11 @@ public class JiraProfieldsService {
                         HttpStatus.BAD_GATEWAY, "Jira Profields retornou resposta inválida para o projeto " + cleanKey);
             }
             rootNode = objectMapper.readTree(response.getBody());
-            probeValueEndpoints(restTemplate, entity, cleanDomain, cleanKey);
-            probeIssueLevelCustomFields(restTemplate, entity, cleanDomain, cleanKey, rootNode);
+            JsonNode valuesNode = fetchProfieldsValues(restTemplate, entity, cleanDomain, cleanKey);
+            if (valuesNode != null) {
+                log.info("Profields {}: forma da resposta de valores: {}", cleanKey, describeShapeWithTypes(valuesNode));
+                rootNode = toSyntheticFields(rootNode, valuesNode);
+            }
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
         } catch (Exception e) {
@@ -428,121 +431,127 @@ public class JiraProfieldsService {
         }
     }
 
-    /**
-     * DIAGNÓSTICO TEMPORÁRIO: o endpoint de layout do Profields devolve só as definições dos campos, sem valores.
-     * Testa endpoints candidatos (somente GET, com o token do próprio usuário) e registra status e FORMA da
-     * resposta (nomes de chave e contagens), nunca os valores. Remover quando o endpoint de valores for identificado.
-     */
-    private void probeValueEndpoints(RestTemplate rt, HttpEntity<Void> entity, String domain, String key) {
-        String base = "https://" + domain;
-        String projectId = null;
-        try {
-            ResponseEntity<String> core = rt.exchange(base + "/rest/api/2/project/" + key, HttpMethod.GET, entity, String.class);
-            JsonNode coreNode = objectMapper.readTree(core.getBody());
-            projectId = coreNode.has("id") ? coreNode.get("id").asText() : null;
-            log.info("PROBE core /rest/api/2/project/{} -> {} id={} chaves={}", key, core.getStatusCode().value(), projectId, keyNames(coreNode));
-        } catch (Exception e) {
-            log.info("PROBE core /rest/api/2/project/{} -> falhou: {}", key, e.getClass().getSimpleName());
-        }
 
-        List<String> paths = new ArrayList<>(List.of(
-                "/rest/profields/api/2.0/layouts/projects/" + key + "?expand=predefined,values",
-                "/rest/profields/api/2.0/layouts/projects/" + key + "?expand=values",
-                "/rest/profields/api/2.0/layouts/projects/" + key + "/values",
-                "/rest/profields/api/2.0/values/projects/" + key,
-                "/rest/profields/api/2.0/projects/" + key,
-                "/rest/profields/api/2.0/projects/" + key + "/values",
-                "/rest/profields/api/2.0/fields/projects/" + key,
-                "/rest/api/2/project/" + key + "/properties"));
-        if (projectId != null) {
-            paths.add("/rest/profields/api/2.0/values/projects/" + projectId);
-            paths.add("/rest/profields/api/2.0/projects/" + projectId);
-            paths.add("/rest/profields/api/2.0/projects/" + projectId + "/values");
-        }
-        for (String path : paths) {
-            try {
-                ResponseEntity<String> r = rt.exchange(base + path, HttpMethod.GET, entity, String.class);
-                String body = r.getBody() == null ? "" : r.getBody();
-                String shape;
-                try {
-                    JsonNode n = objectMapper.readTree(body);
-                    int withValue = countValueNodes(n);
-                    shape = "chaves=" + (n.isObject() ? keyNames(n) : "array[" + n.size() + "]") + " nosComValor=" + withValue;
-                } catch (Exception notJson) {
-                    shape = "nao-json bytes=" + body.length();
-                }
-                log.info("PROBE {} -> {} {}", path, r.getStatusCode().value(), shape);
-            } catch (org.springframework.web.client.HttpStatusCodeException e) {
-                log.info("PROBE {} -> {}", path, e.getStatusCode().value());
-            } catch (Exception e) {
-                log.info("PROBE {} -> falhou: {}", path, e.getClass().getSimpleName());
-            }
+    /** Endpoint de valores do Profields: GET /rest/profields/api/2.0/values/projects/{key} (lista de valores por campo). */
+    private JsonNode fetchProfieldsValues(RestTemplate rt, HttpEntity<Void> entity, String domain, String key) {
+        try {
+            String url = "https://" + domain + "/rest/profields/api/2.0/values/projects/" + key;
+            ResponseEntity<String> r = rt.exchange(url, HttpMethod.GET, entity, String.class);
+            if (!r.getStatusCode().is2xxSuccessful() || r.getBody() == null) return null;
+            return objectMapper.readTree(r.getBody());
+        } catch (Exception e) {
+            log.warn("Profields {}: não foi possível ler os valores dos campos: {}", key, e.getMessage());
+            return null;
         }
     }
 
-
     /**
-     * DIAGNÓSTICO TEMPORÁRIO: o layout lista, por campo, um customFieldId. Se o Profields expõe os valores do projeto
-     * como campos personalizados, uma issue do projeto devolve esses customfield_X. Registra só se vieram preenchidos.
+     * Junta layout (definições dos campos) com valores num JSON simples [{name, value}] que o parser entende.
+     * O valor é associado ao campo pelo nome embutido no próprio item ou pelo id (fieldId / field.id / customFieldId)
+     * cruzado com os ids do layout.
      */
-    private void probeIssueLevelCustomFields(RestTemplate rt, HttpEntity<Void> entity, String domain, String key, JsonNode layout) {
-        try {
-            Map<String, String> idByLabel = new LinkedHashMap<>();
-            collectCustomFieldIds(layout, idByLabel);
-            Set<String> wanted = Set.of("segmentoprojeto", "tribo", "vp", "localidade", "vicepresidente", "agilemaster",
-                    "productowner", "devteam", "statusprojeto", "peoplelead", "tribelead");
-            Map<String, String> chosen = new LinkedHashMap<>();
-            idByLabel.forEach((label, id) -> { if (wanted.contains(normalizeLabel(label))) chosen.put(label, id); });
-            if (chosen.isEmpty()) {
-                log.info("PROBE issue-level: nenhum customFieldId nos campos de interesse");
-                return;
-            }
-            String fields = String.join(",", chosen.values());
-            String url = "https://" + domain + "/rest/api/2/search?jql=project%3D" + key + "&maxResults=3&fields=" + fields;
-            JsonNode res = objectMapper.readTree(rt.exchange(url, HttpMethod.GET, entity, String.class).getBody());
-            JsonNode issues = res.get("issues");
-            log.info("PROBE issue-level: issues={} campos={}", issues == null ? 0 : issues.size(), chosen);
-            if (issues != null) {
-                for (JsonNode issue : issues) {
-                    JsonNode f = issue.get("fields");
-                    List<String> filled = new ArrayList<>();
-                    chosen.forEach((label, id) -> {
-                        JsonNode v = f == null ? null : f.get(id);
-                        if (v != null && !v.isNull()) filled.add(label);
-                    });
-                    log.info("PROBE issue-level {}: preenchidos={}", issue.path("key").asText(), filled);
-                }
-            }
-        } catch (Exception e) {
-            log.info("PROBE issue-level falhou: {}", e.getClass().getSimpleName());
-        }
+    JsonNode toSyntheticFields(JsonNode layout, JsonNode values) {
+        Map<String, String> nameById = new HashMap<>();
+        indexLayoutFieldIds(layout, nameById);
+
+        com.fasterxml.jackson.databind.node.ArrayNode out = objectMapper.createArrayNode();
+        collectValueItems(values, nameById, out, 0);
+        return out;
     }
 
-    private void collectCustomFieldIds(JsonNode node, Map<String, String> out) {
+    private void indexLayoutFieldIds(JsonNode node, Map<String, String> nameById) {
         if (node == null) return;
         if (node.isObject()) {
             JsonNode field = node.get("field");
-            if (field != null && field.isObject() && field.has("name") && field.has("customFieldId")) {
-                String id = field.get("customFieldId").asText();
-                out.putIfAbsent(field.get("name").asText(), id.startsWith("customfield_") ? id : "customfield_" + id);
+            if (field != null && field.isObject() && field.has("name")) {
+                String name = field.get("name").asText();
+                for (String idKey : List.of("id", "customFieldId")) {
+                    if (field.has(idKey) && !field.get(idKey).isNull()) {
+                        String id = field.get(idKey).asText();
+                        nameById.putIfAbsent(id, name);
+                        nameById.putIfAbsent(id.replace("customfield_", ""), name);
+                    }
+                }
             }
-            node.fields().forEachRemaining(e -> collectCustomFieldIds(e.getValue(), out));
+            node.fields().forEachRemaining(e -> indexLayoutFieldIds(e.getValue(), nameById));
         } else if (node.isArray()) {
-            for (JsonNode c : node) collectCustomFieldIds(c, out);
+            for (JsonNode c : node) indexLayoutFieldIds(c, nameById);
         }
     }
 
-    private int countValueNodes(JsonNode node) {
-        if (node == null) return 0;
-        int n = 0;
-        if (node.isObject()) {
-            if (VALUE_KEYS.stream().anyMatch(node::has)) n++;
-            var it = node.elements();
-            while (it.hasNext()) n += countValueNodes(it.next());
-        } else if (node.isArray()) {
-            for (JsonNode c : node) n += countValueNodes(c);
+    private void collectValueItems(JsonNode node, Map<String, String> nameById, com.fasterxml.jackson.databind.node.ArrayNode out, int depth) {
+        if (node == null || depth > 6) return;
+        if (node.isArray()) {
+            for (JsonNode c : node) collectValueItems(c, nameById, out, depth + 1);
+            return;
         }
-        return n;
+        if (!node.isObject()) return;
+
+        JsonNode value = null;
+        for (String vk : VALUE_KEYS) {
+            if (node.has(vk)) { value = node.get(vk); break; }
+        }
+        if (value != null) {
+            String label = null;
+            for (String lk : LABEL_KEYS) {
+                if (node.has(lk) && node.get(lk).isTextual()) { label = node.get(lk).asText(); break; }
+            }
+            if (label == null && node.has("field") && node.get("field").isObject() && node.get("field").has("name")) {
+                label = node.get("field").get("name").asText();
+            }
+            if (label == null) {
+                for (String idKey : List.of("fieldId", "customFieldId", "id")) {
+                    if (node.has(idKey) && !node.get(idKey).isNull()) {
+                        String id = node.get(idKey).asText();
+                        label = nameById.getOrDefault(id, nameById.get(id.replace("customfield_", "")));
+                        if (label != null) break;
+                    }
+                }
+                if (label == null && node.has("field") && node.get("field").isObject()) {
+                    JsonNode f = node.get("field");
+                    for (String idKey : List.of("id", "customFieldId")) {
+                        if (f.has(idKey)) {
+                            String id = f.get(idKey).asText();
+                            label = nameById.getOrDefault(id, nameById.get(id.replace("customfield_", "")));
+                            if (label != null) break;
+                        }
+                    }
+                }
+            }
+            if (label != null) {
+                com.fasterxml.jackson.databind.node.ObjectNode item = objectMapper.createObjectNode();
+                item.put("name", label);
+                item.set("value", value);
+                out.add(item);
+                return;
+            }
+        }
+        node.fields().forEachRemaining(e -> {
+            if (e.getValue().isContainerNode()) collectValueItems(e.getValue(), nameById, out, depth + 1);
+        });
+    }
+
+    /** Forma do JSON só com chaves e TIPOS (string/number/object/array/…), nunca conteúdo. */
+    static String describeShapeWithTypes(JsonNode root) {
+        Set<String> lines = new LinkedHashSet<>();
+        walkShape(root, "$", lines, 0);
+        String joined = String.join(" ; ", lines);
+        return joined.length() > 6000 ? joined.substring(0, 6000) + "…" : joined;
+    }
+
+    private static void walkShape(JsonNode node, String path, Set<String> lines, int depth) {
+        if (node == null || depth > 8) return;
+        if (node.isArray()) {
+            lines.add(path + "=array");
+            for (JsonNode c : node) walkShape(c, path + "[]", lines, depth + 1);
+        } else if (node.isObject()) {
+            node.fields().forEachRemaining(e -> {
+                JsonNode v = e.getValue();
+                String t = v.isTextual() ? "string" : v.isNumber() ? "number" : v.isBoolean() ? "bool" : v.isNull() ? "null" : v.isArray() ? "array" : "object";
+                lines.add(path + "." + e.getKey() + "=" + t);
+                if (v.isContainerNode()) walkShape(v, path + "." + e.getKey(), lines, depth + 1);
+            });
+        }
     }
 
     /** Chaves que costumam guardar o rótulo do campo no layout do Profields. */

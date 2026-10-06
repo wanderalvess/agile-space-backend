@@ -224,4 +224,41 @@ class JiraProfieldsServiceTest {
             assertTrue(((List<?>) m.invoke(service, "jira.x.com", "DDW", "tok")).isEmpty());
         }
     }
+
+    @Nested
+    @DisplayName("Valores do Profields cruzados com o layout")
+    class ValuesTests {
+
+        private final ObjectMapper mapper = new ObjectMapper();
+
+        @Test
+        @DisplayName("Associa valor ao campo pelo id do layout e pelo nome embutido")
+        void joinsValuesWithLayout() throws Exception {
+            JsonNode layout = mapper.readTree("""
+                {"sections":[{"children":[{"children":[{"children":[
+                  {"field":{"id":"10","customFieldId":"customfield_77","name":"Tribo"}},
+                  {"field":{"id":"11","name":"Segmento Projeto"}},
+                  {"field":{"id":"12","name":"Agile Master"}}
+                ]}]}]}]}
+                """);
+            JsonNode values = mapper.readTree("""
+                [{"fieldId":10,"value":{"name":"Distribuição"}},
+                 {"field":{"id":11},"values":["Varejo"]},
+                 {"name":"Agile Master","value":[{"displayName":"Ana Souza","accountId":"a1"}]}]
+                """);
+            JsonNode synth = service.toSyntheticFields(layout, values);
+            assertEquals(3, synth.size());
+            assertEquals("Tribo", synth.get(0).get("name").asText());
+            assertEquals("Segmento Projeto", synth.get(1).get("name").asText());
+            assertEquals("Agile Master", synth.get(2).get("name").asText());
+        }
+
+        @Test
+        @DisplayName("Forma com tipos não vaza valores")
+        void shapeHasNoValues() throws Exception {
+            String shape = JiraProfieldsService.describeShapeWithTypes(mapper.readTree("[{\"fieldId\":10,\"value\":\"SEGREDO\"}]"));
+            assertTrue(shape.contains("value=string"));
+            assertFalse(shape.contains("SEGREDO"));
+        }
+    }
 }
