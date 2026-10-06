@@ -16,6 +16,8 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ProjectImportConfirmRequest {
+    /** Nome do time (o Jira guarda a chave, ex.: DDWMISSI, separada do nome, ex.: Projeto X - Y). */
+    private String name;
     private String segmentName;
     private String tribeName;
     private String locality;
@@ -23,7 +25,6 @@ public class ProjectImportConfirmRequest {
     private String vpArea;
     private String status;
     private String creationDate;
-    private Integer devTeamSize;
     private List<Member> members;
 
     @Data

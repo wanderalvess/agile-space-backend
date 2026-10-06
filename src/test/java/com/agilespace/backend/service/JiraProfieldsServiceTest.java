@@ -288,7 +288,7 @@ class JiraProfieldsServiceTest {
         void selectionAndRoleChange() {
             User me = User.builder().id("u-me").name("Eu").email("eu@x.com").build();
             var request = com.agilespace.backend.dto.ProjectImportConfirmRequest.builder()
-                    .segmentName("Distribuição").locality("").devTeamSize(12)
+                    .name("Projeto Missisauga - Winthor").segmentName("Distribuição").locality("")
                     .members(List.of(req("dev2", "QA", false), req("po1", "Product Owner", false)))
                     .build();
 
@@ -296,7 +296,8 @@ class JiraProfieldsServiceTest {
 
             assertEquals("Distribuição", applied.project().getSegmentName());
             assertNull(applied.project().getLocality());          // vazio vira "não informado"
-            assertEquals(12, applied.project().getDevTeamSize());
+            assertEquals("Projeto Missisauga - Winthor", applied.project().getName());
+            assertEquals(2, applied.project().getDevTeamSize()); // sem liderança: Caio(QA) + o próprio usuário
             // PO + Caio(QA) + o próprio usuário como Developer (não se selecionou)
             assertEquals(3, applied.members().size());
             assertTrue(applied.members().stream().anyMatch(m -> "dev2".equals(m.getJiraAccountId()) && "QA".equals(m.getRoleName()) && !m.isLeadership()));
@@ -337,6 +338,40 @@ class JiraProfieldsServiceTest {
             assertTrue(applied.members().stream().noneMatch(m -> "fantasma".equals(m.getJiraAccountId())));
             ProjectMemberRole beto = applied.members().stream().filter(m -> "dev1".equals(m.getJiraAccountId())).findFirst().orElseThrow();
             assertEquals("u-outro", beto.getUserId());           // continua da outra conta
+        }
+    }
+
+    @Nested
+    @DisplayName("Pessoas repetidas na importação")
+    class DedupeTests {
+
+        private ProjectMemberRole m(String acc, String name, String email, String role, boolean lead) {
+            return ProjectMemberRole.builder().projectId("DDW").jiraAccountId(acc).displayName(name).email(email)
+                    .roleName(role).roleKey(role.toUpperCase().replace(' ', '_')).isLeadership(lead).build();
+        }
+
+        @Test
+        @DisplayName("Mesma pessoa por e-mail (sem caixa) vira uma só, com o cargo de maior prioridade")
+        void mergesByEmailKeepingHighestRole() {
+            List<ProjectMemberRole> out = JiraProfieldsService.dedupeMembers(List.of(
+                    m("a1", "Marielen Leite", "marielen.leite@totvs.com.br", "Agile Master", true),
+                    m("a2", "Marielen Cristine de Almeida Leite", "MARIELEN.LEITE@TOTVS.COM.BR", "Developer", false)));
+            assertEquals(1, out.size());
+            assertEquals("Agile Master", out.get(0).getRoleName());
+            assertTrue(out.get(0).isLeadership());
+        }
+
+        @Test
+        @DisplayName("Sem e-mail, junta por nome normalizado; pessoas diferentes ficam separadas")
+        void mergesByNameAndKeepsDistinctPeople() {
+            List<ProjectMemberRole> out = JiraProfieldsService.dedupeMembers(List.of(
+                    m("a1", "Bruna de Brito Alves", null, "Developer", false),
+                    m("a2", "BRUNA DE BRITO ALVES", "bruna@totvs.com.br", "QA", false),
+                    m("a3", "Charly Ribeiro", "charly@totvs.com.br", "Developer", false)));
+            assertEquals(2, out.size());
+            ProjectMemberRole bruna = out.stream().filter(p -> p.getDisplayName().toLowerCase().contains("bruna")).findFirst().orElseThrow();
+            assertEquals("QA", bruna.getRoleName());                 // cargo específico vence Developer
+            assertEquals("bruna@totvs.com.br", bruna.getEmail());    // completa o e-mail que faltava
         }
     }
 }

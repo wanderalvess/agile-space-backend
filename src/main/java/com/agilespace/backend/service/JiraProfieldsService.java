@@ -149,8 +149,8 @@ public class JiraProfieldsService {
         project.setVpArea(blankToNull(request.getVpArea()));
         project.setStatus(blankToNull(request.getStatus()));
         project.setCreationDate(blankToNull(request.getCreationDate()));
-        if (request.getDevTeamSize() != null && request.getDevTeamSize() > 0) {
-            project.setDevTeamSize(request.getDevTeamSize());
+        if (request.getName() != null && !request.getName().isBlank()) {
+            project.setName(request.getName().trim());
         }
 
         Map<String, ProjectMemberRole> byAccount = new HashMap<>();
@@ -211,6 +211,8 @@ public class JiraProfieldsService {
                     .build());
         }
 
+        // "Pessoas no time" não é digitado: é quantas pessoas sem cargo de liderança entram.
+        project.setDevTeamSize((int) chosen.stream().filter(m -> !m.isLeadership()).count());
         return new ProfieldsSnapshot(project, chosen);
     }
 
@@ -248,6 +250,7 @@ public class JiraProfieldsService {
         log.info("Consultando Profields para projeto {} no domínio {}", cleanKey, cleanDomain);
 
         JsonNode rootNode;
+        String jiraProjectName = null;
         try {
             RestTemplate restTemplate = createSslLenientRestTemplate();
             HttpHeaders headers = new HttpHeaders();
@@ -263,6 +266,7 @@ public class JiraProfieldsService {
                         HttpStatus.BAD_GATEWAY, "Jira Profields retornou resposta inválida para o projeto " + cleanKey);
             }
             rootNode = objectMapper.readTree(response.getBody());
+            jiraProjectName = fetchJiraProjectName(restTemplate, entity, cleanDomain, cleanKey);
             JsonNode valuesNode = fetchProfieldsValues(restTemplate, entity, cleanDomain, cleanKey);
             if (valuesNode != null) {
                 log.info("Profields {}: forma da resposta de valores: {}", cleanKey, describeShapeWithTypes(valuesNode));
@@ -277,6 +281,12 @@ public class JiraProfieldsService {
         }
 
         ProjectConfig project = parseProfieldsJson(cleanKey, rootNode);
+        // O Jira guarda o nome do projeto ("Projeto X - Y") separado da chave (DDWMISSI). Só sobrescreve se o
+        // nome atual ainda é a própria chave (ou vazio): não desfaz um nome que alguém já ajustou no sistema.
+        if (jiraProjectName != null && !jiraProjectName.isBlank()
+                && (project.getName() == null || project.getName().isBlank() || project.getName().equalsIgnoreCase(cleanKey))) {
+            project.setName(jiraProjectName.trim());
+        }
         List<ProjectMemberRole> members = parseProfieldsMembers(cleanKey, rootNode);
         if (members.isEmpty()) {
             // O layout do Profields traz só as definições dos campos (sem valores), então não há pessoas ali.
@@ -292,6 +302,8 @@ public class JiraProfieldsService {
                 cleanKey, project.getSegmentName() != null, project.getTribeName() != null,
                 project.getLocality() != null, project.getVpArea() != null, project.getStatus() != null,
                 project.getDevTeamSize(), members.size());
+
+        members = dedupeMembers(members);
 
         for (ProjectMemberRole m : members) {
             // Tenta vincular com usuário do banco se já existir
@@ -546,6 +558,62 @@ public class JiraProfieldsService {
         }
     }
 
+
+
+    /** Nome do projeto no Jira (campo "name" de /rest/api/2/project/{key}); null se não for possível ler. */
+    private String fetchJiraProjectName(RestTemplate rt, HttpEntity<Void> entity, String domain, String key) {
+        try {
+            ResponseEntity<String> r = rt.exchange("https://" + domain + "/rest/api/2/project/" + key, HttpMethod.GET, entity, String.class);
+            JsonNode n = objectMapper.readTree(r.getBody());
+            return n.hasNonNull("name") ? n.get("name").asText() : null;
+        } catch (Exception e) {
+            log.warn("Profields {}: não foi possível ler o nome do projeto no Jira: {}", key, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * A mesma pessoa pode vir mais de uma vez (campo do Profields + atividade em issues, ou contas Jira com id
+     * diferente e o mesmo e-mail). Junta por e-mail (sem caixa) ou nome normalizado e fica com o cargo de maior
+     * prioridade: liderança > cargo específico > Developer.
+     */
+    static List<ProjectMemberRole> dedupeMembers(List<ProjectMemberRole> in) {
+        List<ProjectMemberRole> out = new ArrayList<>();
+        for (ProjectMemberRole m : in) {
+            ProjectMemberRole existing = null;
+            for (ProjectMemberRole o : out) {
+                if (samePerson(o, m)) { existing = o; break; }
+            }
+            if (existing == null) {
+                out.add(m);
+                continue;
+            }
+            ProjectMemberRole keep = rank(m) > rank(existing) ? m : existing;
+            ProjectMemberRole other = keep == m ? existing : m;
+            if (isBlank(keep.getEmail())) keep.setEmail(other.getEmail());
+            if (isBlank(keep.getJiraAccountId())) keep.setJiraAccountId(other.getJiraAccountId());
+            if (isBlank(keep.getAvatarUrl())) keep.setAvatarUrl(other.getAvatarUrl());
+            if (keep.getUserId() == null) keep.setUserId(other.getUserId());
+            out.set(out.indexOf(existing), keep);
+        }
+        return out;
+    }
+
+    private static boolean samePerson(ProjectMemberRole a, ProjectMemberRole b) {
+        if (!isBlank(a.getEmail()) && !isBlank(b.getEmail()) && a.getEmail().trim().equalsIgnoreCase(b.getEmail().trim())) return true;
+        if (!isBlank(a.getJiraAccountId()) && a.getJiraAccountId().equals(b.getJiraAccountId())) return true;
+        String na = normalizeLabel(a.getDisplayName());
+        return !na.isEmpty() && na.equals(normalizeLabel(b.getDisplayName()));
+    }
+
+    private static int rank(ProjectMemberRole m) {
+        if (m.isLeadership()) return 3;
+        return "DEVELOPER".equalsIgnoreCase(m.getRoleKey()) ? 1 : 2;
+    }
+
+    private static boolean isBlank(String v) {
+        return v == null || v.isBlank();
+    }
 
     /** Endpoint de valores do Profields: GET /rest/profields/api/2.0/values/projects/{key} (lista de valores por campo). */
     private JsonNode fetchProfieldsValues(RestTemplate rt, HttpEntity<Void> entity, String domain, String key) {
