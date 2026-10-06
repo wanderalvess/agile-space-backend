@@ -149,6 +149,7 @@ public class JiraProfieldsService {
             }
             rootNode = objectMapper.readTree(response.getBody());
             probeValueEndpoints(restTemplate, entity, cleanDomain, cleanKey);
+            probeIssueLevelCustomFields(restTemplate, entity, cleanDomain, cleanKey, rootNode);
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
         } catch (Exception e) {
@@ -476,6 +477,58 @@ public class JiraProfieldsService {
             } catch (Exception e) {
                 log.info("PROBE {} -> falhou: {}", path, e.getClass().getSimpleName());
             }
+        }
+    }
+
+
+    /**
+     * DIAGNÓSTICO TEMPORÁRIO: o layout lista, por campo, um customFieldId. Se o Profields expõe os valores do projeto
+     * como campos personalizados, uma issue do projeto devolve esses customfield_X. Registra só se vieram preenchidos.
+     */
+    private void probeIssueLevelCustomFields(RestTemplate rt, HttpEntity<Void> entity, String domain, String key, JsonNode layout) {
+        try {
+            Map<String, String> idByLabel = new LinkedHashMap<>();
+            collectCustomFieldIds(layout, idByLabel);
+            Set<String> wanted = Set.of("segmentoprojeto", "tribo", "vp", "localidade", "vicepresidente", "agilemaster",
+                    "productowner", "devteam", "statusprojeto", "peoplelead", "tribelead");
+            Map<String, String> chosen = new LinkedHashMap<>();
+            idByLabel.forEach((label, id) -> { if (wanted.contains(normalizeLabel(label))) chosen.put(label, id); });
+            if (chosen.isEmpty()) {
+                log.info("PROBE issue-level: nenhum customFieldId nos campos de interesse");
+                return;
+            }
+            String fields = String.join(",", chosen.values());
+            String url = "https://" + domain + "/rest/api/2/search?jql=project%3D" + key + "&maxResults=3&fields=" + fields;
+            JsonNode res = objectMapper.readTree(rt.exchange(url, HttpMethod.GET, entity, String.class).getBody());
+            JsonNode issues = res.get("issues");
+            log.info("PROBE issue-level: issues={} campos={}", issues == null ? 0 : issues.size(), chosen);
+            if (issues != null) {
+                for (JsonNode issue : issues) {
+                    JsonNode f = issue.get("fields");
+                    List<String> filled = new ArrayList<>();
+                    chosen.forEach((label, id) -> {
+                        JsonNode v = f == null ? null : f.get(id);
+                        if (v != null && !v.isNull()) filled.add(label);
+                    });
+                    log.info("PROBE issue-level {}: preenchidos={}", issue.path("key").asText(), filled);
+                }
+            }
+        } catch (Exception e) {
+            log.info("PROBE issue-level falhou: {}", e.getClass().getSimpleName());
+        }
+    }
+
+    private void collectCustomFieldIds(JsonNode node, Map<String, String> out) {
+        if (node == null) return;
+        if (node.isObject()) {
+            JsonNode field = node.get("field");
+            if (field != null && field.isObject() && field.has("name") && field.has("customFieldId")) {
+                String id = field.get("customFieldId").asText();
+                out.putIfAbsent(field.get("name").asText(), id.startsWith("customfield_") ? id : "customfield_" + id);
+            }
+            node.fields().forEachRemaining(e -> collectCustomFieldIds(e.getValue(), out));
+        } else if (node.isArray()) {
+            for (JsonNode c : node) collectCustomFieldIds(c, out);
         }
     }
 
