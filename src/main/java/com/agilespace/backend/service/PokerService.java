@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 import java.util.Optional;
 
@@ -260,7 +261,8 @@ public class PokerService {
 
     // --- Chat Messages Logic ---
     @Transactional(readOnly = true)
-    public List<PokerChatMessage> getChatMessages(String roomId, String channelId) {
+    public List<PokerChatMessage> getChatMessages(String roomId, String channelId, String callerId) {
+        requireChatChannelAccess(channelId, callerId);
         return chatMessageRepository.findByRoomIdAndChannelIdOrderByTsAsc(roomId, channelId);
     }
 
@@ -272,12 +274,13 @@ public class PokerService {
         if (message.getId() == null || message.getId().trim().isEmpty()) {
             message.setId(java.util.UUID.randomUUID().toString());
         }
+        requireChatChannelAccess(message.getChannelId(), callerId);
         message.setRoomId(roomId);
         if (message.getTs() == null || message.getTs().trim().isEmpty()) {
             message.setTs(new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").format(new java.util.Date()));
         }
         PokerChatMessage saved = chatMessageRepository.save(message);
-        webSocketHandler.broadcastEvent(roomId, "CHAT_MESSAGE_SAVED", saved);
+        publishChatEvent(roomId, "CHAT_MESSAGE_SAVED", saved, saved.getChannelId());
         return saved;
     }
 
@@ -299,10 +302,51 @@ public class PokerService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Sem permissão para excluir esta mensagem.");
         }
 
+        // DM só pode ser apagada pelos próprios participantes da conversa.
+        if (isDmChannel(message.getChannelId()) && !isDmParticipant(message.getChannelId(), callerId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Sem acesso a esta conversa privada.");
+        }
         chatMessageRepository.delete(message);
-        webSocketHandler.broadcastEvent(roomId, "CHAT_MESSAGE_DELETED", Map.of(
+        publishChatEvent(roomId, "CHAT_MESSAGE_DELETED", Map.of(
                 "messageId", messageId,
                 "channelId", message.getChannelId()
-        ));
+        ), message.getChannelId());
+    }
+
+    private static boolean isDmChannel(String channelId) {
+        return channelId != null && channelId.startsWith("dm_");
+    }
+
+    /** dm_uidA_uidB: só os dois uids participam. */
+    private static boolean isDmParticipant(String channelId, String userId) {
+        if (userId == null || userId.isBlank() || !isDmChannel(channelId)) return false;
+        String rest = channelId.substring(3);
+        String asFirst = userId + "_";
+        String asSecond = "_" + userId;
+        return (rest.startsWith(asFirst) && rest.length() > asFirst.length())
+                || (rest.endsWith(asSecond) && rest.length() > asSecond.length());
+    }
+
+    private static void requireChatChannelAccess(String channelId, String callerId) {
+        if (channelId == null || channelId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Canal inválido.");
+        }
+        if (isDmChannel(channelId) && !isDmParticipant(channelId, callerId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Sem acesso a esta conversa privada.");
+        }
+    }
+
+    /** Eventos de DM chegam só aos dois participantes; os demais canais, à sala toda. */
+    private void publishChatEvent(String roomId, String eventType, Object payload, String channelId) {
+        if (isDmChannel(channelId)) {
+            String rest = channelId.substring(3);
+            int sep = rest.indexOf('_');
+            Set<String> users = sep > 0
+                    ? new java.util.HashSet<>(List.of(rest.substring(0, sep), rest.substring(sep + 1)))
+                    : Set.of();
+            webSocketHandler.broadcastEventToUsers(roomId, eventType, payload, users);
+        } else {
+            webSocketHandler.broadcastEvent(roomId, eventType, payload);
+        }
     }
 }

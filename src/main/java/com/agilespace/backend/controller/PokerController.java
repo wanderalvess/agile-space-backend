@@ -180,8 +180,10 @@ public class PokerController {
     @GetMapping("/{roomId}/chat")
     public ResponseEntity<List<com.agilespace.backend.domain.PokerChatMessage>> getChatMessages(
             @PathVariable("roomId") String roomId,
-            @RequestParam("channelId") String channelId) {
-        return ResponseEntity.ok(pokerService.getChatMessages(roomId, channelId));
+            @RequestParam("channelId") String channelId,
+            HttpServletRequest request) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        return ResponseEntity.ok(pokerService.getChatMessages(roomId, channelId, callerId));
     }
 
     @PostMapping("/{roomId}/chat")

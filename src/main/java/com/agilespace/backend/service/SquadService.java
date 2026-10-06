@@ -81,6 +81,7 @@ public class SquadService {
         if (squad.getPhases() != null) target.setPhases(squad.getPhases());
         if (squad.getCeremonyMode() != null) target.setCeremonyMode(squad.getCeremonyMode());
         if (squad.getCeremonies() != null) target.setCeremonies(squad.getCeremonies());
+        if (squad.getEstimationUnit() != null) target.setEstimationUnit(squad.getEstimationUnit());
 
         return squadRepository.save(target);
     }

@@ -117,4 +117,8 @@ public class Squad {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "ceremonies", columnDefinition = "jsonb")
     private JsonNode ceremonies;
+
+    // Unidade de estimativa configurada pela squad: SP | HOURS | TSHIRT | COUNT. Null = não configurada.
+    @Column(name = "estimation_unit", length = 10)
+    private String estimationUnit;
 }
