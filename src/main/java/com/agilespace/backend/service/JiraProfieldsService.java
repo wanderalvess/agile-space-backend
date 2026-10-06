@@ -39,6 +39,7 @@ public class JiraProfieldsService {
     private final ProjectConfigRepository projectConfigRepository;
     private final ProjectMemberRoleRepository projectMemberRoleRepository;
     private final UserRepository userRepository;
+    private final JiraAdminService jiraAdminService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private RestTemplate createSslLenientRestTemplate() {
@@ -158,6 +159,11 @@ public class JiraProfieldsService {
 
         ProjectConfig project = parseProfieldsJson(cleanKey, rootNode);
         List<ProjectMemberRole> members = parseProfieldsMembers(cleanKey, rootNode);
+        if (members.isEmpty()) {
+            // O layout do Profields traz só as definições dos campos (sem valores), então não há pessoas ali.
+            // Usa a mesma descoberta do importador do admin: papéis do projeto, grupos, líderes e atividade recente.
+            members = new ArrayList<>(discoverMembersFromJira(cleanDomain, cleanKey, token));
+        }
         // Diagnóstico: só rótulos/estrutura, sem valores. Ajuda a mapear campos que o parser não reconheceu.
         Map<String, JsonNode> receivedFields = new HashMap<>();
         collectFields(rootNode, receivedFields);
@@ -385,6 +391,41 @@ public class JiraProfieldsService {
         return members;
     }
 
+
+
+    /**
+     * Descobre as pessoas do time pela API padrão do Jira (mesma lógica do importador do admin) e converte em
+     * papéis de projeto. Falha silenciosa: sem pessoas, o chamador cai no fallback de Agile Master.
+     */
+    private List<ProjectMemberRole> discoverMembersFromJira(String domain, String projectKey, String token) {
+        try {
+            com.agilespace.backend.dto.JiraSyncRequest request = new com.agilespace.backend.dto.JiraSyncRequest();
+            request.setProjectKey(projectKey);
+            request.setJiraDomain(domain);
+            request.setToken(token.trim());
+            com.agilespace.backend.dto.JiraProjectPreviewDto preview = jiraAdminService.previewProject(request);
+            List<ProjectMemberRole> found = new ArrayList<>();
+            if (preview != null && preview.getMembers() != null) {
+                for (com.agilespace.backend.dto.JiraMemberCandidateDto c : preview.getMembers()) {
+                    String role = (c.getRole() == null || c.getRole().isBlank()) ? "Developer" : c.getRole();
+                    found.add(ProjectMemberRole.builder()
+                            .projectId(projectKey)
+                            .roleName(role)
+                            .roleKey(role.toUpperCase(java.util.Locale.ROOT).replaceAll("[^A-Z0-9]+", "_"))
+                            .jiraAccountId(c.getJiraAccountId())
+                            .displayName(c.getDisplayName())
+                            .email(c.getEmail())
+                            .isLeadership(LEADERSHIP_ROLE_NAMES.contains(role.toUpperCase(java.util.Locale.ROOT)))
+                            .build());
+                }
+            }
+            log.info("Profields {}: {} pessoa(s) descobertas pela API padrão do Jira", projectKey, found.size());
+            return found;
+        } catch (Exception e) {
+            log.warn("Profields {}: não foi possível descobrir pessoas pela API padrão do Jira: {}", projectKey, e.getMessage());
+            return Collections.emptyList();
+        }
+    }
 
     /**
      * DIAGNÓSTICO TEMPORÁRIO: o endpoint de layout do Profields devolve só as definições dos campos, sem valores.

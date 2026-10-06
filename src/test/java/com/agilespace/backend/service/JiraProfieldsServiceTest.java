@@ -38,6 +38,7 @@ class JiraProfieldsServiceTest {
     @Mock private ProjectConfigRepository projectConfigRepository;
     @Mock private ProjectMemberRoleRepository projectMemberRoleRepository;
     @Mock private UserRepository userRepository;
+    @Mock private JiraAdminService jiraAdminService;
 
     @InjectMocks
     private JiraProfieldsService service;
@@ -185,6 +186,42 @@ class JiraProfieldsServiceTest {
             String outline = JiraProfieldsService.describeStructure(root);
             assertTrue(outline.contains("name=Tribo"));
             assertFalse(outline.contains("SEGREDO-NOME-DE-PESSOA"));
+        }
+    }
+
+    @Nested
+    @DisplayName("Descoberta de pessoas pela API padrão do Jira")
+    class DiscoveryTests {
+
+        @Test
+        @DisplayName("Converte candidatos do importador do admin em papéis de projeto, marcando liderança")
+        void convertsCandidatesToRoles() throws Exception {
+            com.agilespace.backend.dto.JiraProjectPreviewDto preview = com.agilespace.backend.dto.JiraProjectPreviewDto.builder()
+                    .members(List.of(
+                            com.agilespace.backend.dto.JiraMemberCandidateDto.builder().jiraAccountId("a1").displayName("Ana PO").email("ana@x.com").role("Product Owner").score(100).build(),
+                            com.agilespace.backend.dto.JiraMemberCandidateDto.builder().jiraAccountId("b2").displayName("Beto Dev").email("beto@x.com").role("Developer").score(10).build()))
+                    .build();
+            when(jiraAdminService.previewProject(any())).thenReturn(preview);
+
+            Method m = JiraProfieldsService.class.getDeclaredMethod("discoverMembersFromJira", String.class, String.class, String.class);
+            m.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            List<ProjectMemberRole> roles = (List<ProjectMemberRole>) m.invoke(service, "jira.x.com", "DDW", "tok");
+
+            assertEquals(2, roles.size());
+            assertEquals("PRODUCT_OWNER", roles.get(0).getRoleKey());
+            assertTrue(roles.get(0).isLeadership());
+            assertEquals("DEVELOPER", roles.get(1).getRoleKey());
+            assertFalse(roles.get(1).isLeadership());
+        }
+
+        @Test
+        @DisplayName("Falha do Jira vira lista vazia, sem estourar o onboarding")
+        void failureYieldsEmpty() throws Exception {
+            when(jiraAdminService.previewProject(any())).thenThrow(new RuntimeException("boom"));
+            Method m = JiraProfieldsService.class.getDeclaredMethod("discoverMembersFromJira", String.class, String.class, String.class);
+            m.setAccessible(true);
+            assertTrue(((List<?>) m.invoke(service, "jira.x.com", "DDW", "tok")).isEmpty());
         }
     }
 }
