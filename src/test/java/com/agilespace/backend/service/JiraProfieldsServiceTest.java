@@ -39,6 +39,7 @@ class JiraProfieldsServiceTest {
     @Mock private ProjectMemberRoleRepository projectMemberRoleRepository;
     @Mock private UserRepository userRepository;
     @Mock private JiraAdminService jiraAdminService;
+    @Mock private JiraService jiraService;
 
     @InjectMocks
     private JiraProfieldsService service;
@@ -372,6 +373,39 @@ class JiraProfieldsServiceTest {
             ProjectMemberRole bruna = out.stream().filter(p -> p.getDisplayName().toLowerCase().contains("bruna")).findFirst().orElseThrow();
             assertEquals("QA", bruna.getRoleName());                 // cargo específico vence Developer
             assertEquals("bruna@totvs.com.br", bruna.getEmail());    // completa o e-mail que faltava
+        }
+    }
+
+    @Nested
+    @DisplayName("Foto do usuário do Jira")
+    class AvatarTests {
+
+        @Test
+        @DisplayName("Imagem pequena vira data URI; não-imagem, vazia ou grande demais é descartada")
+        void toDataUriRules() {
+            byte[] png = new byte[]{(byte) 0x89, 'P', 'N', 'G'};
+            String uri = JiraProfieldsService.toDataUri(png, org.springframework.http.MediaType.IMAGE_PNG);
+            assertTrue(uri.startsWith("data:image/png;base64,"));
+            assertNull(JiraProfieldsService.toDataUri(png, org.springframework.http.MediaType.TEXT_HTML));   // página de login
+            assertNull(JiraProfieldsService.toDataUri(new byte[0], org.springframework.http.MediaType.IMAGE_PNG));
+            assertNull(JiraProfieldsService.toDataUri(new byte[JiraProfieldsService.MAX_AVATAR_BYTES + 1], org.springframework.http.MediaType.IMAGE_PNG));
+            assertNull(JiraProfieldsService.toDataUri(png, null));
+        }
+
+        @Test
+        @DisplayName("Descoberta de pessoas leva a URL da foto adiante")
+        void discoveryKeepsAvatarUrl() throws Exception {
+            com.agilespace.backend.dto.JiraProjectPreviewDto preview = com.agilespace.backend.dto.JiraProjectPreviewDto.builder()
+                    .members(List.of(com.agilespace.backend.dto.JiraMemberCandidateDto.builder()
+                            .jiraAccountId("a1").displayName("Ana").email("ana@x.com").role("Developer")
+                            .avatarUrl("https://jira.x.com/secure/useravatar?ownerId=ana").build()))
+                    .build();
+            when(jiraAdminService.previewProject(any())).thenReturn(preview);
+            Method m = JiraProfieldsService.class.getDeclaredMethod("discoverMembersFromJira", String.class, String.class, String.class);
+            m.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            List<ProjectMemberRole> roles = (List<ProjectMemberRole>) m.invoke(service, "jira.x.com", "DDW", "tok");
+            assertEquals("https://jira.x.com/secure/useravatar?ownerId=ana", roles.get(0).getAvatarUrl());
         }
     }
 }

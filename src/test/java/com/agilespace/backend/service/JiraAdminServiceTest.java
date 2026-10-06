@@ -313,4 +313,18 @@ class JiraAdminServiceTest {
             mockServer.verify();
         }
     }
+
+    @org.junit.jupiter.api.Test
+    @org.junit.jupiter.api.DisplayName("extractAvatarUrl prefere 48x48 e aceita avatarUrl simples")
+    void extractAvatarUrlVariants() throws Exception {
+        com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+        org.junit.jupiter.api.Assertions.assertEquals("https://j/48",
+                JiraAdminService.extractAvatarUrl(om.readTree("{\"avatarUrls\":{\"16x16\":\"https://j/16\",\"48x48\":\"https://j/48\"}}")));
+        org.junit.jupiter.api.Assertions.assertEquals("https://j/32",
+                JiraAdminService.extractAvatarUrl(om.readTree("{\"avatarUrls\":{\"32x32\":\"https://j/32\"}}")));
+        org.junit.jupiter.api.Assertions.assertEquals("https://j/a",
+                JiraAdminService.extractAvatarUrl(om.readTree("{\"avatarUrl\":\"https://j/a\"}")));
+        org.junit.jupiter.api.Assertions.assertNull(JiraAdminService.extractAvatarUrl(om.readTree("{\"displayName\":\"x\"}")));
+        org.junit.jupiter.api.Assertions.assertNull(JiraAdminService.extractAvatarUrl(null));
+    }
 }

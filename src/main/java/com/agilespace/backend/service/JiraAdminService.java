@@ -109,14 +109,15 @@ public class JiraAdminService {
             RoleScore eval = evaluateRole(rawRole);
             candidateMap.compute(info.accountId, (k, existing) -> {
                 if (existing == null) {
-                    return new MemberCandidate(info.accountId, info.displayName, info.email, eval.canonicalRole, eval.score);
+                    return new MemberCandidate(info.accountId, info.displayName, info.email, eval.canonicalRole, eval.score, info.avatarUrl);
                 }
                 String bestName = (existing.displayName != null && !existing.displayName.isBlank()) ? existing.displayName : info.displayName;
                 String bestEmail = (existing.email != null && !existing.email.isBlank()) ? existing.email : info.email;
+                String bestAvatar = (existing.avatarUrl != null && !existing.avatarUrl.isBlank()) ? existing.avatarUrl : info.avatarUrl;
                 if (eval.score > existing.score) {
-                    return new MemberCandidate(k, bestName, bestEmail, eval.canonicalRole, eval.score);
+                    return new MemberCandidate(k, bestName, bestEmail, eval.canonicalRole, eval.score, bestAvatar);
                 }
-                return new MemberCandidate(k, bestName, bestEmail, existing.role, existing.score);
+                return new MemberCandidate(k, bestName, bestEmail, existing.role, existing.score, bestAvatar);
             });
         };
 
@@ -228,6 +229,7 @@ public class JiraAdminService {
                         .jiraAccountId(c.accountId)
                         .displayName(c.displayName)
                         .email(c.email)
+                        .avatarUrl(c.avatarUrl)
                         .role(c.role)
                         .score(c.score)
                         .selected(true)
@@ -519,6 +521,24 @@ public class JiraAdminService {
         return false;
     }
 
+
+    /**
+     * URL da foto do usuário no Jira: avatarUrls (48x48 > 32x32 > 24x24 > 16x16) ou avatarUrl simples. Null se não houver.
+     */
+    static String extractAvatarUrl(JsonNode userNode) {
+        if (userNode == null || userNode.isNull()) return null;
+        JsonNode urls = userNode.get("avatarUrls");
+        if (urls != null && urls.isObject()) {
+            for (String size : new String[]{"48x48", "32x32", "24x24", "16x16"}) {
+                if (urls.hasNonNull(size) && !urls.get(size).asText().isBlank()) return urls.get(size).asText();
+            }
+        }
+        if (userNode.hasNonNull("avatarUrl") && !userNode.get("avatarUrl").asText().isBlank()) {
+            return userNode.get("avatarUrl").asText();
+        }
+        return null;
+    }
+
     private MemberInfo extractMemberInfo(JsonNode userNode) {
         if (userNode == null || userNode.isNull()) return null;
         if (userNode.has("actorUser") && userNode.get("actorUser").isObject()) {
@@ -550,7 +570,7 @@ public class JiraAdminService {
         String email = userNode.has("emailAddress") && !userNode.get("emailAddress").asText().isBlank()
                 ? userNode.get("emailAddress").asText() 
                 : null;
-        return new MemberInfo(accountId, displayName, email);
+        return new MemberInfo(accountId, displayName, email, extractAvatarUrl(userNode));
     }
 
     private RoleScore evaluateRole(String rawRoleName) {
@@ -651,12 +671,15 @@ public class JiraAdminService {
         final String role;
         final int score;
 
-        MemberCandidate(String accountId, String displayName, String email, String role, int score) {
+        final String avatarUrl;
+
+        MemberCandidate(String accountId, String displayName, String email, String role, int score, String avatarUrl) {
             this.accountId = accountId;
             this.displayName = displayName;
             this.email = email;
             this.role = role;
             this.score = score;
+            this.avatarUrl = avatarUrl;
         }
     }
 
@@ -664,10 +687,13 @@ public class JiraAdminService {
         final String accountId;
         final String displayName;
         final String email;
-        MemberInfo(String accountId, String displayName, String email) {
+        final String avatarUrl;
+
+        MemberInfo(String accountId, String displayName, String email, String avatarUrl) {
             this.accountId = accountId;
             this.displayName = displayName;
             this.email = email;
+            this.avatarUrl = avatarUrl;
         }
     }
 }

@@ -40,6 +40,7 @@ public class JiraProfieldsService {
     private final ProjectMemberRoleRepository projectMemberRoleRepository;
     private final UserRepository userRepository;
     private final JiraAdminService jiraAdminService;
+    private final JiraService jiraService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private RestTemplate createSslLenientRestTemplate() {
@@ -304,6 +305,7 @@ public class JiraProfieldsService {
                 project.getDevTeamSize(), members.size());
 
         members = dedupeMembers(members);
+        embedAvatars(members, cleanDomain, token);
 
         for (ProjectMemberRole m : members) {
             // Tenta vincular com usuário do banco se já existir
@@ -546,6 +548,7 @@ public class JiraProfieldsService {
                             .jiraAccountId(c.getJiraAccountId())
                             .displayName(c.getDisplayName())
                             .email(c.getEmail())
+                            .avatarUrl(c.getAvatarUrl())
                             .isLeadership(LEADERSHIP_ROLE_NAMES.contains(role.toUpperCase(java.util.Locale.ROOT)))
                             .build());
                 }
@@ -559,6 +562,69 @@ public class JiraProfieldsService {
     }
 
 
+
+
+    /** Foto maior que isso é descartada (o 48x48 do Jira costuma ter poucos KB). */
+    static final int MAX_AVATAR_BYTES = 40_000;
+
+    /**
+     * Converte a imagem baixada do Jira em data URI. Null se não for imagem ou passar do limite de tamanho.
+     */
+    static String toDataUri(byte[] body, org.springframework.http.MediaType contentType) {
+        if (body == null || body.length == 0 || body.length > MAX_AVATAR_BYTES) return null;
+        if (contentType == null || !"image".equals(contentType.getType())) return null;
+        return "data:" + contentType.getType() + "/" + contentType.getSubtype() + ";base64,"
+                + java.util.Base64.getEncoder().encodeToString(body);
+    }
+
+    /**
+     * A foto do Jira só abre com login (o navegador não consegue carregar a URL direto). Baixa cada uma com o token de
+     * quem está importando e guarda como imagem embutida, para todo o time ver sem precisar de token. Em paralelo e
+     * com limite de tempo; quem falhar fica sem foto (iniciais).
+     */
+    private void embedAvatars(List<ProjectMemberRole> members, String domain, String token) {
+        List<ProjectMemberRole> withUrl = members.stream()
+                .filter(m -> !isBlank(m.getAvatarUrl()) && m.getAvatarUrl().startsWith("http"))
+                .toList();
+        // Quem não tem URL válida não deve ficar com um endereço que o navegador não consegue abrir.
+        members.stream().filter(m -> !isBlank(m.getAvatarUrl()) && !m.getAvatarUrl().startsWith("http") && !m.getAvatarUrl().startsWith("data:"))
+                .forEach(m -> m.setAvatarUrl(null));
+        if (withUrl.isEmpty()) return;
+
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(Math.min(8, withUrl.size()));
+        try {
+            List<java.util.concurrent.Future<String>> futures = new ArrayList<>();
+            for (ProjectMemberRole m : withUrl) {
+                String url = m.getAvatarUrl();
+                futures.add(pool.submit(() -> fetchAvatarDataUri(domain, token, url)));
+            }
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(12);
+            for (int i = 0; i < withUrl.size(); i++) {
+                String dataUri = null;
+                try {
+                    long remaining = Math.max(1, deadline - System.nanoTime());
+                    dataUri = futures.get(i).get(remaining, java.util.concurrent.TimeUnit.NANOSECONDS);
+                } catch (Exception ignored) {
+                    futures.get(i).cancel(true);
+                }
+                withUrl.get(i).setAvatarUrl(dataUri);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    private String fetchAvatarDataUri(String domain, String token, String url) {
+        try {
+            ResponseEntity<?> r = jiraService.getAttachment(domain, token, url);
+            if (r.getStatusCode().is2xxSuccessful() && r.getBody() instanceof byte[] bytes) {
+                return toDataUri(bytes, r.getHeaders().getContentType());
+            }
+        } catch (Exception e) {
+            log.debug("Avatar não baixado: {}", e.getMessage());
+        }
+        return null;
+    }
 
     /** Nome do projeto no Jira (campo "name" de /rest/api/2/project/{key}); null se não for possível ler. */
     private String fetchJiraProjectName(RestTemplate rt, HttpEntity<Void> entity, String domain, String key) {

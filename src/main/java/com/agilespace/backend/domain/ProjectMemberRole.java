@@ -42,7 +42,7 @@ public class ProjectMemberRole {
     @Column(name = "email")
     private String email; // Ex: "colaborador@empresa.com.br"
 
-    @Column(name = "avatar_url")
+    @Column(name = "avatar_url", columnDefinition = "TEXT")
     private String avatarUrl;
 
     @Column(name = "user_id")
