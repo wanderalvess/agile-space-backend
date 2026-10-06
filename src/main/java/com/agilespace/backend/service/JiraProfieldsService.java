@@ -147,6 +147,7 @@ public class JiraProfieldsService {
                         HttpStatus.BAD_GATEWAY, "Jira Profields retornou resposta inválida para o projeto " + cleanKey);
             }
             rootNode = objectMapper.readTree(response.getBody());
+            probeValueEndpoints(restTemplate, entity, cleanDomain, cleanKey);
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
         } catch (Exception e) {
@@ -382,6 +383,72 @@ public class JiraProfieldsService {
         }
 
         return members;
+    }
+
+
+    /**
+     * DIAGNÓSTICO TEMPORÁRIO: o endpoint de layout do Profields devolve só as definições dos campos, sem valores.
+     * Testa endpoints candidatos (somente GET, com o token do próprio usuário) e registra status e FORMA da
+     * resposta (nomes de chave e contagens), nunca os valores. Remover quando o endpoint de valores for identificado.
+     */
+    private void probeValueEndpoints(RestTemplate rt, HttpEntity<Void> entity, String domain, String key) {
+        String base = "https://" + domain;
+        String projectId = null;
+        try {
+            ResponseEntity<String> core = rt.exchange(base + "/rest/api/2/project/" + key, HttpMethod.GET, entity, String.class);
+            JsonNode coreNode = objectMapper.readTree(core.getBody());
+            projectId = coreNode.has("id") ? coreNode.get("id").asText() : null;
+            log.info("PROBE core /rest/api/2/project/{} -> {} id={} chaves={}", key, core.getStatusCode().value(), projectId, keyNames(coreNode));
+        } catch (Exception e) {
+            log.info("PROBE core /rest/api/2/project/{} -> falhou: {}", key, e.getClass().getSimpleName());
+        }
+
+        List<String> paths = new ArrayList<>(List.of(
+                "/rest/profields/api/2.0/layouts/projects/" + key + "?expand=predefined,values",
+                "/rest/profields/api/2.0/layouts/projects/" + key + "?expand=values",
+                "/rest/profields/api/2.0/layouts/projects/" + key + "/values",
+                "/rest/profields/api/2.0/values/projects/" + key,
+                "/rest/profields/api/2.0/projects/" + key,
+                "/rest/profields/api/2.0/projects/" + key + "/values",
+                "/rest/profields/api/2.0/fields/projects/" + key,
+                "/rest/api/2/project/" + key + "/properties"));
+        if (projectId != null) {
+            paths.add("/rest/profields/api/2.0/values/projects/" + projectId);
+            paths.add("/rest/profields/api/2.0/projects/" + projectId);
+            paths.add("/rest/profields/api/2.0/projects/" + projectId + "/values");
+        }
+        for (String path : paths) {
+            try {
+                ResponseEntity<String> r = rt.exchange(base + path, HttpMethod.GET, entity, String.class);
+                String body = r.getBody() == null ? "" : r.getBody();
+                String shape;
+                try {
+                    JsonNode n = objectMapper.readTree(body);
+                    int withValue = countValueNodes(n);
+                    shape = "chaves=" + (n.isObject() ? keyNames(n) : "array[" + n.size() + "]") + " nosComValor=" + withValue;
+                } catch (Exception notJson) {
+                    shape = "nao-json bytes=" + body.length();
+                }
+                log.info("PROBE {} -> {} {}", path, r.getStatusCode().value(), shape);
+            } catch (org.springframework.web.client.HttpStatusCodeException e) {
+                log.info("PROBE {} -> {}", path, e.getStatusCode().value());
+            } catch (Exception e) {
+                log.info("PROBE {} -> falhou: {}", path, e.getClass().getSimpleName());
+            }
+        }
+    }
+
+    private int countValueNodes(JsonNode node) {
+        if (node == null) return 0;
+        int n = 0;
+        if (node.isObject()) {
+            if (VALUE_KEYS.stream().anyMatch(node::has)) n++;
+            var it = node.elements();
+            while (it.hasNext()) n += countValueNodes(it.next());
+        } else if (node.isArray()) {
+            for (JsonNode c : node) n += countValueNodes(c);
+        }
+        return n;
     }
 
     /** Chaves que costumam guardar o rótulo do campo no layout do Profields. */
