@@ -68,13 +68,37 @@ Feito no navegador, com a sessão ADMIN, criando só dados de teste ("SMOKE TEST
 
 ### Bugs e pontos encontrados
 
-1. 🟡 **Chamada inútil com 400 no chat de conhecimento** (`/knowledge`). A landing gera um slug local de 10 caracteres (`crypto.randomUUID().slice(0, 10)`, [knowledge/chat/page.tsx:11](../agile-space-frontend/src/app/knowledge/chat/page.tsx)) e a página chama `GET /api/knowledge/conversations/{id}`, que exige UUID, então sempre dá `400`. **Não quebra o chat**: o erro cai num `catch`, a sessão abre vazia e a conversa é criada no backend (com UUID real) no primeiro envio. Correção feita no frontend (ainda sem deploy): não buscar quando o id não é UUID. Não verificado em produção; o chat de IA também não foi exercitado (sem chave de IA na VM).
+1. 🟡 **Chamada inútil com 400 no chat de conhecimento** (`/knowledge`). A landing gera um slug local de 10 caracteres (`crypto.randomUUID().slice(0, 10)`, [knowledge/chat/page.tsx:11](../agile-space-frontend/src/app/knowledge/chat/page.tsx)) e a página chama `GET /api/knowledge/conversations/{id}`, que exige UUID, então sempre dá `400`. **Não quebra o chat**: o erro cai num `catch`, a sessão abre vazia e a conversa é criada no backend (com UUID real) no primeiro envio. Corrigido no frontend (commitado): não busca quando o id não é UUID. **Falta fazer o deploy do frontend na VM** para valer em produção. Não verificado em produção; o chat de IA também não foi exercitado (sem chave de IA na VM).
 2. 🟠 **Jira acessível da VM?** A sincronização exige domínio Jira e token (PAT). Se o Jira da TOTVS for interno ou atrás de VPN, esta VM na internet pública **não alcança**. Não testado (sem credenciais). Confirmar antes de produção.
 3. 🟡 **404 recorrentes no console**: `/api/users/{id}/jira-config` e `/tdn-config` devolvem 404 quando o usuário não configurou. Funciona, mas polui o console e os logs. Melhor devolver 200 vazio ou 204.
 4. 🟡 **Requisições com id vazio** ao abrir o painel: `GET /api/squads//rollup`, `/issues`, `/members` (404) disparam antes de o squad ser resolvido. Inofensivo, mas indica carga antes da hora.
 5. 🟡 **`GET /api/squads/DDWMISSI` e `/rollup` retornam 404** no squad novo sem Jira conectado. Esperado sem sincronização, mas as telas de squad ficam vazias; confirmar com o Jira conectado.
 6. 🟡 **Poker e Retro não têm endpoint para apagar sala/quadro** (só participantes, votos, cards). Salas de teste só saem com a limpeza do banco. Para produção, avaliar se é intencional.
 7. 🟡 **Telas lentas na primeira pintura**: `/room`, `/retro` e o modal "Nova sessão" demoram alguns segundos animando o fade-in antes de ficarem clicáveis (observado no navegador embutido, 2 OCPU). Vale medir em máquina comum.
+
+### Fluxo básico: primeiro login, primeira equipe, convidar pessoas
+
+| # | Passo | Resultado |
+|---|---|---|
+| ✅ | Login ADMIN na produção | funciona (sessão, `/api/auth/me`, token) |
+| ✅ | **Criar equipe** (`POST /api/projects`) | cria o projeto, o criador vira **Agile Master (liderança)** e a equipe ativa dele passa a ser a nova |
+| ✅ | Chave de equipe duplicada / nome vazio | 409 / 400 |
+| ✅ | **Gerar convite por link** (tela do roster) | link `https://app.espacoagil.com.br/invite/<token>`, expira em 7 dias |
+| ✅ | Convite em equipe recém-criada | 201 |
+| ✅ | **Abrir convite logado e aceitar** | mostra "Squad / Papel", aceita, vai para `/squad` e a pessoa aparece no roster com o papel |
+| ✅ | Convite é de uso único | segundo aceite: 400 |
+| ✅ | Aceitar sem login / token inválido | 401 / 401 |
+| ✅ | Cadastro é 100% local (sem chamada ao Jira) | confirmado no código (`AuthService.register`) |
+| ✅ | Pós-login volta ao `/invite/<token>`; `/invite/` está liberada do onboarding obrigatório | 11 testes unitários passam (`auth-routing.test.ts`), incluindo "cadastro com returnUrl" |
+
+**Não executado (precisa de pessoa/conta nova):** a tela `/onboarding` (só aparece para quem não tem equipe) e o cadastro real de alguém convidado. O que se viu: a regra de e-mail `@totvs.com.br` vale para quem for convidado a se cadastrar.
+
+Achados do fluxo:
+- ℹ️ `GET /api/squads/{id}/invites` ("listPending") devolve também convites já aceitos (`status: ACCEPTED`), mas o roster **já filtra `PENDING`** no frontend (`squad/roster/page.tsx`). Sem impacto na tela; só o nome do método engana. Não corrigido de propósito: mudar o contrato da API não traz ganho.
+- 🟡 Convite aceito vira integrante com o `jiraAccountId` igual ao id do usuário (sem Jira). Esperado, mas quando o Jira for conectado pode duplicar a pessoa. Validar no sync real.
+- ℹ️ `GET /api/squads/{id}` retorna 404 até haver sincronização: o "squad" do roster e o "projeto" criado no onboarding são entidades diferentes.
+
+Dados de teste deixados: equipe `SMOKETEST` ("Smoke Test (apagar)") com 1 convite pendente, e o ADMIN agora é integrante Developer da equipe `DDWMISSI` (convite aceito).
 
 Não coberto: Showcase (criação), Brainstorming pela interface, sprint-planner (criação), Jolt, Prompt Hub (criar item), Workspace (criar quadro), importação do Jira, chat de IA (sem chave de IA configurada na VM).
 
