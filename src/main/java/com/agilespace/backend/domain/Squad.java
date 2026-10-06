@@ -35,6 +35,10 @@ public class Squad {
     @Column(name = "sprint_field_id")
     private String sprintFieldId;
 
+    /** ID do quadro Scrum no Jira (rapidViewId). Guardado como texto; vazio = ainda não descoberto/informado. */
+    @Column(name = "rapid_view_id", length = 50)
+    private String rapidViewId;
+
     @Column(name = "active_sprint_id")
     private String activeSprintId;
 

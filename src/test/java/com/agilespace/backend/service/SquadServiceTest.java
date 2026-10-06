@@ -225,4 +225,65 @@ class SquadServiceTest {
             verify(worklogCacheRepository).deleteById("squad-alpha_ALPHA-10");
         }
     }
+
+    @org.junit.jupiter.api.Nested
+    @org.junit.jupiter.api.DisplayName("Leitura do rollup quando a sprint ativa não tem rollup")
+    class RollupFallbackTests {
+
+        private com.agilespace.backend.domain.SquadMetricsRollup rollup(String sprint, String computedAt) {
+            com.agilespace.backend.domain.SquadMetricsRollup r = new com.agilespace.backend.domain.SquadMetricsRollup();
+            r.setSquadId("DDW");
+            r.setSprintId(sprint);
+            r.setComputedAt(computedAt);
+            return r;
+        }
+
+        @org.junit.jupiter.api.Test
+        @org.junit.jupiter.api.DisplayName("active_sprint_id = UNMAPPED sem rollup: devolve o rollup mais recente em vez de 404")
+        void fallsBackToLatestRollup() {
+            com.agilespace.backend.domain.Squad squad = com.agilespace.backend.domain.Squad.builder().id("DDW").activeSprintId("UNMAPPED").build();
+            org.mockito.Mockito.when(squadRepository.findById("DDW")).thenReturn(java.util.Optional.of(squad));
+            org.mockito.Mockito.when(rollupRepository.findBySquadIdAndSprintId("DDW", "UNMAPPED")).thenReturn(java.util.Optional.empty());
+            org.mockito.Mockito.when(rollupRepository.findBySquadId("DDW")).thenReturn(java.util.List.of(
+                    rollup("1", "2026-10-01T10:00:00Z"), rollup("52883", "2026-10-06T17:26:04Z")));
+
+            java.util.Optional<com.agilespace.backend.domain.SquadMetricsRollup> got = service.getRollup("DDW");
+
+            org.junit.jupiter.api.Assertions.assertTrue(got.isPresent());
+            org.junit.jupiter.api.Assertions.assertEquals("52883", got.get().getSprintId());
+        }
+
+        @org.junit.jupiter.api.Test
+        @org.junit.jupiter.api.DisplayName("Com rollup na sprint ativa, ele tem prioridade")
+        void activeSprintWins() {
+            com.agilespace.backend.domain.Squad squad = com.agilespace.backend.domain.Squad.builder().id("DDW").activeSprintId("7").build();
+            org.mockito.Mockito.when(squadRepository.findById("DDW")).thenReturn(java.util.Optional.of(squad));
+            org.mockito.Mockito.when(rollupRepository.findBySquadIdAndSprintId("DDW", "7")).thenReturn(java.util.Optional.of(rollup("7", "2026-09-01T00:00:00Z")));
+
+            org.junit.jupiter.api.Assertions.assertEquals("7", service.getRollup("DDW").orElseThrow().getSprintId());
+        }
+
+        @org.junit.jupiter.api.Test
+        @org.junit.jupiter.api.DisplayName("Sem nenhum rollup continua vazio")
+        void emptyWhenNothing() {
+            org.mockito.Mockito.when(squadRepository.findById("DDW")).thenReturn(java.util.Optional.empty());
+            org.mockito.Mockito.when(rollupRepository.findBySquadId("DDW")).thenReturn(java.util.List.of());
+            org.junit.jupiter.api.Assertions.assertTrue(service.getRollup("DDW").isEmpty());
+        }
+    }
+
+    @org.junit.jupiter.api.Nested
+    @org.junit.jupiter.api.DisplayName("ID do quadro Scrum")
+    class RapidViewIdTests {
+        @org.junit.jupiter.api.Test
+        @org.junit.jupiter.api.DisplayName("saveSquad guarda o rapidViewId enviado (antes era descartado)")
+        void savesRapidViewId() {
+            org.mockito.Mockito.when(squadRepository.findById("DDW")).thenReturn(java.util.Optional.empty());
+            org.mockito.Mockito.when(squadRepository.save(org.mockito.ArgumentMatchers.any(com.agilespace.backend.domain.Squad.class))).thenAnswer(i -> i.getArgument(0));
+
+            com.agilespace.backend.domain.Squad saved = service.saveSquad(com.agilespace.backend.domain.Squad.builder().id("DDW").rapidViewId("1234").build());
+
+            org.junit.jupiter.api.Assertions.assertEquals("1234", saved.getRapidViewId());
+        }
+    }
 }

@@ -74,4 +74,15 @@ public class JiraController {
             request.getSelectedProjectKey()
         );
     }
+
+    @PostMapping("/boards")
+    public ResponseEntity<String> listScrumBoards(@RequestBody java.util.Map<String, String> body) {
+        String domain = body.get("domain");
+        String token = body.get("token");
+        String projectKey = body.get("projectKey");
+        if (domain == null || domain.isBlank() || token == null || token.isBlank() || projectKey == null || projectKey.isBlank()) {
+            return ResponseEntity.badRequest().body("{\"error\": \"Domain, Token e projectKey são obrigatórios.\"}");
+        }
+        return jiraService.listScrumBoards(domain, token, projectKey);
+    }
 }

@@ -354,6 +354,39 @@ public class JiraService {
         }
     }
 
+
+    /**
+     * Lista os quadros Scrum de um projeto (/rest/agile/1.0/board?projectKeyOrId=KEY&type=scrum), para descobrir o
+     * rapidViewId sem o usuário precisar digitar. Devolve o JSON do Jira ({values:[{id,name,type}]}).
+     */
+    public ResponseEntity<String> listScrumBoards(String domain, String token, String projectKey) {
+        String cleanDomain = domain.trim().replace("https://", "").replace("http://", "");
+        URI jiraUri;
+        try {
+            jiraUri = new URI("https://" + cleanDomain + "/rest/agile/1.0/board?type=scrum&maxResults=50&projectKeyOrId="
+                    + java.net.URLEncoder.encode(projectKey.trim(), java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("{\"error\": \"Erro ao construir URL do Jira: " + e.getMessage() + "\"}");
+        }
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", "Bearer " + token.trim());
+        headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+        headers.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+        try {
+            ResponseEntity<String> response = exchangeSecure(jiraUri, entity, String.class);
+            return ResponseEntity.ok(response.getBody());
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            log.warn("Jira boards failed with status {}", e.getStatusCode());
+            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+        } catch (Exception e) {
+            log.warn("Jira boards failed: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("{\"error\": \"Erro ao buscar quadros no Jira: " + e.getMessage() + "\"}");
+        }
+    }
+
     /**
      * Busca metadados oficiais de uma sprint (/rest/agile/1.0/sprint/{id}) —
      * nome/estado/datas vindos direto do Jira, em vez de confiar no blob

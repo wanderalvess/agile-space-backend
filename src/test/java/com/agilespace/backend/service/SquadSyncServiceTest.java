@@ -350,4 +350,28 @@ public class SquadSyncServiceTest {
         verify(squadService).saveRollup(rollupCaptor.capture());
         assertEquals(21600L, rollupCaptor.getValue().getExtraMetrics().get("estimateAdjustedTotalSec").asLong());
     }
+
+    @org.junit.jupiter.api.Nested
+    @org.junit.jupiter.api.DisplayName("Sprint efetiva quando os metadados não a identificam")
+    class EffectiveSprintFallbackTests {
+
+        private com.agilespace.backend.domain.SquadIssueSnapshot snap(String sprintId) {
+            return com.agilespace.backend.domain.SquadIssueSnapshot.builder().sprintId(sprintId).build();
+        }
+
+        @org.junit.jupiter.api.Test
+        @org.junit.jupiter.api.DisplayName("UNMAPPED + issues com sprint real: usa a mais frequente")
+        void usesMostFrequentRealSprint() {
+            String got = SquadSyncService.withSnapshotFallback("UNMAPPED",
+                    java.util.List.of(snap("52883"), snap("52883"), snap("1"), snap("UNMAPPED"), snap("")));
+            org.junit.jupiter.api.Assertions.assertEquals("52883", got);
+        }
+
+        @org.junit.jupiter.api.Test
+        @org.junit.jupiter.api.DisplayName("Sprint já identificada não muda; sem sprint real continua UNMAPPED")
+        void keepsIdentifiedAndUnmapped() {
+            org.junit.jupiter.api.Assertions.assertEquals("9", SquadSyncService.withSnapshotFallback("9", java.util.List.of(snap("52883"))));
+            org.junit.jupiter.api.Assertions.assertEquals("UNMAPPED", SquadSyncService.withSnapshotFallback("UNMAPPED", java.util.List.of(snap("UNMAPPED"), snap(""))));
+        }
+    }
 }

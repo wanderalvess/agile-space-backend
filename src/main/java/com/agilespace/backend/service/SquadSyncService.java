@@ -132,6 +132,7 @@ public class SquadSyncService {
         normalizeBlankSprintIds(snapshots, hasAnySprint);
 
         String effectiveSprintId = hasAnySprint ? pickEffectiveSprint(sprintMeta) : UNMAPPED_SPRINT_ID;
+        effectiveSprintId = withSnapshotFallback(effectiveSprintId, snapshots);
 
         if (!isFull && !isBlank(config.getActiveSprintId())
                 && !effectiveSprintId.equals(config.getActiveSprintId()) && !UNMAPPED_SPRINT_ID.equals(effectiveSprintId)) {
@@ -143,7 +144,7 @@ public class SquadSyncService {
             snapshots = mapped.snapshots();
             sprintMeta = mapped.sprintMeta();
             normalizeBlankSprintIds(snapshots, true);
-            effectiveSprintId = pickEffectiveSprint(sprintMeta);
+            effectiveSprintId = withSnapshotFallback(pickEffectiveSprint(sprintMeta), snapshots);
         }
 
         reconcileSprintMetaWithJira(sprintMeta, creds.domain(), creds.token());
@@ -698,6 +699,23 @@ public class SquadSyncService {
             SprintMeta meta = sprintMeta.get(s.getSprintId());
             if (meta != null) s.setSprintName(meta.name);
         }
+    }
+
+
+    /**
+     * Quando os metadados de sprint não identificam a sprint efetiva (UNMAPPED) mas as issues já carregam um id de
+     * sprint real, usa o mais frequente. Evita gravar active_sprint_id = UNMAPPED com o rollup na sprint real.
+     */
+    static String withSnapshotFallback(String effective, List<SquadIssueSnapshot> snapshots) {
+        if (!UNMAPPED_SPRINT_ID.equals(effective)) return effective;
+        return snapshots.stream()
+                .map(SquadIssueSnapshot::getSprintId)
+                .filter(id -> !isBlank(id) && !UNMAPPED_SPRINT_ID.equals(id))
+                .collect(Collectors.groupingBy(id -> id, Collectors.counting()))
+                .entrySet().stream()
+                .max(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey)
+                .orElse(effective);
     }
 
     private static String pickEffectiveSprint(Map<String, SprintMeta> sprintMeta) {

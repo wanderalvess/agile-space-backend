@@ -59,6 +59,7 @@ public class SquadService {
         if (squad.getSyncJql() != null) target.setSyncJql(squad.getSyncJql());
         if (squad.getJiraDomain() != null) target.setJiraDomain(squad.getJiraDomain());
         if (squad.getSprintFieldId() != null) target.setSprintFieldId(squad.getSprintFieldId());
+        if (squad.getRapidViewId() != null) target.setRapidViewId(squad.getRapidViewId());
         if (squad.getActiveSprintId() != null) target.setActiveSprintId(squad.getActiveSprintId());
         if (squad.getSchemaVersion() != null) target.setSchemaVersion(squad.getSchemaVersion());
         if (squad.getRankingEnabled() != null) target.setRankingEnabled(squad.getRankingEnabled());
@@ -96,11 +97,14 @@ public class SquadService {
                 .map(Squad::getActiveSprintId)
                 .filter(s -> s != null && !s.isBlank())
                 .orElse(null);
-        if (activeSprintId == null) {
-            List<SquadMetricsRollup> all = rollupRepository.findBySquadId(squadId);
-            return all.isEmpty() ? Optional.empty() : Optional.of(all.get(all.size() - 1));
+        if (activeSprintId != null) {
+            Optional<SquadMetricsRollup> active = rollupRepository.findBySquadIdAndSprintId(squadId, activeSprintId);
+            if (active.isPresent()) return active;
         }
-        return rollupRepository.findBySquadIdAndSprintId(squadId, activeSprintId);
+        // Sem sprint ativa gravada, ou ela não tem rollup (ex.: active_sprint_id = UNMAPPED enquanto o rollup foi
+        // gravado na sprint real): devolve o mais recente em vez de 404, para o painel mostrar o que já foi sincronizado.
+        return rollupRepository.findBySquadId(squadId).stream()
+                .max(java.util.Comparator.comparing(r -> r.getComputedAt() == null ? "" : r.getComputedAt()));
     }
 
     @Transactional(readOnly = true)
