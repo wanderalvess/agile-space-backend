@@ -18,6 +18,12 @@ public class PokerRoom {
     @Id
     private String id; // ID da sala
 
+    // Trava otimista: várias ações (timer, ciclo da sessão, fila, votos, notas) leem e gravam a
+    // sala inteira; duas gravações sobre a mesma versão não podem se sobrescrever em silêncio.
+    // Wrapper de propósito: null = sala nova (o Spring Data usa isso para decidir persist x merge).
+    @Version
+    private Long version;
+
     @Column(length = 50)
     private String deckType;
 

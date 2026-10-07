@@ -56,10 +56,18 @@ public class PokerService {
         Optional<PokerRoom> existing = room.getId() != null ? roomRepository.findById(room.getId()) : Optional.empty();
         if (existing.isPresent()) {
             requireRoomParticipant(existing.get(), callerId, callerRole);
+            // Quem não envia a versão (cliente antigo, MCP) mantém o comportamento anterior, última
+            // gravação vence. Sem isso o Spring Data trataria a sala como nova e tentaria um INSERT.
+            if (room.getVersion() == null) {
+                room.setVersion(existing.get().getVersion());
+            }
         } else {
             room.setCreatorId(callerId);
         }
-        PokerRoom saved = roomRepository.save(room);
+        // saveAndFlush: a versão só é incrementada no flush, e o broadcast abaixo ainda roda dentro
+        // da transação. Com save() os clientes receberiam a versão antiga e o próprio autor tomaria
+        // 409 na ação seguinte.
+        PokerRoom saved = roomRepository.saveAndFlush(room);
         webSocketHandler.broadcastEvent(saved.getId(), "ROOM_UPDATED", saved);
         return saved;
     }
@@ -108,7 +116,7 @@ public class PokerService {
         }
 
         room.setIssuesQueue(queue);
-        PokerRoom saved = roomRepository.save(room);
+        PokerRoom saved = roomRepository.saveAndFlush(room);
         webSocketHandler.broadcastEvent(saved.getId(), "ROOM_UPDATED", saved);
         return saved;
     }

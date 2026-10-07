@@ -93,7 +93,7 @@ class PokerServiceTest {
         @DisplayName("Deve criar nova sala associando o callerId como criador e disparando broadcast")
         void shouldCreateNewRoomAndBroadcastEvent() {
             PokerRoom newRoom = PokerRoom.builder().title("Nova Sala").build();
-            when(roomRepository.save(any(PokerRoom.class))).thenAnswer(i -> {
+            when(roomRepository.saveAndFlush(any(PokerRoom.class))).thenAnswer(i -> {
                 PokerRoom r = i.getArgument(0);
                 r.setId("room-nova");
                 return r;
@@ -103,7 +103,7 @@ class PokerServiceTest {
 
             assertEquals("room-nova", saved.getId());
             assertEquals("user-creator", saved.getCreatorId());
-            verify(roomRepository).save(newRoom);
+            verify(roomRepository).saveAndFlush(newRoom);
             verify(webSocketHandler).broadcastEvent(eq("room-nova"), eq("ROOM_UPDATED"), any(PokerRoom.class));
         }
 
@@ -111,7 +111,7 @@ class PokerServiceTest {
         @DisplayName("Deve permitir ao criador atualizar dados da sala existente")
         void shouldAllowCreatorToUpdateExistingRoom() {
             when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
-            when(roomRepository.save(sampleRoom)).thenReturn(sampleRoom);
+            when(roomRepository.saveAndFlush(sampleRoom)).thenReturn(sampleRoom);
 
             sampleRoom.setTitle("Planning Poker Sprint 45 - Revisado");
             PokerRoom updated = service.saveOrUpdateRoom(sampleRoom, "user-creator", "MEMBER");
@@ -124,12 +124,50 @@ class PokerServiceTest {
         @DisplayName("Deve permitir a um usuário com papel ADMIN atualizar qualquer sala existente")
         void shouldAllowAdminToUpdateRoomEvenIfNotParticipant() {
             when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
-            when(roomRepository.save(sampleRoom)).thenReturn(sampleRoom);
+            when(roomRepository.saveAndFlush(sampleRoom)).thenReturn(sampleRoom);
 
             PokerRoom updated = service.saveOrUpdateRoom(sampleRoom, "admin-user", "ADMIN");
 
             assertNotNull(updated);
-            verify(roomRepository).save(sampleRoom);
+            verify(roomRepository).saveAndFlush(sampleRoom);
+        }
+
+        @Test
+        @DisplayName("Gravação concorrente: o conflito de versão chega ao controller (não é engolido) e nada é transmitido")
+        void shouldPropagateOptimisticLockWithoutBroadcast() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+            when(roomRepository.saveAndFlush(sampleRoom))
+                    .thenThrow(new org.springframework.orm.ObjectOptimisticLockingFailureException(PokerRoom.class, "room-123"));
+
+            assertThrows(org.springframework.dao.OptimisticLockingFailureException.class,
+                    () -> service.saveOrUpdateRoom(sampleRoom, "user-creator", "MEMBER"));
+            verify(webSocketHandler, never()).broadcastEvent(anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("Cliente sem versão (antigo/MCP) em sala existente herda a versão atual em vez de virar INSERT")
+        void shouldKeepWorkingForClientsThatDoNotSendVersion() {
+            PokerRoom stored = PokerRoom.builder().id("room-123").creatorId("user-creator").version(7L).build();
+            PokerRoom incoming = PokerRoom.builder().id("room-123").title("Sem versão").build();
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(stored));
+            when(roomRepository.saveAndFlush(incoming)).thenReturn(incoming);
+
+            service.saveOrUpdateRoom(incoming, "user-creator", "MEMBER");
+
+            assertEquals(7L, incoming.getVersion());
+        }
+
+        @Test
+        @DisplayName("Cliente com versão antiga mantém a versão enviada: o banco decide o conflito")
+        void shouldNotOverrideVersionSentByClient() {
+            PokerRoom stored = PokerRoom.builder().id("room-123").creatorId("user-creator").version(7L).build();
+            PokerRoom incoming = PokerRoom.builder().id("room-123").version(5L).build();
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(stored));
+            when(roomRepository.saveAndFlush(incoming)).thenReturn(incoming);
+
+            service.saveOrUpdateRoom(incoming, "user-creator", "MEMBER");
+
+            assertEquals(5L, incoming.getVersion());
         }
 
         @Test

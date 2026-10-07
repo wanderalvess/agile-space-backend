@@ -9,6 +9,7 @@ import com.agilespace.backend.service.PokerService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -207,5 +208,18 @@ public class PokerController {
         String callerRole = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
         pokerService.deleteChatMessage(roomId, messageId, callerId, callerRole);
         return ResponseEntity.noContent().build();
+    }
+
+    // --- Conflito de gravação ---
+    // O frontend lê, altera e grava a sala inteira a partir de várias ações concorrentes. O
+    // @Version em PokerRoom detecta quando duas gravações partem da mesma versão; devolvemos 409
+    // para o cliente recarregar a sala e avisar o usuário, em vez de um 500 genérico ou de
+    // perder uma das ações sem aviso.
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<Map<String, String>> handleOptimisticLock(OptimisticLockingFailureException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                "error", "CONFLICT",
+                "message", "A sala foi atualizada por outra pessoa antes que essa ação fosse salva. Recarregue os dados e tente novamente."
+        ));
     }
 }
