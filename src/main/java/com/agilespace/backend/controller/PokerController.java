@@ -84,9 +84,12 @@ public class PokerController {
     @PostMapping("/{roomId}/participants")
     public ResponseEntity<PokerParticipant> joinRoom(
             @PathVariable("roomId") String roomId,
-            @RequestBody PokerParticipant participant) {
+            @RequestBody PokerParticipant participant,
+            HttpServletRequest request) {
         participant.setRoomId(roomId);
-        return ResponseEntity.status(HttpStatus.CREATED).body(pokerService.joinRoom(participant));
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        String callerRole = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        return ResponseEntity.status(HttpStatus.CREATED).body(pokerService.joinRoom(participant, callerId, callerRole));
     }
 
     @PostMapping("/{roomId}/heartbeat/{userId}")

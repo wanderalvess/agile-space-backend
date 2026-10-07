@@ -176,9 +176,10 @@ class PokerServiceTest {
                     .role("SCRUM_MASTER")
                     .build();
 
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
             when(participantRepository.findById("room-123_user-wanderson")).thenAnswer(i -> Optional.of(participant));
 
-            PokerParticipant joined = service.joinRoom(participant);
+            PokerParticipant joined = service.joinRoom(participant, "user-wanderson", "MEMBER");
 
             assertEquals("room-123_user-wanderson", joined.getDbId());
             // upsert idempotente: duas entradas simultâneas não violam a PK
@@ -190,6 +191,57 @@ class PokerServiceTest {
             long driftMs = Math.abs(java.time.Instant.parse(joined.getLastSeen()).toEpochMilli() - System.currentTimeMillis());
             assertTrue(driftMs < 5000, "lastSeen fora do instante atual: " + driftMs + "ms");
             verify(webSocketHandler).broadcastEvent(eq("room-123"), eq("PARTICIPANT_JOINED"), eq(joined));
+        }
+
+        private PokerParticipant forged(String id, boolean facilitator) {
+            return PokerParticipant.builder().roomId("room-123").id(id).nickname("X").role("dev").isFacilitator(facilitator).build();
+        }
+
+        @Test
+        @DisplayName("Não deve permitir entrar na sala como outro usuário")
+        void shouldRejectJoinAsAnotherUser() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+            when(participantRepository.findById("room-123_intruso")).thenReturn(Optional.empty());
+
+            ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                    () -> service.joinRoom(forged("vitima", false), "intruso", "MEMBER"));
+            assertEquals(HttpStatus.FORBIDDEN, e.getStatusCode());
+            verify(participantRepository, never()).upsertParticipant(any(), any(), any(), any(), any(), any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Não deve deixar um participante comum se promover a facilitador")
+        void shouldIgnoreSelfDeclaredFacilitator() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+            when(participantRepository.findById("room-123_user-b")).thenReturn(Optional.empty());
+
+            PokerParticipant p = forged("user-b", true);
+            service.joinRoom(p, "user-b", "MEMBER");
+
+            verify(participantRepository).upsertParticipant(
+                    eq("room-123_user-b"), eq("user-b"), eq("room-123"), any(), any(), any(), eq(false), any(), anyString());
+        }
+
+        @Test
+        @DisplayName("Criador da sala entra como facilitador")
+        void shouldKeepFacilitatorForCreator() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+
+            service.joinRoom(forged("user-creator", true), "user-creator", "MEMBER");
+
+            verify(participantRepository).upsertParticipant(
+                    eq("room-123_user-creator"), eq("user-creator"), eq("room-123"), any(), any(), any(), eq(true), any(), anyString());
+        }
+
+        @Test
+        @DisplayName("Facilitador pode editar o papel de outro participante")
+        void shouldAllowFacilitatorToEditOthers() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+
+            service.joinRoom(forged("user-b", false), "user-creator", "MEMBER");
+
+            verify(participantRepository).upsertParticipant(
+                    eq("room-123_user-b"), eq("user-b"), eq("room-123"), any(), any(), any(), any(), any(), anyString());
         }
 
         @Test

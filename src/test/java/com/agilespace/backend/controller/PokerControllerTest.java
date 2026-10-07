@@ -76,9 +76,12 @@ public class PokerControllerTest {
     @Test
     public void testJoinRoom() {
         PokerParticipant participant = new PokerParticipant();
-        when(service.joinRoom(participant)).thenReturn(participant);
-        
-        ResponseEntity<PokerParticipant> response = controller.joinRoom("room-1", participant);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("user-1");
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE)).thenReturn("MEMBER");
+        when(service.joinRoom(participant, "user-1", "MEMBER")).thenReturn(participant);
+
+        ResponseEntity<PokerParticipant> response = controller.joinRoom("room-1", participant, request);
         
         assertEquals(HttpStatus.CREATED, response.getStatusCode());
         assertEquals("room-1", participant.getRoomId());

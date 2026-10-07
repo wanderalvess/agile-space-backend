@@ -40,6 +40,11 @@ public class PokerService {
     private final PokerChatMessageRepository chatMessageRepository;
     private final PokerWebSocketHandler webSocketHandler;
 
+    static final int CHAT_MAX_TEXT = 8000;
+    static final int CHAT_MAX_SENDER_NAME = 120;
+    static final int CHAT_MAX_SENDER_CATEGORY = 255;
+    private static final Set<String> CHAT_KINDS = Set.of("text", "code");
+
     // --- Room Logic ---
     @Transactional(readOnly = true)
     public Optional<PokerRoom> getRoom(String roomId) {
@@ -144,8 +149,27 @@ public class PokerService {
         return participantRepository.findByRoomIdOrderByNicknameAsc(roomId);
     }
 
+    /**
+     * Entrada/atualização de participante. A identidade vem do JWT, não do corpo:
+     * o próprio usuário se registra, mas só vira facilitador se for o criador da sala,
+     * ADMIN/LEAD ou já for facilitador (o "assumir controle" do frontend grava o creatorId
+     * da sala antes). Editar outro participante (papel, rebaixar facilitador antigo) é coisa de facilitador.
+     */
     @Transactional
-    public PokerParticipant joinRoom(PokerParticipant participant) {
+    public PokerParticipant joinRoom(PokerParticipant participant, String callerId, String callerRole) {
+        if (callerId == null || callerId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Autenticação necessária.");
+        }
+        PokerRoom room = roomRepository.findById(participant.getRoomId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sala não encontrada"));
+        boolean facilitatorCaller = isRoomFacilitator(room, callerId, callerRole);
+        boolean self = callerId.equals(participant.getId());
+        if (!self && !facilitatorCaller) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só é possível entrar na sala como o próprio usuário.");
+        }
+        if (!facilitatorCaller) {
+            participant.setIsFacilitator(false);
+        }
         String dbId = participant.getRoomId() + "_" + participant.getId();
         participant.setDbId(dbId);
         participant.setLastSeen(nowUtcIso());
@@ -162,6 +186,15 @@ public class PokerService {
         PokerParticipant saved = participantRepository.findById(dbId).orElse(participant);
         webSocketHandler.broadcastEvent(participant.getRoomId(), "PARTICIPANT_JOINED", saved);
         return saved;
+    }
+
+    private boolean isRoomFacilitator(PokerRoom room, String callerId, String callerRole) {
+        if (isPrivilegedRole(callerRole) || callerId.equals(room.getCreatorId())) {
+            return true;
+        }
+        return participantRepository.findById(room.getId() + "_" + callerId)
+                .map(p -> Boolean.TRUE.equals(p.getIsFacilitator()))
+                .orElse(false);
     }
 
     /** Instante atual em UTC no formato ISO-8601 com milissegundos e sufixo Z (o 'Z' precisa ser verdadeiro). */
@@ -268,25 +301,66 @@ public class PokerService {
 
     @Transactional
     public PokerChatMessage saveChatMessage(String roomId, PokerChatMessage message, String callerId) {
+        if (message == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mensagem inválida.");
+        }
         if (callerId == null || !callerId.equals(message.getSenderId())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só é possível enviar mensagens como o próprio usuário.");
         }
-        if (message.getId() == null || message.getId().trim().isEmpty()) {
-            message.setId(java.util.UUID.randomUUID().toString());
-        }
         requireChatChannelAccess(message.getChannelId(), callerId);
-        message.setRoomId(roomId);
-        if (message.getTs() == null || message.getTs().trim().isEmpty()) {
-            message.setTs(new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").format(new java.util.Date()));
+        String text = message.getText();
+        if (text == null || text.trim().isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A mensagem não pode ser vazia.");
         }
-        PokerChatMessage saved = chatMessageRepository.save(message);
-        publishChatEvent(roomId, "CHAT_MESSAGE_SAVED", saved, saved.getChannelId());
+        if (text.length() > CHAT_MAX_TEXT) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A mensagem excede " + CHAT_MAX_TEXT + " caracteres.");
+        }
+        String kind = message.getKind() == null || message.getKind().isBlank() ? "text" : message.getKind();
+        if (!CHAT_KINDS.contains(kind)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tipo de mensagem inválido.");
+        }
+        PokerRoom room = roomRepository.findById(roomId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sala não encontrada"));
+        Optional<PokerParticipant> participant = participantRepository.findById(roomId + "_" + callerId);
+        if (participant.isEmpty() && !callerId.equals(room.getCreatorId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Apenas participantes da sala podem usar o chat.");
+        }
+        // Nome exibido vem do cadastro do participante, não do corpo da requisição.
+        String senderName = participant.map(PokerParticipant::getNickname)
+                .filter(n -> n != null && !n.isBlank())
+                .orElse(message.getSenderName());
+        if (senderName == null || senderName.trim().isEmpty() || senderName.length() > CHAT_MAX_SENDER_NAME) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nome do remetente inválido.");
+        }
+        if (message.getSenderCategory() != null && message.getSenderCategory().length() > CHAT_MAX_SENDER_CATEGORY) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Categoria do remetente inválida.");
+        }
+        String id = message.getId() == null || message.getId().trim().isEmpty()
+                ? java.util.UUID.randomUUID().toString() : message.getId();
+        // id vindo do cliente nunca sobrescreve uma mensagem existente (de outro autor ou sala)
+        if (chatMessageRepository.existsById(id)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma mensagem com este id.");
+        }
+        PokerChatMessage toSave = PokerChatMessage.builder()
+                .id(id)
+                .roomId(roomId)
+                .channelId(message.getChannelId())
+                .senderId(callerId)
+                .senderName(senderName)
+                .senderCategory(message.getSenderCategory())
+                .text(text)
+                .kind(kind)
+                .ts(nowUtcIso())
+                .build();
+        PokerChatMessage saved = chatMessageRepository.save(toSave);
+        publishChatEvent(roomId, "CHAT_MESSAGE_SAVED", saved, saved.getChannelId(), callerId);
         return saved;
     }
 
     @Transactional
     public void deleteChatMessage(String roomId, String messageId, String callerId, String callerRole) {
         PokerChatMessage message = chatMessageRepository.findById(messageId)
+                .filter(m -> roomId.equals(m.getRoomId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Mensagem não encontrada"));
 
         boolean isAuthor = callerId != null && callerId.equals(message.getSenderId());
@@ -310,7 +384,7 @@ public class PokerService {
         publishChatEvent(roomId, "CHAT_MESSAGE_DELETED", Map.of(
                 "messageId", messageId,
                 "channelId", message.getChannelId()
-        ), message.getChannelId());
+        ), message.getChannelId(), callerId);
     }
 
     private static boolean isDmChannel(String channelId) {
@@ -337,16 +411,26 @@ public class PokerService {
     }
 
     /** Eventos de DM chegam só aos dois participantes; os demais canais, à sala toda. */
-    private void publishChatEvent(String roomId, String eventType, Object payload, String channelId) {
+    private void publishChatEvent(String roomId, String eventType, Object payload, String channelId, String callerId) {
         if (isDmChannel(channelId)) {
-            String rest = channelId.substring(3);
-            int sep = rest.indexOf('_');
-            Set<String> users = sep > 0
-                    ? new java.util.HashSet<>(List.of(rest.substring(0, sep), rest.substring(sep + 1)))
-                    : Set.of();
-            webSocketHandler.broadcastEventToUsers(roomId, eventType, payload, users);
+            webSocketHandler.broadcastEventToUsers(roomId, eventType, payload, dmUsers(channelId, callerId));
         } else {
             webSocketHandler.broadcastEvent(roomId, eventType, payload);
         }
+    }
+
+    /** dm_uidA_uidB: com o caller conhecido, o outro uid é o resto — correto mesmo se o uid contiver "_". */
+    private static Set<String> dmUsers(String channelId, String callerId) {
+        String rest = channelId.substring(3);
+        if (callerId == null) return Set.of();
+        String asFirst = callerId + "_";
+        String asSecond = "_" + callerId;
+        if (rest.startsWith(asFirst) && rest.length() > asFirst.length()) {
+            return new java.util.HashSet<>(List.of(callerId, rest.substring(asFirst.length())));
+        }
+        if (rest.endsWith(asSecond) && rest.length() > asSecond.length()) {
+            return new java.util.HashSet<>(List.of(callerId, rest.substring(0, rest.length() - asSecond.length())));
+        }
+        return Set.of();
     }
 }
