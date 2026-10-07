@@ -62,6 +62,59 @@ class JiraProfieldsServiceTest {
             verifyNoInteractions(projectConfigRepository);
         }
 
+        private User caller(String id, String role) {
+            return User.builder().id(id).role(role).email(id + "@x.com").name(id).build();
+        }
+
+        private ProjectMemberRole leader(String userId) {
+            return ProjectMemberRole.builder().projectId("PROJ1").roleName("Agile Master").roleKey("AGILE_MASTER")
+                    .userId(userId).isLeadership(true).build();
+        }
+
+        @Test
+        @DisplayName("Usuário que não é liderança não pode reimportar projeto que já tem time")
+        void syncRejectsNonLeaderOnExistingProject() {
+            when(projectMemberRoleRepository.findByProjectId("PROJ1")).thenReturn(List.of(leader("dono")));
+
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                    () -> service.syncProjectFromProfields("evil.example.com", "proj1", "tok", caller("intruso", "MEMBER")));
+            assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+            verify(projectMemberRoleRepository, never()).deleteByProjectId(any());
+        }
+
+        @Test
+        @DisplayName("Confirmação de importação também exige liderança do projeto existente")
+        void confirmRejectsNonLeaderOnExistingProject() {
+            when(projectMemberRoleRepository.findByProjectId("PROJ1")).thenReturn(List.of(leader("dono")));
+
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                    () -> service.confirmImportFromProfields("evil.example.com", "PROJ1", "tok",
+                            new com.agilespace.backend.dto.ProjectImportConfirmRequest(), caller("intruso", "MEMBER")));
+            assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+            verify(projectMemberRoleRepository, never()).deleteByProjectId(any());
+        }
+
+        @Test
+        @DisplayName("Liderança do projeto e ADMIN passam pelo guard (falham só adiante, sem token)")
+        void syncAllowsLeaderAndAdmin() {
+            lenient().when(projectMemberRoleRepository.findByProjectId("PROJ1")).thenReturn(List.of(leader("dono")));
+
+            assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+                    () -> service.syncProjectFromProfields("empresa.atlassian.net", "PROJ1", null, caller("dono", "MEMBER"))).getStatusCode());
+            assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+                    () -> service.syncProjectFromProfields("empresa.atlassian.net", "PROJ1", null, caller("adm", "ADMIN"))).getStatusCode());
+        }
+
+        @Test
+        @DisplayName("Domínio com caminho, credencial ou query é rejeitado antes de qualquer chamada")
+        void syncRejectsMalformedDomain() {
+            for (String bad : List.of("evil.com/x#", "user@evil.com", "evil.com?a=b", "a b.com")) {
+                ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                        () -> service.previewProjectFromProfields(bad, "PROJ1", "tok", caller("u", "MEMBER")));
+                assertEquals(HttpStatus.BAD_REQUEST, ex.getStatusCode(), bad);
+            }
+        }
+
         @Test
         @DisplayName("Deve retornar vazio quando projeto Profields não for encontrado")
         void getProjectDetailsReturnsEmptyWhenNotFound() {

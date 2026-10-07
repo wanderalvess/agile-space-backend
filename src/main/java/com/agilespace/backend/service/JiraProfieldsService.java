@@ -41,6 +41,7 @@ public class JiraProfieldsService {
     private final UserRepository userRepository;
     private final JiraAdminService jiraAdminService;
     private final JiraService jiraService;
+    private final org.springframework.transaction.PlatformTransactionManager transactionManager;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private RestTemplate createSslLenientRestTemplate() {
@@ -75,7 +76,6 @@ public class JiraProfieldsService {
      * Sincroniza o projeto a partir da API Profields do Jira.
      * Endpoint: https://{domain}/rest/profields/api/2.0/layouts/projects/{projectKey}?expand=predefined
      */
-    @Transactional
     public ProjectDetailDto syncProjectFromProfields(String domain, String projectKey, String token) {
         return syncProjectFromProfields(domain, projectKey, token, null);
     }
@@ -86,24 +86,43 @@ public class JiraProfieldsService {
      * membro retornado pelo Profields — sem isso ele fica sem projeto associado e trava no
      * onboarding, já que o sync não sabe reconciliar "quem está criando" com "quem o Jira retornou".
      */
-    @Transactional
     public ProjectDetailDto syncProjectFromProfields(String domain, String projectKey, String token, User creator) {
+        requireCanOverwriteProject(projectKey, creator);
+        // Consulta ao Jira (rede, até dezenas de segundos) fora da transação: só a gravação segura conexão do pool.
         ProfieldsSnapshot snapshot = fetchProfieldsSnapshot(domain, projectKey, token, creator);
-        String cleanKey = snapshot.project().getId();
-
-        // Salva Projeto
-        ProjectConfig project = projectConfigRepository.save(snapshot.project());
-
-        // Atualiza Membros
-        projectMemberRoleRepository.deleteByProjectId(cleanKey);
-        projectMemberRoleRepository.flush(); // Garante que a exclusão ocorreu antes do insert
-
-        List<ProjectMemberRole> members = projectMemberRoleRepository.saveAll(snapshot.members());
-        projectMemberRoleRepository.flush(); // Força o insert imediato
-
-        return toDetailDto(project, members);
+        return persistImport(snapshot.project(), snapshot.members());
     }
 
+    /** Grava projeto + time numa transação curta (troca o time inteiro). */
+    private ProjectDetailDto persistImport(ProjectConfig project, List<ProjectMemberRole> members) {
+        return new org.springframework.transaction.support.TransactionTemplate(transactionManager).execute(status -> {
+            String cleanKey = project.getId();
+            ProjectConfig saved = projectConfigRepository.save(project);
+            projectMemberRoleRepository.deleteByProjectId(cleanKey);
+            projectMemberRoleRepository.flush(); // Garante que a exclusão ocorreu antes do insert
+            List<ProjectMemberRole> savedMembers = projectMemberRoleRepository.saveAll(members);
+            projectMemberRoleRepository.flush();
+            return toDetailDto(saved, savedMembers);
+        });
+    }
+
+    /**
+     * Sync/confirm apagam e recriam o time do projeto. Projeto que já tem time só pode ser reimportado
+     * por ADMIN ou por quem já é liderança dele — senão qualquer usuário logado sobrescreveria time e
+     * liderança de um projeto alheio apontando o sync para um "Jira" que ele controla.
+     */
+    private void requireCanOverwriteProject(String projectKey, User caller) {
+        if (caller == null || projectKey == null) return;
+        if ("ADMIN".equalsIgnoreCase(caller.getRole())) return;
+        List<ProjectMemberRole> existing = projectMemberRoleRepository.findByProjectId(projectKey.trim().toUpperCase());
+        if (existing == null || existing.isEmpty()) return;
+        boolean leader = existing.stream()
+                .anyMatch(m -> m.isLeadership() && caller.getId() != null && caller.getId().equals(m.getUserId()));
+        if (!leader) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Este projeto já tem time cadastrado. Só a liderança do projeto (ou um admin) pode reimportá-lo.");
+        }
+    }
 
     /** Cargos sem governança: qualquer um pode ser escolhido na prévia da importação. */
     private static final Set<String> SELF_ASSIGNABLE_ROLES = Set.of(
@@ -116,24 +135,15 @@ public class JiraProfieldsService {
      * (ninguém se promove a liderança pela prévia); (4) marcar "sou eu" numa pessoa ainda sem conta vinculada.
      * Quem importa e não se selecionou entra como Developer, nunca como liderança.
      */
-    @Transactional
     public ProjectDetailDto confirmImportFromProfields(String domain, String projectKey, String token,
                                                        com.agilespace.backend.dto.ProjectImportConfirmRequest request, User creator) {
         if (request == null) {
             throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, "Dados da importação ausentes");
         }
+        requireCanOverwriteProject(projectKey, creator);
         ProfieldsSnapshot base = fetchProfieldsSnapshot(domain, projectKey, token, creator, false);
         ProfieldsSnapshot applied = applyConfirmation(base, request, creator);
-        String cleanKey = applied.project().getId();
-        ProjectConfig project = applied.project();
-        List<ProjectMemberRole> chosen = applied.members();
-
-        ProjectConfig saved = projectConfigRepository.save(project);
-        projectMemberRoleRepository.deleteByProjectId(cleanKey);
-        projectMemberRoleRepository.flush();
-        List<ProjectMemberRole> members = projectMemberRoleRepository.saveAll(chosen);
-        projectMemberRoleRepository.flush();
-        return toDetailDto(saved, members);
+        return persistImport(applied.project(), applied.members());
     }
 
 
@@ -222,7 +232,6 @@ public class JiraProfieldsService {
      * já cadastrados e fallback Agile Master do criador) e devolve o DTO SEM gravar nada.
      * Usado pelo onboarding pra o usuário conferir o que vai entrar antes de confirmar.
      */
-    @Transactional(readOnly = true)
     public ProjectDetailDto previewProjectFromProfields(String domain, String projectKey, String token, User creator) {
         ProfieldsSnapshot snapshot = fetchProfieldsSnapshot(domain, projectKey, token, creator);
         return toDetailDto(snapshot.project(), snapshot.members());
@@ -247,6 +256,16 @@ public class JiraProfieldsService {
                 ? domain.trim().replace("https://", "").replace("http://", "")
                 : "jira.empresa.com.br";
         String cleanKey = projectKey.trim().toUpperCase();
+        // `domain` vem do cliente: precisa ser só um host[:porta] (nada de caminho, credencial ou query) e passar
+        // pelo mesmo bloqueio de alvos sensíveis/allowlist usado nas demais chamadas ao Jira.
+        if (!cleanDomain.matches("[A-Za-z0-9.-]+(:[0-9]{1,5})?")) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, "Domínio do Jira inválido");
+        }
+        try {
+            jiraService.assertNotBlockedHost(java.net.URI.create("https://" + cleanDomain));
+        } catch (IllegalArgumentException e) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
 
         log.info("Consultando Profields para projeto {} no domínio {}", cleanKey, cleanDomain);
 
@@ -270,7 +289,7 @@ public class JiraProfieldsService {
             jiraProjectName = fetchJiraProjectName(restTemplate, entity, cleanDomain, cleanKey);
             JsonNode valuesNode = fetchProfieldsValues(restTemplate, entity, cleanDomain, cleanKey);
             if (valuesNode != null) {
-                log.info("Profields {}: forma da resposta de valores: {}", cleanKey, describeShapeWithTypes(valuesNode));
+                log.debug("Profields {}: forma da resposta de valores: {}", cleanKey, describeShapeWithTypes(valuesNode));
                 rootNode = toSyntheticFields(rootNode, valuesNode);
             }
         } catch (org.springframework.web.server.ResponseStatusException e) {
@@ -297,9 +316,9 @@ public class JiraProfieldsService {
         // Diagnóstico: só rótulos/estrutura, sem valores. Ajuda a mapear campos que o parser não reconheceu.
         Map<String, JsonNode> receivedFields = new HashMap<>();
         collectFields(rootNode, receivedFields);
-        log.info("Profields {}: rotulos de campo recebidos: {}", cleanKey, receivedFields.keySet());
-        log.info("Profields {}: estrutura recebida: {}", cleanKey, describeStructure(rootNode));
-        log.info("Profields {}: segmento={} tribo={} localidade={} vp={} status={} devTeam={} membros={}",
+        log.debug("Profields {}: rotulos de campo recebidos: {}", cleanKey, receivedFields.keySet());
+        log.debug("Profields {}: estrutura recebida: {}", cleanKey, describeStructure(rootNode));
+        log.debug("Profields {}: segmento={} tribo={} localidade={} vp={} status={} devTeam={} membros={}",
                 cleanKey, project.getSegmentName() != null, project.getTribeName() != null,
                 project.getLocality() != null, project.getVpArea() != null, project.getStatus() != null,
                 project.getDevTeamSize(), members.size());
@@ -316,8 +335,8 @@ public class JiraProfieldsService {
         }
 
         if (creatorFallback && creator != null && members.stream().noneMatch(m -> creator.getId().equals(m.getUserId()))) {
-            log.warn("Usuário {} ({}) disparou o sync do projeto {} mas não bateu com nenhum membro retornado pelo Profields — vinculando como Agile Master fallback pra não travar o onboarding.",
-                    creator.getId(), creator.getEmail(), cleanKey);
+            log.warn("Usuário {} disparou o sync do projeto {} mas não bateu com nenhum membro retornado pelo Profields — vinculando como Agile Master fallback pra não travar o onboarding.",
+                    creator.getId(), cleanKey);
             members.add(ProjectMemberRole.builder()
                     .projectId(cleanKey)
                     .roleName("Agile Master")

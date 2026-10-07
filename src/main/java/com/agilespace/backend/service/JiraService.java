@@ -83,6 +83,24 @@ public class JiraService {
     }
 
     /**
+     * Lista opcional de domínios Jira aceitos (app.jira.allowed-domains, separada por vírgula; cada entrada
+     * vale para o host exato e seus subdomínios). Vazia = sem restrição por nome (comportamento anterior).
+     * Com ela preenchida, `domain` livre não consegue apontar o token do Jira para um host arbitrário.
+     */
+    @org.springframework.beans.factory.annotation.Value("${app.jira.allowed-domains:}")
+    private String allowedDomains = "";
+
+    void assertAllowedDomain(String host) {
+        if (allowedDomains == null || allowedDomains.isBlank()) return;
+        String h = host.toLowerCase(java.util.Locale.ROOT);
+        for (String entry : allowedDomains.split(",")) {
+            String d = entry.trim().toLowerCase(java.util.Locale.ROOT);
+            if (!d.isEmpty() && (h.equals(d) || h.endsWith("." + d))) return;
+        }
+        throw new IllegalArgumentException("Domain não permitido: " + host);
+    }
+
+    /**
      * Bloqueia alvos claramente sensíveis (loopback, link-local — inclui
      * 169.254.169.254, o endpoint de metadata de cloud) antes de proxyar
      * qualquer request. `domain` é texto livre salvo por usuário (squad pode
@@ -93,12 +111,14 @@ public class JiraService {
      * continuam permitidos — sem visibilidade de onde o Jira real está
      * hospedado pra saber se travar essas faixas quebraria produção).
      */
-    private void assertNotBlockedHost(URI uri) {
+    public void assertNotBlockedHost(URI uri) {
         String host = uri.getHost();
         if (host == null) throw new IllegalArgumentException("Domain inválido.");
+        assertAllowedDomain(host);
         try {
             InetAddress addr = InetAddress.getByName(host);
-            if (addr.isLoopbackAddress() || addr.isLinkLocalAddress() || addr.isAnyLocalAddress()) {
+            if (addr.isLoopbackAddress() || addr.isLinkLocalAddress() || addr.isAnyLocalAddress()
+                    || addr.isMulticastAddress()) {
                 throw new IllegalArgumentException("Domain não permitido: " + host);
             }
         } catch (java.net.UnknownHostException e) {
