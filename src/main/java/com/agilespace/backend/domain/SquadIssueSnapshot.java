@@ -95,6 +95,10 @@ public class SquadIssueSnapshot {
     @Column(name = "dates_are_inferred")
     private Boolean datesAreInferred;
 
+    // summary do Jira da própria issue (null em linhas sincronizadas antes da V29).
+    @Column(name = "title", columnDefinition = "TEXT")
+    private String title;
+
     @Column(name = "parent_key")
     private String parentKey;
 

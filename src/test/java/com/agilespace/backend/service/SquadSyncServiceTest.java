@@ -60,6 +60,7 @@ public class SquadSyncServiceTest {
         for (String key : keys) {
             if (issues.length() > 0) issues.append(",");
             issues.append("{\"key\":\"").append(key).append("\",\"fields\":{")
+                    .append("\"summary\":\"Título de ").append(key).append("\",")
                     .append("\"issuetype\":{\"name\":\"Story\"},")
                     .append("\"status\":{\"name\":\"To Do\",\"statusCategory\":{\"key\":\"new\"}},")
                     .append("\"created\":\"2026-01-01T10:00:00.000-0300\",")
@@ -155,6 +156,26 @@ public class SquadSyncServiceTest {
         assertEquals("u1", lastUpdate.getLastSyncBy());
         assertEquals(2, lastUpdate.getLastSyncIssueCount());
         assertEquals("", lastUpdate.getLastSyncError());
+    }
+
+    @Test
+    public void syncSquad_persistsIssueTitleFromJiraSummary() {
+        when(squadService.getSquad("SQ1")).thenReturn(Optional.of(baseSquad()));
+        when(userJiraConfigRepository.findById("u1")).thenReturn(Optional.of(creds()));
+        when(jiraService.getFields(anyString(), anyString())).thenReturn(ResponseEntity.ok("[]"));
+        when(jiraService.searchIssues(any())).thenReturn(ResponseEntity.ok(issuesResponse("A-1", "A-2")));
+        when(squadService.getIssues(eq("SQ1"), any())).thenReturn(List.of());
+        stubCommonSquadServiceCalls();
+
+        syncService.syncSquad("SQ1", "u1", false);
+
+        // Sem o título gravado, o Cronograma caía para a chave e mostrava "A-1 A-1".
+        ArgumentCaptor<List<SquadIssueSnapshot>> captor = ArgumentCaptor.forClass(List.class);
+        verify(squadService, atLeastOnce()).batchUpsertIssues(eq("SQ1"), captor.capture());
+        List<SquadIssueSnapshot> saved = captor.getAllValues().stream().flatMap(List::stream).toList();
+        assertEquals(2, saved.size());
+        assertEquals("Título de A-1", saved.stream().filter(i -> "A-1".equals(i.getJiraKey())).findFirst().orElseThrow().getTitle());
+        assertEquals("Título de A-2", saved.stream().filter(i -> "A-2".equals(i.getJiraKey())).findFirst().orElseThrow().getTitle());
     }
 
     @Test

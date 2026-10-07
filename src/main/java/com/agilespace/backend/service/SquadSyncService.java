@@ -434,7 +434,7 @@ public class SquadSyncService {
     private record WorklogEntry(String authorId, String authorName, long timeSpentSeconds, Instant started) {}
 
     private record ParsedJiraIssue(
-            String key, String type, boolean isBug, String status, String statusCategory,
+            String key, String title, String type, boolean isBug, String status, String statusCategory,
             long estimateSec, long remainingSec, long loggedSec,
             String updatedAtJira, String createdAtJira, String resolutionDate, String dueDate,
             String targetStart, String targetEnd, boolean datesAreInferred,
@@ -528,6 +528,7 @@ public class SquadSyncService {
         JsonNode parent = fields.path("parent");
         String parentKey = parent.isTextual() ? parent.asText("") : parent.path("key").asText("");
         String parentTitle = parent.path("fields").path("summary").asText("");
+        String title = fields.path("summary").asText("");
 
         List<String> subtaskKeys = new ArrayList<>();
         for (JsonNode st : fields.path("subtasks")) {
@@ -563,7 +564,7 @@ public class SquadSyncService {
             changelog.add(new ChangelogEntry(historyCreated, items));
         }
 
-        return new ParsedJiraIssue(key, type, isBug, status, statusCategory, estimateSec, remainingSec, loggedSec,
+        return new ParsedJiraIssue(key, title, type, isBug, status, statusCategory, estimateSec, remainingSec, loggedSec,
                 updatedAtJira, created, resolutionDate, dueDate, targetStart, targetEnd, datesAreInferred,
                 assigneeId, assigneeName, parentKey, parentTitle, sprintRaw, subtaskKeys, worklogs, changelog);
     }
@@ -734,6 +735,7 @@ public class SquadSyncService {
         return SquadIssueSnapshot.builder()
                 .dbId(null)
                 .jiraKey(issue.key())
+                .title(isBlank(issue.title()) ? null : issue.title())
                 .type(issue.type())
                 .isBug(issue.isBug())
                 .status(issue.status())
