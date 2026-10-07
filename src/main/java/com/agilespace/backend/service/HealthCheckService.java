@@ -47,8 +47,8 @@ public class HealthCheckService {
     }
 
     @Transactional(readOnly = true)
-    public List<HealthCheckBoard> listBoards() {
-        return boardRepository.findAllByOrderByCreatedAtDesc();
+    public List<HealthCheckBoard> listBoards(String squadId) {
+        return boardRepository.findByTeamIgnoreCaseOrderByCreatedAtDesc(squadId);
     }
 
     @Transactional

@@ -1,5 +1,6 @@
 package com.agilespace.backend.domain;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.*;
 import lombok.*;
@@ -13,11 +14,15 @@ import org.hibernate.type.SqlTypes;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class SquadMetricsRollup {
 
     @Id
-    @Column(name = "squad_id")
-    private String squadId; // PK = squadId (apenas 1 rollup ativo por squad)
+    @Column(name = "db_id")
+    private String dbId; // PK = {squadId}_{sprintId} — 1 rollup por sprint, não por squad
+
+    @Column(name = "squad_id", nullable = false)
+    private String squadId;
 
     @Column(name = "sprint_id")
     private String sprintId;

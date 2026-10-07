@@ -1,0 +1,50 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: false
+        use_sql_comments: false
+  flyway:
+    enabled: true
+    clean-disabled: true
+    locations: classpath:db/migration
+    # baseline-on-migrate/out-of-order herdados de application.yml (V1_1__baseline_schema.sql
+    # cobre o cenário de banco com schema pré-existente sem histórico Flyway, sem precisar de
+    # baseline manual).
+
+server:
+  error:
+    include-message: never
+    include-binding-errors: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
+springdoc:
+  swagger-ui:
+    enabled: false
+  api-docs:
+    enabled: false
+
+app:
+  security:
+    encryption-key: ${APP_ENCRYPTION_SECRET}
+    # Sem default de propósito: sem APP_JWT_SECRET o backend não sobe.
+    jwt-secret: ${APP_JWT_SECRET}
+    # Default totvs.com.br em produção (ferramenta interna à TOTVS) — ainda pode ser
+    # sobrescrito via ALLOWED_EMAIL_DOMAIN se necessário. Atenção: variável definida porém
+    # vazia (ex.: docker-compose repassando "${ALLOWED_EMAIL_DOMAIN:-}") NÃO cai neste default;
+    # o ProductionSecretsValidator barra o boot nesse caso.
+    allowed-email-domain: ${ALLOWED_EMAIL_DOMAIN:totvs.com.br}
+  cors:
+    # Sem fallback de propósito: obriga a definir o(s) domínio(s) público(s) reais em produção
+    # em vez de herdar silenciosamente o default de localhost do application.yml.
+    allowed-origins: ${ALLOWED_ORIGINS}

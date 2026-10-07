@@ -1,0 +1,35 @@
+{$DOMAIN} {
+	# Rotas de API que existem SÓ no Next.js (app/api/**). Precisam vir antes do /api/* abaixo, senão caem no
+	# Spring e dão 404 (o backend não tem esses caminhos): chat de IA, embeddings/ingestão do conhecimento,
+	# TDN, mocks e llms.
+	@nextApi path /api/ai/* /api/llms /api/mock-config /api/mock/* /api/tdn/* /api/knowledge/embed /api/knowledge/ingest-pdf /api/knowledge/sync-manuals
+	handle @nextApi {
+		reverse_proxy frontend:9002
+	}
+
+	# API REST, WebSocket, docs e actuator vão pro backend Spring Boot.
+	handle /api/* {
+		reverse_proxy backend:8002
+	}
+	handle /ws/* {
+		# reverse_proxy do Caddy detecta e faz upgrade de WebSocket automaticamente,
+		# sem precisar de config extra pra headers Connection/Upgrade.
+		reverse_proxy backend:8002
+	}
+	handle /actuator/* {
+		reverse_proxy backend:8002
+	}
+	handle /v3/api-docs* {
+		reverse_proxy backend:8002
+	}
+	handle /swagger-ui* {
+		reverse_proxy backend:8002
+	}
+
+	# Resto (app Next.js) vai pro frontend.
+	handle {
+		reverse_proxy frontend:9002
+	}
+
+	encode gzip
+}

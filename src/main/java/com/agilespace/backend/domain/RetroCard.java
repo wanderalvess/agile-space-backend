@@ -1,7 +1,10 @@
 package com.agilespace.backend.domain;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -44,8 +47,11 @@ public class RetroCard {
     private String parentId; // Para cartões agrupados
 
     private String carriedFromBoardId;
-    
+
     private String carriedFromBoardTitle;
+
+    // Quantas vezes esta ação foi reimportada sem ser concluída (sinal de tema recorrente)
+    private Integer carryCount;
 
     // --- Votes collection ---
     @ElementCollection(fetch = FetchType.EAGER)
@@ -53,4 +59,20 @@ public class RetroCard {
     @Column(name = "user_id")
     @Builder.Default
     private List<String> votes = new ArrayList<>();
+
+    // --- Reações rápidas (independentes do voto de priorização) ---
+    // Formato: { "up": ["uid1"], "love": [], "wow": [], "concern": ["uid2"] }
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "reactions", columnDefinition = "jsonb")
+    private JsonNode reactions;
+
+    // Histórico de ideias fundidas neste card (conteúdo das origens, na ordem
+    // em que foram fundidas) — content nunca é reescrito numa fusão, só isso
+    // aqui cresce. Renderizado como linha do tempo no frontend.
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "retro_card_original_texts", joinColumns = @JoinColumn(name = "card_id"))
+    @Column(name = "text", columnDefinition = "TEXT")
+    @OrderColumn(name = "position")
+    @Builder.Default
+    private List<String> originalTexts = new ArrayList<>();
 }

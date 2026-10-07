@@ -4,21 +4,61 @@ import com.agilespace.backend.domain.BrainstormingBoard;
 import com.agilespace.backend.domain.BrainstormingIdea;
 import com.agilespace.backend.domain.BrainstormingGroup;
 import com.agilespace.backend.domain.BrainstormingParticipant;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.BrainstormingService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
 @RestController
 @RequestMapping("/api/brainstormings")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
+@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class BrainstormingController {
 
     private final BrainstormingService brainstormingService;
+    private final com.agilespace.backend.service.SquadAccessService squadAccessService;
+
+    /**
+     * Só o próprio usuário (ou ADMIN) sai de um board removendo sua própria participação.
+     * Antes disso qualquer usuário autenticado removia qualquer participante trocando o userId na URL.
+     */
+    private static void requireSelfOrAdmin(String userId, HttpServletRequest request) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        if ("ADMIN".equalsIgnoreCase(role)) {
+            return;
+        }
+        if (callerId == null || !callerId.equals(userId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito ao próprio usuário.");
+        }
+    }
+
+    /**
+     * Só participantes do board (criador incluso) ou ADMIN apagam board/ideias.
+     * Antes disso qualquer usuário autenticado apagava board ou ideias de qualquer board.
+     */
+    private void requireBoardAccess(String boardId, HttpServletRequest request) {
+        String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        if ("ADMIN".equalsIgnoreCase(role)) {
+            return;
+        }
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        boolean isCreator = callerId != null && brainstormingService.getBoard(boardId)
+                .map(BrainstormingBoard::getCreatorId)
+                .map(callerId::equals)
+                .orElse(false);
+        boolean isParticipant = callerId != null && brainstormingService.getParticipants(boardId).stream()
+                .anyMatch(p -> callerId.equals(p.getId()));
+        if (!isCreator && !isParticipant) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a participantes deste board.");
+        }
+    }
 
     // --- Boards ---
     @GetMapping("/{id}")
@@ -34,12 +74,14 @@ public class BrainstormingController {
     }
 
     @GetMapping
-    public ResponseEntity<List<BrainstormingBoard>> listBoards() {
-        return ResponseEntity.ok(brainstormingService.listBoards());
+    public ResponseEntity<List<BrainstormingBoard>> listBoards(@RequestParam("squadId") String squadId, HttpServletRequest request) {
+        squadAccessService.requireSquadReadAccess(squadId, request);
+        return ResponseEntity.ok(brainstormingService.listBoards(squadId));
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteBoard(@PathVariable("id") String id) {
+    public ResponseEntity<Void> deleteBoard(@PathVariable("id") String id, HttpServletRequest request) {
+        requireBoardAccess(id, request);
         brainstormingService.deleteBoard(id);
         return ResponseEntity.noContent().build();
     }
@@ -61,7 +103,9 @@ public class BrainstormingController {
     @DeleteMapping("/{boardId}/participants/{userId}")
     public ResponseEntity<Void> leaveBoard(
             @PathVariable("boardId") String boardId,
-            @PathVariable("userId") String userId) {
+            @PathVariable("userId") String userId,
+            HttpServletRequest request) {
+        requireSelfOrAdmin(userId, request);
         brainstormingService.leaveBoard(boardId, userId);
         return ResponseEntity.noContent().build();
     }
@@ -83,7 +127,9 @@ public class BrainstormingController {
     @DeleteMapping("/{boardId}/ideas/{ideaId}")
     public ResponseEntity<Void> deleteIdea(
             @PathVariable("boardId") String boardId,
-            @PathVariable("ideaId") String ideaId) {
+            @PathVariable("ideaId") String ideaId,
+            HttpServletRequest request) {
+        requireBoardAccess(boardId, request);
         brainstormingService.deleteIdeaWithCascade(boardId, ideaId);
         return ResponseEntity.noContent().build();
     }

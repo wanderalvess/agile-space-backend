@@ -30,6 +30,9 @@ public class ActionPlan {
 
     private String team;
 
+    @Column(length = 100)
+    private String sprintId;
+
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;

@@ -1,5 +1,8 @@
 package com.agilespace.backend.domain;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -10,6 +13,7 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class SquadIssueSnapshot {
 
     @Id
@@ -19,8 +23,21 @@ public class SquadIssueSnapshot {
     @Column(name = "squad_id", nullable = false)
     private String squadId;
 
+    @JsonProperty("jiraKey")
+    @JsonAlias({"key", "jiraKey", "jira_key"})
     @Column(name = "jira_key", nullable = false)
     private String jiraKey; // ex: PROJ-123 — renomeado de 'key' para evitar colisão SQL
+
+    @JsonProperty("key")
+    public String getKey() {
+        return jiraKey != null ? jiraKey : "";
+    }
+
+    public void setKey(String key) {
+        if (key != null && !key.isBlank()) {
+            this.jiraKey = key;
+        }
+    }
 
     @Column(name = "issue_type")
     private String type;
@@ -61,6 +78,27 @@ public class SquadIssueSnapshot {
     @Column(name = "due_date")
     private String dueDate;
 
+    @Column(name = "target_start")
+    private String targetStart;
+
+    @Column(name = "target_end")
+    private String targetEnd;
+
+    // Posição no array fields.subtasks da issue pai (ordem de rank do Jira) —
+    // desempate de ordem de fase quando duas fases caem na mesma data.
+    @Column(name = "order_index")
+    private Integer orderIndex;
+
+    // true = target_start/target_end vieram de campo de data real do Jira;
+    // false/null = caiu no fallback (dueDate, created/updated). Ver
+    // squadIssueToPlansTask no frontend.
+    @Column(name = "dates_are_inferred")
+    private Boolean datesAreInferred;
+
+    // summary do Jira da própria issue (null em linhas sincronizadas antes da V29).
+    @Column(name = "title", columnDefinition = "TEXT")
+    private String title;
+
     @Column(name = "parent_key")
     private String parentKey;
 
@@ -70,6 +108,37 @@ public class SquadIssueSnapshot {
     @Column(name = "updated_at_jira")
     private String updatedAtJira;
 
+    // Jira `created` — usado pra taxa de escape de bugs (bug criado dentro da janela da
+    // sprint?), não confundir com syncedAt (quando ESTA linha foi sincronizada).
+    @Column(name = "created_at_jira")
+    private String createdAtJira;
+
+    // Jira `resolutiondate` — só muda uma vez, quando a issue resolve/fecha
+    // (diferente de updatedAtJira, que muda a qualquer edição). Usado pro
+    // sinal "concluiu atrasado" sem falso-positivo de edição tardia.
+    @Column(name = "resolution_date")
+    private String resolutionDate;
+
     @Column(name = "synced_at")
     private String syncedAt;
+
+    // --- Campos de cerimônia (Poker/Planner/Showcase) ---
+    // Consolidados aqui em vez de numa tabela work_items separada: esta linha já é a mesma
+    // que o sync real do Squad popula (type/status/assignee/estimate vindos do Jira de
+    // verdade), então commit/estimativa/decisão de showcase passam a enriquecer o dado real
+    // em vez de um casco paralelo nunca sincronizado. Ver plano de unificação Squad Pulse +
+    // jiradash, Fase 1. "ceremonyStatus" é o estágio da cerimônia (backlog/committed/
+    // delivered/rejected/carried_over) — nunca confundir com "status", que é o status bruto
+    // do Jira (To Do/In Progress/Done).
+    @Column(name = "ceremony_status")
+    private String ceremonyStatus;
+
+    @Column(name = "points_estimated")
+    private Double pointsEstimated;
+
+    @Column(name = "decision_feedback", columnDefinition = "TEXT")
+    private String decisionFeedback;
+
+    @Column(name = "decided_at")
+    private String decidedAt;
 }

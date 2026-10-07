@@ -2,7 +2,12 @@ package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.AuditLog;
 import com.agilespace.backend.domain.GlobalAnnouncement;
+import com.agilespace.backend.domain.PasswordResetRequest;
+import com.agilespace.backend.dto.UnifiedSessionDto;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.AdminService;
+import com.agilespace.backend.service.PasswordResetService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -16,6 +21,9 @@ public class AdminController {
 
     @Autowired
     private AdminService service;
+
+    @Autowired
+    private PasswordResetService passwordResetService;
 
     @GetMapping("/stats")
     public ResponseEntity<Map<String, Object>> getStats() {
@@ -63,5 +71,29 @@ public class AdminController {
                                               @RequestParam String performedBy,
                                               @RequestBody(required = false) String details) {
         return ResponseEntity.ok(service.logAction(action, performedBy, details));
+    }
+
+    @GetMapping("/sessions")
+    public ResponseEntity<List<UnifiedSessionDto>> getSessions() {
+        return ResponseEntity.ok(service.getSessions());
+    }
+
+    @DeleteMapping("/sessions/{id}")
+    public ResponseEntity<Void> deleteSession(@PathVariable String id, @RequestParam(required = false) String type) {
+        service.deleteSession(id, type);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/password-resets")
+    public ResponseEntity<List<PasswordResetRequest>> getPasswordResets() {
+        return ResponseEntity.ok(passwordResetService.getAllRequests());
+    }
+
+    @PostMapping("/password-resets/{id}/approve")
+    public ResponseEntity<PasswordResetRequest> approvePasswordReset(
+            @PathVariable String id,
+            HttpServletRequest request) {
+        String approvedBy = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_EMAIL);
+        return ResponseEntity.ok(passwordResetService.approveReset(id, approvedBy));
     }
 }

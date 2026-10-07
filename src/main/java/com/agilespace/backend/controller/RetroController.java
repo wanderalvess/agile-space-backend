@@ -2,28 +2,89 @@ package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.RetroBoard;
 import com.agilespace.backend.domain.RetroCard;
+import com.agilespace.backend.domain.RetroChatMessage;
 import com.agilespace.backend.domain.RetroParticipant;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.RetroService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
 @RestController
 @RequestMapping("/api/retros")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class RetroController {
 
     private final RetroService retroService;
+    private final com.agilespace.backend.service.SquadAccessService squadAccessService;
+
+    /**
+     * Só o próprio usuário (ou ADMIN) sai de um board removendo sua própria participação.
+     * Antes disso qualquer usuário autenticado removia qualquer participante trocando o userId na URL.
+     */
+    private static void requireSelfOrAdmin(String userId, HttpServletRequest request) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        if ("ADMIN".equalsIgnoreCase(role)) {
+            return;
+        }
+        if (callerId == null || !callerId.equals(userId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito ao próprio usuário.");
+        }
+    }
+
+    /**
+     * Só participantes do board (criador incluso) ou ADMIN apagam cards.
+     * Antes disso qualquer usuário autenticado apagava cards de qualquer board.
+     */
+    private void requireBoardAccess(String boardId, HttpServletRequest request) {
+        String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        if ("ADMIN".equalsIgnoreCase(role)) {
+            return;
+        }
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        boolean isCreator = callerId != null && retroService.getBoard(boardId)
+                .map(RetroBoard::getCreatorId)
+                .map(callerId::equals)
+                .orElse(false);
+        boolean isParticipant = callerId != null && retroService.getParticipants(boardId).stream()
+                .anyMatch(p -> callerId.equals(p.getId()));
+        if (!isCreator && !isParticipant) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a participantes deste board.");
+        }
+    }
 
     // --- Board Endpoints ---
+    /**
+     * squadId/team são obrigatórios (um dos dois) pra qualquer listagem "de squad" — antes
+     * a ausência de ambos caía num fallback que devolvia boards de TODAS as squads, sem
+     * checagem de pertencimento nenhuma. sprintId continua sem essa exigência (retro de um
+     * sprint específico é um uso mais restrito, já indiretamente escopado pelo sprint).
+     */
     @GetMapping
-    public ResponseEntity<List<RetroBoard>> listBoards() {
-        return ResponseEntity.ok(retroService.listBoards());
+    public ResponseEntity<List<RetroBoard>> listBoards(
+            @RequestParam(value = "sprintId", required = false) String sprintId,
+            @RequestParam(value = "team", required = false) String team,
+            @RequestParam(value = "squadId", required = false) String squadId,
+            HttpServletRequest request) {
+        if (sprintId != null && !sprintId.isBlank()) {
+            return ResponseEntity.ok(retroService.listBoardsBySprintId(sprintId));
+        }
+        if (squadId != null && !squadId.isBlank()) {
+            squadAccessService.requireSquadReadAccess(squadId, request);
+            return ResponseEntity.ok(retroService.listBoardsBySquadId(squadId));
+        }
+        if (team != null && !team.isBlank()) {
+            squadAccessService.requireSquadReadAccess(team, request);
+            return ResponseEntity.ok(retroService.listBoardsByTeam(team));
+        }
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe squadId, team ou sprintId.");
     }
 
     @GetMapping("/{id}")
@@ -55,7 +116,9 @@ public class RetroController {
     @DeleteMapping("/{id}/participants/{userId}")
     public ResponseEntity<Void> removeParticipant(
             @PathVariable("id") String boardId,
-            @PathVariable("userId") String userId) {
+            @PathVariable("userId") String userId,
+            HttpServletRequest request) {
+        requireSelfOrAdmin(userId, request);
         retroService.removeParticipant(boardId, userId);
         return ResponseEntity.noContent().build();
     }
@@ -77,8 +140,10 @@ public class RetroController {
     @DeleteMapping("/{id}/cards/{cardId}")
     public ResponseEntity<Void> deleteCard(
             @PathVariable("id") String boardId,
-            @PathVariable("cardId") String cardId) {
-        retroService.deleteCard(cardId);
+            @PathVariable("cardId") String cardId,
+            HttpServletRequest request) {
+        requireBoardAccess(boardId, request);
+        retroService.deleteCard(boardId, cardId);
         return ResponseEntity.noContent().build();
     }
 
@@ -88,5 +153,34 @@ public class RetroController {
             @RequestBody List<RetroCard> cards) {
         retroService.importActions(boardId, cards);
         return ResponseEntity.ok().build();
+    }
+
+    // --- Chat Endpoints ---
+    @GetMapping("/{id}/chat")
+    public ResponseEntity<List<RetroChatMessage>> getChatMessages(
+            @PathVariable("id") String boardId,
+            @RequestParam("channelId") String channelId,
+            HttpServletRequest request) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        return ResponseEntity.ok(retroService.getChatMessages(boardId, channelId, callerId));
+    }
+
+    @PostMapping("/{id}/chat")
+    public ResponseEntity<RetroChatMessage> sendChatMessage(
+            @PathVariable("id") String boardId,
+            @RequestBody RetroChatMessage message,
+            HttpServletRequest request) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        return ResponseEntity.status(HttpStatus.CREATED).body(retroService.saveChatMessage(boardId, message, callerId));
+    }
+
+    @DeleteMapping("/{id}/chat/{messageId}")
+    public ResponseEntity<Void> deleteChatMessage(
+            @PathVariable("id") String boardId,
+            @PathVariable("messageId") String messageId,
+            HttpServletRequest request) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        retroService.deleteChatMessage(boardId, messageId, callerId);
+        return ResponseEntity.noContent().build();
     }
 }

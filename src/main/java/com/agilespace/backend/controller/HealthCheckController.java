@@ -4,6 +4,7 @@ import com.agilespace.backend.domain.HealthCheckBoard;
 import com.agilespace.backend.domain.HealthCheckParticipant;
 import com.agilespace.backend.domain.HealthCheckVote;
 import com.agilespace.backend.service.HealthCheckService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -14,10 +15,11 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/health-checks")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
+@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class HealthCheckController {
 
     private final HealthCheckService healthCheckService;
+    private final com.agilespace.backend.service.SquadAccessService squadAccessService;
 
     // --- Boards Endpoints ---
     @GetMapping("/{id}")
@@ -33,8 +35,9 @@ public class HealthCheckController {
     }
 
     @GetMapping
-    public ResponseEntity<List<HealthCheckBoard>> listBoards() {
-        return ResponseEntity.ok(healthCheckService.listBoards());
+    public ResponseEntity<List<HealthCheckBoard>> listBoards(@RequestParam("squadId") String squadId, HttpServletRequest request) {
+        squadAccessService.requireSquadReadAccess(squadId, request);
+        return ResponseEntity.ok(healthCheckService.listBoards(squadId));
     }
 
     @DeleteMapping("/{id}")

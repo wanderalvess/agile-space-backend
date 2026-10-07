@@ -32,4 +32,7 @@ public class RetroParticipant {
     private Boolean isCreator = false;
 
     private String globalRole;
+
+    // Resposta do check-in inicial (chave da opção da escala, ex.: "good") — null enquanto não responde.
+    private String healthCheckAnswer;
 }

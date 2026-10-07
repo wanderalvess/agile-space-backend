@@ -27,6 +27,9 @@ public class Feedback {
     @Column(name = "user_id")
     private String userId;
 
+    @Builder.Default
+    private String status = "OPEN"; // OPEN, REVIEWED, ARCHIVED
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 }
