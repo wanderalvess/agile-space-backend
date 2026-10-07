@@ -19,8 +19,13 @@ RUN groupadd -r spring && useradd -r -g spring spring
 # via OTEL_JAVAAGENT_ENABLED=true (ver docker-compose.yml/DEPLOYMENT.md) — sem isso, o agente
 # não instrumenta nada e não tenta exportar pra lugar nenhum. Compatível com qualquer backend
 # OTLP (SigNoz, Jaeger, etc.), não é vendor-specific.
-ADD https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/latest/download/opentelemetry-javaagent.jar /app/otel-agent.jar
-RUN chown spring:spring /app/otel-agent.jar
+# Versão fixa + checksum: o jar roda como -javaagent, então build não pode depender de "latest".
+# Para atualizar: troque a versão e o sha256 (digest do asset na página da release).
+ARG OTEL_AGENT_VERSION=2.32.0
+ARG OTEL_AGENT_SHA256=f787eb6c7f3d18e69a431e108a15278d25ee37f83d68b678f621e063f3988f82
+ADD https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v${OTEL_AGENT_VERSION}/opentelemetry-javaagent.jar /app/otel-agent.jar
+RUN echo "${OTEL_AGENT_SHA256}  /app/otel-agent.jar" | sha256sum -c - \
+    && chown spring:spring /app/otel-agent.jar
 
 USER spring
 

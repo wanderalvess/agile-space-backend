@@ -15,6 +15,8 @@
 	<description>Agile Space Backend</description>
 	<properties>
 		<java.version>17</java.version>
+		<!-- Testcontainers 2.x: o 1.21 do BOM do Boot 3.5 não conversa com Docker Engine 29+. Só testes. -->
+		<testcontainers.version>2.0.5</testcontainers.version>
 		<!-- 1.1.8 é o último estável da linha 1.x — 2.0.x exige spring-boot-starter-web 4.1.1
 		     (salto pra Boot 4), fora de escopo. 1.1.8 continua em Boot 3.5.x e traz
 		     io.modelcontextprotocol.sdk:mcp-spring-webmvc 0.18.3 (via BOM, não fixar versão
@@ -102,6 +104,17 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<!-- Banco descartável para testes de integração (E2EAgileCycleTest). -->
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-postgresql</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-junit-jupiter</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
