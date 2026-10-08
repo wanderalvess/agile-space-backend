@@ -186,7 +186,9 @@ curl http://localhost:8002/actuator/health
 ### Backup & Disaster Recovery
 
 1. **Database backups:** `scripts/backup-db.sh` wraps `docker exec ... pg_dump` (não precisa do
-   cliente do Postgres no host) e já aplica retenção (apaga backups com mais de 14 dias por
+   cliente do Postgres no host) e também empacota os anexos dos cards da Review
+   (`uploads_*.tar.gz`, volume `agile-space-uploads` montado em `/data/uploads`; desligue com
+   `BACKUP_UPLOADS=0`). Banco e anexos precisam ser restaurados juntos. Aplica retenção (apaga backups com mais de 14 dias por
    padrão — ajustável via `RETENTION_DAYS`). Agende via cron no host de produção:
    ```bash
    # Todo dia às 3h da manhã

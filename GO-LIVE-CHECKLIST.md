@@ -124,7 +124,7 @@ Não coberto: Showcase (criação), Brainstorming pela interface, sprint-planner
 
 - ⬜ **Login real.** SSO da TOTVS pendente (protocolo, discovery URL, client id; o secret vai direto no `.env` da VM). Hoje o login é e-mail e senha.
 - ⬜ **Verificação de e-mail no cadastro.** Hoje basta digitar um endereço `@totvs.com.br`: o sistema checa só o texto, não confirma que a pessoa é dona dele. Resolver com SSO, convite ou confirmação por e-mail.
-- ⬜ **Backup com restauração testada.** `scripts/backup-db.sh` no cron, cópia para fora da VM (ex.: Object Storage), e um teste de restore em banco descartável. Backup nunca restaurado não conta.
+- ⬜ **Backup com restauração testada.** `scripts/backup-db.sh` no cron (banco e anexos dos cards, volume `agile-space-uploads`), cópia para fora da VM (ex.: Object Storage), e um teste de restore em banco descartável. Backup nunca restaurado não conta.
 - ⬜ **Banco limpo e segredos novos antes do primeiro dado real.** Os segredos atuais foram usados na homologação. Atenção: `APP_ENCRYPTION_SECRET` cifra os tokens do Jira; trocar depois de existir dado real os deixa ilegíveis. Limpeza completa: `docker compose down -v` (**apaga tudo, irreversível**).
 - ⚠️ **Onde hospedar.** A VM está na conta pessoal Oracle e no domínio pessoal. Para dados da TOTVS, decidir com o time se fica aqui ou em conta/infra da empresa (LGPD, segurança da informação, propriedade).
 - ⚠️ **`ALLOWED_EMAIL_DOMAIN`** em produção deve ser `totvs.com.br` (hoje na homologação também; confirmar no `.env`).

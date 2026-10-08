@@ -1,5 +1,6 @@
 package com.agilespace.backend.domain;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -104,4 +105,10 @@ public class ShowcaseTask {
 
     @Column(name = "task_order")
     private Integer order;
+
+    // Montado pelo Service a partir de showcase_task_files. Só sai na resposta: o que o cliente
+    // mandar aqui é ignorado, anexo só entra e sai pelos endpoints de arquivo.
+    @Transient
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private List<ShowcaseTaskFile> attachments;
 }

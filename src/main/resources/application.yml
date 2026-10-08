@@ -1,6 +1,11 @@
 spring:
   application:
     name: agile-space-backend
+  servlet:
+    multipart:
+      # Anexos dos cards da Review (PNG/JPEG/PDF, até 10 MB cada). O padrão do Spring é 1 MB.
+      max-file-size: 10MB
+      max-request-size: 11MB
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/espacoagil}
     username: ${DB_USERNAME:postgres}
@@ -62,6 +67,9 @@ springdoc:
     tryItOutEnabled: true
 
 app:
+  uploads:
+    # Onde ficam os anexos dos cards. No Docker é o volume agile-space-uploads (/data/uploads).
+    dir: ${UPLOADS_DIR:./data/uploads}
   security:
     # Obrigatório em produção. Defina a variável de ambiente APP_ENCRYPTION_SECRET.
     # Em dev local, pode usar um valor padrão. Em produção, nunca use fallback hardcoded.

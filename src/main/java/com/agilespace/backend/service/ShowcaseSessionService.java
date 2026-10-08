@@ -3,6 +3,7 @@ package com.agilespace.backend.service;
 import com.agilespace.backend.domain.ShowcaseMember;
 import com.agilespace.backend.domain.ShowcaseSession;
 import com.agilespace.backend.domain.ShowcaseTask;
+import com.agilespace.backend.domain.ShowcaseTaskFile;
 import com.agilespace.backend.repository.ShowcaseMemberRepository;
 import com.agilespace.backend.repository.ShowcaseSessionRepository;
 import com.agilespace.backend.repository.ShowcaseTaskRepository;
@@ -16,7 +17,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class ShowcaseSessionService {
@@ -36,6 +39,9 @@ public class ShowcaseSessionService {
 
     @Autowired
     private ShowcaseWebSocketHandler webSocketHandler;
+
+    @Autowired
+    private ShowcaseTaskFileService fileService;
 
     @Transactional(readOnly = true)
     public ShowcaseSession getSession(String id) {
@@ -93,7 +99,11 @@ public class ShowcaseSessionService {
     // --- Montagem/gravação das tabelas filhas (sem relação JPA, mesmo padrão do SprintPlanningService) ---
 
     private ShowcaseSession attachChildren(ShowcaseSession session) {
-        session.setTasks(taskRepository.findBySessionIdOrderByOrderAsc(session.getId()));
+        List<ShowcaseTask> tasks = taskRepository.findBySessionIdOrderByOrderAsc(session.getId());
+        Map<String, List<ShowcaseTaskFile>> filesByTask = fileService.listBySession(session.getId()).stream()
+                .collect(Collectors.groupingBy(ShowcaseTaskFile::getTaskId));
+        tasks.forEach(t -> t.setAttachments(filesByTask.getOrDefault(t.getId(), List.of())));
+        session.setTasks(tasks);
         session.setMembers(memberRepository.findBySessionIdOrderByOrderAsc(session.getId()));
         return session;
     }
@@ -114,6 +124,8 @@ public class ShowcaseSessionService {
         if (!safeTasks.isEmpty()) {
             taskRepository.saveAll(safeTasks);
         }
+        // Card que saiu da Review leva os anexos junto.
+        fileService.removeOrphans(sessionId, safeTasks.stream().map(ShowcaseTask::getId).collect(Collectors.toSet()));
 
         List<ShowcaseMember> safeMembers = members != null ? members : Collections.emptyList();
         int memberOrder = 0;

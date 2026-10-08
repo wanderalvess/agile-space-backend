@@ -27,6 +27,11 @@ ADD https://github.com/open-telemetry/opentelemetry-java-instrumentation/release
 RUN echo "${OTEL_AGENT_SHA256}  /app/otel-agent.jar" | sha256sum -c - \
     && chown spring:spring /app/otel-agent.jar
 
+# Anexos dos cards da Review: pasta pertencente ao usuário da aplicação. O volume nomeado do
+# compose herda este dono na primeira criação.
+RUN mkdir -p /data/uploads && chown -R spring:spring /data
+ENV UPLOADS_DIR=/data/uploads
+
 USER spring
 
 COPY --from=build /app/target/*.jar app.jar

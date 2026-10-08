@@ -12,6 +12,8 @@
 #   DB_USER        usuário do Postgres (default: postgres)
 #   BACKUP_DIR     pasta onde salvar os .sql.gz (default: ./backups)
 #   RETENTION_DAYS backups mais velhos que isso são apagados (default: 14)
+#   BACKEND_CONTAINER nome do container do backend, de onde sai o volume de anexos (default: agile-space-backend)
+#   BACKUP_UPLOADS   1 inclui os anexos dos cards da Review (/data/uploads) no backup (default: 1)
 
 set -eu
 
@@ -20,6 +22,8 @@ DB_NAME="${DB_NAME:-espacoagil}"
 DB_USER="${DB_USER:-postgres}"
 BACKUP_DIR="${BACKUP_DIR:-$(dirname "$0")/../backups}"
 RETENTION_DAYS="${RETENTION_DAYS:-14}"
+BACKEND_CONTAINER="${BACKEND_CONTAINER:-agile-space-backend}"
+BACKUP_UPLOADS="${BACKUP_UPLOADS:-1}"
 
 mkdir -p "$BACKUP_DIR"
 
@@ -32,5 +36,20 @@ docker exec "$DB_CONTAINER" pg_dump -U "$DB_USER" "$DB_NAME" | gzip > "$OUT_FILE
 SIZE="$(du -h "$OUT_FILE" | cut -f1)"
 echo "[backup-db] OK: $OUT_FILE ($SIZE)"
 
+# Anexos dos cards da Review (PNG/JPEG/PDF): ficam no volume agile-space-uploads, fora do banco.
+# Backup do banco sem eles deixaria linhas apontando para arquivos que não existem mais.
+if [ "$BACKUP_UPLOADS" = "1" ]; then
+  UPLOADS_FILE="$BACKUP_DIR/uploads_${TIMESTAMP}.tar.gz"
+  # Grava num temporário e só renomeia no sucesso: falha no meio não pode deixar um .tar.gz
+  # vazio com cara de backup válido.
+  if ! docker exec "$BACKEND_CONTAINER" tar -C /data -czf - uploads > "$UPLOADS_FILE.part"; then
+    rm -f "$UPLOADS_FILE.part"
+    echo "[backup-db] ERRO: não foi possível empacotar os anexos de $BACKEND_CONTAINER:/data/uploads" >&2
+    exit 1
+  fi
+  mv "$UPLOADS_FILE.part" "$UPLOADS_FILE"
+  echo "[backup-db] OK anexos: $UPLOADS_FILE ($(du -h "$UPLOADS_FILE" | cut -f1))"
+fi
+
 echo "[backup-db] Removendo backups com mais de $RETENTION_DAYS dia(s) em $BACKUP_DIR"
-find "$BACKUP_DIR" -name "${DB_NAME}_*.sql.gz" -mtime "+$RETENTION_DAYS" -print -delete
+find "$BACKUP_DIR" \( -name "${DB_NAME}_*.sql.gz" -o -name "uploads_*.tar.gz" \) -mtime "+$RETENTION_DAYS" -print -delete

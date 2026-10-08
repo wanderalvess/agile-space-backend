@@ -45,6 +45,9 @@ class ShowcaseSessionServiceTest {
     @Mock
     private ShowcaseWebSocketHandler webSocketHandler;
 
+    @Mock
+    private ShowcaseTaskFileService fileService;
+
     @InjectMocks
     private ShowcaseSessionService service;
 

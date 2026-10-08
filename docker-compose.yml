@@ -66,6 +66,9 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-grpc}
       OTEL_RESOURCE_ATTRIBUTES: deployment.environment=${SPRING_PROFILES_ACTIVE:-dev}
+    volumes:
+      # Anexos dos cards da Review (PNG/JPEG/PDF). Entra no backup junto com o banco.
+      - agile-space-uploads:/data/uploads
     ports:
       # Loopback por padrão: em produção o acesso externo passa pelo Caddy (profile "proxy").
       # PUBLISH_ADDR=0.0.0.0 expõe direto na rede, se precisar sem proxy.
@@ -157,5 +160,6 @@ services:
 
 volumes:
   agile-space-db-data:
+  agile-space-uploads:
   agile-space-caddy-data:
   agile-space-caddy-config:
