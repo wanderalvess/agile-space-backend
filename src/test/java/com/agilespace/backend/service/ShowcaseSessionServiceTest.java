@@ -152,6 +152,40 @@ class ShowcaseSessionServiceTest {
         }
 
         @Test
+        @DisplayName("Deve gravar fundo e tema da apresentação junto com a sessão")
+        void shouldPersistPresentationSettings() {
+            ShowcaseSession newSession = ShowcaseSession.builder()
+                    .name("Review com fundo TOTVS")
+                    .status("planning")
+                    .presentationBackground("/showcase/fundo-totvs.webp")
+                    .presentationTheme("glass")
+                    .build();
+            when(repository.save(any(ShowcaseSession.class))).thenAnswer(i -> i.getArgument(0));
+
+            ShowcaseSession saved = service.saveSession(newSession, "user-author");
+
+            assertEquals("/showcase/fundo-totvs.webp", saved.getPresentationBackground());
+            assertEquals("glass", saved.getPresentationTheme());
+            verify(repository).save(argThat(s -> "/showcase/fundo-totvs.webp".equals(s.getPresentationBackground())));
+        }
+
+        @Test
+        @DisplayName("Deve gravar o checklist de prontidão junto com a sessão")
+        void shouldPersistReadinessChecklist() {
+            ShowcaseSession newSession = ShowcaseSession.builder()
+                    .name("Review com checklist")
+                    .status("planning")
+                    .readinessChecklist(List.of(true, false, true))
+                    .build();
+            when(repository.save(any(ShowcaseSession.class))).thenAnswer(i -> i.getArgument(0));
+
+            ShowcaseSession saved = service.saveSession(newSession, "user-author");
+
+            assertEquals(List.of(true, false, true), saved.getReadinessChecklist());
+            verify(repository).save(argThat(s -> List.of(true, false, true).equals(s.getReadinessChecklist())));
+        }
+
+        @Test
         @DisplayName("Deve preservar criador e data de criação originais ao atualizar sessão existente")
         void shouldPreserveOriginalMetadataWhenUpdatingExistingSession() {
             LocalDateTime originalCreatedAt = LocalDateTime.of(2026, 8, 20, 10, 0);

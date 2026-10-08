@@ -34,6 +34,13 @@ public class ShowcaseEvidence {
     @Column(name = "evidence_preference")
     private String evidencePreference;
 
+    // Links de apoio (não são a evidência exibida no Teatro): documento técnico e TDN.
+    @Column(name = "tech_doc_url", columnDefinition = "TEXT")
+    private String techDocUrl;
+
+    @Column(name = "tdn_url", columnDefinition = "TEXT")
+    private String tdnUrl;
+
     @Column(name = "time_spent")
     private Double timeSpent;
 

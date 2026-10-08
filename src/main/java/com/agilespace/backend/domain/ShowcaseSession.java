@@ -53,6 +53,18 @@ public class ShowcaseSession {
     @Column(name = "default_sort")
     private String defaultSort;
 
+    // Fundo (cor, gradiente CSS ou caminho de imagem) e tema do Modo Teatro.
+    @Column(name = "presentation_background", columnDefinition = "TEXT")
+    private String presentationBackground;
+
+    @Column(name = "presentation_theme", length = 32)
+    private String presentationTheme;
+
+    // Checklist "Guia de Elite" da tela inicial da Review (um booleano por item).
+    @Convert(converter = BooleanListConverter.class)
+    @Column(name = "readiness_checklist", columnDefinition = "TEXT")
+    private List<Boolean> readinessChecklist;
+
     @Transient
     private List<ShowcaseTask> tasks; // Montado pelo Service a partir de showcase_tasks
 
