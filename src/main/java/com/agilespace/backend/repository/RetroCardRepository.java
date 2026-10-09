@@ -9,5 +9,6 @@ import java.util.List;
 @Repository
 public interface RetroCardRepository extends JpaRepository<RetroCard, String> {
     List<RetroCard> findByBoardId(String boardId);
+    List<RetroCard> findByBoardIdAndParentId(String boardId, String parentId);
     void deleteByBoardId(String boardId);
 }

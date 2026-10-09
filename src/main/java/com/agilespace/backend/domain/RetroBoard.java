@@ -5,9 +5,16 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonSetter;
+import org.hibernate.annotations.Fetch;
+import org.hibernate.annotations.FetchMode;
+
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Entity
 @Table(name = "retro_boards")
@@ -20,6 +27,11 @@ public class RetroBoard {
 
     @Id
     private String id; // UUID ou informado pelo criador
+
+    // Trava otimista (lost update); somente leitura no JSON.
+    @Version
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private Long version;
 
     @Column(nullable = false)
     private String creatorId;
@@ -100,7 +112,38 @@ public class RetroBoard {
 
     // --- Nested Columns ---
     @ElementCollection(fetch = FetchType.EAGER)
+    @Fetch(FetchMode.SUBSELECT)
     @CollectionTable(name = "retro_board_columns", joinColumns = @JoinColumn(name = "board_id"))
     @Builder.Default
     private List<RetroColumnDef> columns = new ArrayList<>();
+
+    /**
+     * Visão aninhada do timer ({status, endTime(ms), initialDuration, remainingOnPause}) — o
+     * formato que o frontend usa (TimerState). Os campos planos timer* continuam sendo as colunas.
+     */
+    @JsonProperty("timer")
+    public Map<String, Object> getTimer() {
+        Map<String, Object> t = new LinkedHashMap<>();
+        t.put("status", timerStatus);
+        Long end = null;
+        if (timerEndTime != null && !timerEndTime.isBlank()) {
+            try { end = Long.parseLong(timerEndTime.trim()); } catch (NumberFormatException ignored) { }
+        }
+        t.put("endTime", end);
+        t.put("initialDuration", timerInitialDuration);
+        t.put("remainingOnPause", timerRemainingOnPause);
+        return t;
+    }
+
+    @JsonSetter("timer")
+    public void setTimer(Map<String, Object> t) {
+        if (t == null) return;
+        if (t.get("status") instanceof String s) timerStatus = s;
+        if (t.containsKey("endTime")) {
+            Object e = t.get("endTime");
+            timerEndTime = e == null ? null : String.valueOf(e instanceof Number n ? n.longValue() : e);
+        }
+        if (t.get("initialDuration") instanceof Number n) timerInitialDuration = n.intValue();
+        if (t.get("remainingOnPause") instanceof Number n) timerRemainingOnPause = n.intValue();
+    }
 }

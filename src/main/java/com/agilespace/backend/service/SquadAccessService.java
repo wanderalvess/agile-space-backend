@@ -35,11 +35,16 @@ public class SquadAccessService {
      * squad_members). Não tem efeito colateral nenhum — nunca grava nada.
      */
     public boolean matchesSquad(String squadId, HttpServletRequest request) {
-        String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        return matchesSquad(squadId,
+                (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID),
+                (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE));
+    }
+
+    /** Mesma checagem sem HttpServletRequest (ex.: handshake de WebSocket, onde só há userId/role do JWT). */
+    public boolean matchesSquad(String squadId, String userId, String role) {
         if ("ADMIN".equalsIgnoreCase(role) || "LEAD".equalsIgnoreCase(role)) {
             return true;
         }
-        String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
         User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
         if (caller == null) {
             return false;

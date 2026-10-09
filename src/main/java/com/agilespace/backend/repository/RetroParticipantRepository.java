@@ -12,4 +12,5 @@ public interface RetroParticipantRepository extends JpaRepository<RetroParticipa
     List<RetroParticipant> findByBoardId(String boardId);
     Optional<RetroParticipant> findByBoardIdAndId(String boardId, String id);
     void deleteByBoardIdAndId(String boardId, String id);
+    void deleteByBoardId(String boardId);
 }

@@ -6,8 +6,14 @@ import lombok.*;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import org.hibernate.annotations.Fetch;
+import org.hibernate.annotations.FetchMode;
+
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 @Entity
 @Table(name = "retro_cards")
@@ -20,6 +26,12 @@ public class RetroCard {
 
     @Id
     private String id; // UUID gerado pelo criador
+
+    // Trava otimista: gravações concorrentes do mesmo card viram 409 em vez de lost update.
+    // Somente leitura no JSON — o cliente nunca dita a versão.
+    @Version
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private Long version;
 
     @Column(nullable = false)
     private String boardId;
@@ -54,11 +66,15 @@ public class RetroCard {
     private Integer carryCount;
 
     // --- Votes collection ---
+    // Set: o banco tem UNIQUE (card_id, user_id) e o Hibernate grava só o delta (insert/delete
+    // por linha) em vez de apagar e reinserir a coleção inteira, como fazia com List (bag).
+    // SUBSELECT: carregar N cards custa 1 query para os votos, não N.
     @ElementCollection(fetch = FetchType.EAGER)
+    @Fetch(FetchMode.SUBSELECT)
     @CollectionTable(name = "retro_card_votes", joinColumns = @JoinColumn(name = "card_id"))
     @Column(name = "user_id")
     @Builder.Default
-    private List<String> votes = new ArrayList<>();
+    private Set<String> votes = new LinkedHashSet<>();
 
     // --- Reações rápidas (independentes do voto de priorização) ---
     // Formato: { "up": ["uid1"], "love": [], "wow": [], "concern": ["uid2"] }
@@ -70,6 +86,7 @@ public class RetroCard {
     // em que foram fundidas) — content nunca é reescrito numa fusão, só isso
     // aqui cresce. Renderizado como linha do tempo no frontend.
     @ElementCollection(fetch = FetchType.EAGER)
+    @Fetch(FetchMode.SUBSELECT)
     @CollectionTable(name = "retro_card_original_texts", joinColumns = @JoinColumn(name = "card_id"))
     @Column(name = "text", columnDefinition = "TEXT")
     @OrderColumn(name = "position")
