@@ -6,6 +6,7 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import org.hibernate.annotations.Fetch;
 import org.hibernate.annotations.FetchMode;
@@ -109,6 +110,16 @@ public class RetroBoard {
     private Integer timerRemainingOnPause = 300;
 
     private String timerEndTime;
+
+    // Ordenar por votos por coluna: { "<columnId>": true }. JSON em texto.
+    @Convert(converter = RetroJsonConverters.BooleanMapConverter.class)
+    @Column(name = "column_sorts", columnDefinition = "text")
+    private Map<String, Boolean> columnSorts;
+
+    // Resumo sincronizado entre clientes (hoje { feedbackCount, actionItems }); JSON livre em texto.
+    @Convert(converter = RetroJsonConverters.JsonNodeConverter.class)
+    @Column(name = "summary", columnDefinition = "text")
+    private JsonNode summary;
 
     // --- Nested Columns ---
     @ElementCollection(fetch = FetchType.EAGER)

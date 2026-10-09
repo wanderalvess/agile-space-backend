@@ -62,6 +62,7 @@ public class RetroService {
     static final int MAX_ORIGINAL_TEXTS = 100;
     static final int MAX_VOTES_LIMIT = 100;
     static final int MAX_IMPORT = 200;
+    static final int MAX_SUMMARY_CHARS = 20_000;
 
     // --- Publicação de eventos ---
 
@@ -265,6 +266,15 @@ public class RetroService {
         if (b.getTimerInitialDuration() != null && b.getTimerInitialDuration() < 0) throw badRequest("Duração do timer inválida.");
         if (b.getTimerRemainingOnPause() != null && b.getTimerRemainingOnPause() < 0) throw badRequest("Tempo restante do timer inválido.");
         if (b.getTimerEndTime() != null && b.getTimerEndTime().length() > 50) throw badRequest("endTime inválido.");
+        if (b.getSummary() != null && b.getSummary().toString().length() > MAX_SUMMARY_CHARS) {
+            throw badRequest("Resumo grande demais (máx. " + MAX_SUMMARY_CHARS + " caracteres).");
+        }
+        if (b.getColumnSorts() != null) {
+            if (b.getColumnSorts().size() > MAX_COLUMNS) throw badRequest("columnSorts com chaves demais.");
+            for (String key : b.getColumnSorts().keySet()) {
+                if (key == null || key.length() > MAX_COLUMN_KEY) throw badRequest("columnSorts com chave inválida.");
+            }
+        }
         if (b.getColumns() != null) {
             if (b.getColumns().size() > MAX_COLUMNS) throw badRequest("Colunas demais (máx. " + MAX_COLUMNS + ").");
             for (RetroColumnDef c : b.getColumns()) {
@@ -294,6 +304,8 @@ public class RetroService {
         if (src.getTimerInitialDuration() != null) target.setTimerInitialDuration(src.getTimerInitialDuration());
         if (src.getTimerRemainingOnPause() != null) target.setTimerRemainingOnPause(src.getTimerRemainingOnPause());
         if (src.getTimerEndTime() != null) target.setTimerEndTime(src.getTimerEndTime());
+        if (src.getColumnSorts() != null) target.setColumnSorts(src.getColumnSorts());
+        if (src.getSummary() != null) target.setSummary(src.getSummary());
         if (src.getColumns() != null && !src.getColumns().isEmpty()) {
             target.getColumns().clear();
             target.getColumns().addAll(src.getColumns());
@@ -323,6 +335,7 @@ public class RetroService {
         boolean clearEndTime = false;
         boolean clearQuestion = false;
         boolean clearActiveColumn = false;
+        boolean clearSummary = false;
         Iterator<Map.Entry<String, JsonNode>> it = patch.fields();
         while (it.hasNext()) {
             Map.Entry<String, JsonNode> e = it.next();
@@ -376,6 +389,17 @@ public class RetroService {
                         touchesControl = true;
                     }
                 }
+                case "columnSorts" -> {
+                    if (v.isObject()) {
+                        Map<String, Boolean> sorts = new java.util.LinkedHashMap<>();
+                        v.fields().forEachRemaining(en -> sorts.put(en.getKey(), en.getValue().asBoolean(false)));
+                        delta.setColumnSorts(sorts);
+                    }
+                }
+                case "summary" -> {
+                    if (!v.isNull()) delta.setSummary(v);
+                    else clearSummary = true;
+                }
                 default -> { /* creatorId, squadId, sprintId, id, participantIds, summary...: ignorados */ }
             }
         }
@@ -389,6 +413,26 @@ public class RetroService {
             if (clearEndTime) board.setTimerEndTime(null);
             if (clearQuestion) board.setHealthCheckQuestion(null);
             if (clearActiveColumn) board.setActiveColumnKey(null);
+        }
+        // columnSorts/summary: controle do facilitador; de participante comum são ignorados sem erro
+        // (o frontend antigo os enviava).
+        if (isCreatorOrAdmin(board, caller)) {
+            if (delta.getColumnSorts() != null) {
+                Set<String> ids = new LinkedHashSet<>();
+                if (board.getColumns() != null) board.getColumns().forEach(c -> ids.add(c.getId()));
+                if (!ids.isEmpty()) {
+                    for (String key : delta.getColumnSorts().keySet()) {
+                        if (!ids.contains(key)) throw badRequest("columnSorts referencia coluna inexistente: " + key);
+                    }
+                }
+                validateOptionalBoardFields(delta);
+                board.setColumnSorts(delta.getColumnSorts());
+            }
+            if (delta.getSummary() != null) {
+                validateOptionalBoardFields(delta);
+                board.setSummary(delta.getSummary());
+            }
+            if (clearSummary) board.setSummary(null);
         }
         RetroBoard saved = boardRepository.save(board);
         publish(boardId, "BOARD_UPDATED", saved);

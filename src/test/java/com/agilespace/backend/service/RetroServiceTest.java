@@ -448,6 +448,40 @@ class RetroServiceTest {
         }
 
         @Test
+        @DisplayName("PATCH do criador persiste columnSorts e summary")
+        void patchColumnSortsAndSummary() {
+            RetroBoard r = service.patchBoard(BOARD,
+                    json("{\"columnSorts\":{\"good\":true,\"bad\":false},\"summary\":{\"feedbackCount\":3,\"actionItems\":[\"a\"]}}"), CREATOR);
+
+            assertEquals(Boolean.TRUE, r.getColumnSorts().get("good"));
+            assertEquals(Boolean.FALSE, r.getColumnSorts().get("bad"));
+            assertEquals(3, r.getSummary().get("feedbackCount").asInt());
+            verify(webSocketHandler).broadcastEvent(eq(BOARD), eq("BOARD_UPDATED"), eq(board));
+        }
+
+        @Test
+        @DisplayName("PATCH: columnSorts com coluna inexistente e summary gigante → 400")
+        void patchColumnSortsSummaryValidation() {
+            assertStatus(HttpStatus.BAD_REQUEST,
+                    () -> service.patchBoard(BOARD, json("{\"columnSorts\":{\"fantasma\":true}}"), CREATOR));
+            String huge = "x".repeat(21_000);
+            assertStatus(HttpStatus.BAD_REQUEST,
+                    () -> service.patchBoard(BOARD, json("{\"summary\":{\"t\":\"" + huge + "\"}}"), CREATOR));
+            assertNull(board.getColumnSorts());
+            assertNull(board.getSummary());
+        }
+
+        @Test
+        @DisplayName("PATCH de participante comum com columnSorts/summary é ignorado sem erro")
+        void patchColumnSortsSummaryIgnoredForParticipant() {
+            RetroBoard r = service.patchBoard(BOARD,
+                    json("{\"columnSorts\":{\"good\":true},\"summary\":{\"feedbackCount\":1}}"), ANA);
+
+            assertNull(r.getColumnSorts());
+            assertNull(r.getSummary());
+        }
+
+        @Test
         @DisplayName("transfer-control: chamador vira criador e só ele fica com isCreator")
         void transferControlLeavesSingleFlag() {
             RetroParticipant boss = RetroParticipant.builder().id("boss").boardId(BOARD).nickname("Boss").isCreator(true).build();
