@@ -54,6 +54,9 @@ public class ApiKeyController {
         if (name.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Campo obrigatório: name."));
         }
+        if (name.length() > 100) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Nome da chave muito longo (máximo 100 caracteres)."));
+        }
 
         Set<String> requestedScopes = extractScopes(body.get("scopes"));
         if (requestedScopes.isEmpty()) {
