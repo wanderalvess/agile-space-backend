@@ -68,9 +68,13 @@ public class AdminController {
 
     @PostMapping("/audit-logs")
     public ResponseEntity<AuditLog> logAction(@RequestParam String action,
-                                              @RequestParam String performedBy,
-                                              @RequestBody(required = false) String details) {
-        return ResponseEntity.ok(service.logAction(action, performedBy, details));
+                                              @RequestParam(required = false) String performedBy,
+                                              @RequestBody(required = false) String details,
+                                              HttpServletRequest request) {
+        // Autoria vem do token: aceitar o nome do corpo/query permitia forjar quem fez a ação no registro de auditoria.
+        String email = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_EMAIL);
+        String author = email != null && !email.isBlank() ? email : (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        return ResponseEntity.ok(service.logAction(action, author != null ? author : "ADMIN", details));
     }
 
     @GetMapping("/sessions")

@@ -26,7 +26,6 @@ import java.util.Map;
  */
 @RestController
 @RequiredArgsConstructor
-@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class InviteController {
 
     private final InviteService inviteService;

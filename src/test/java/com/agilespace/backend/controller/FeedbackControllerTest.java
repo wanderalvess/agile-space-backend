@@ -1,7 +1,10 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.Feedback;
+import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.FeedbackService;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.server.ResponseStatusException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -43,12 +46,21 @@ class FeedbackControllerTest {
                     .build();
             Feedback saved = Feedback.builder().id("f1").toolName("PlanningPoker").score(5).userId("user-123").build();
 
-            when(service.saveFeedback(input)).thenReturn(saved);
+            when(service.submitFeedback(input, "user-123")).thenReturn(saved);
 
-            ResponseEntity<Feedback> response = controller.saveFeedback(input);
+            ResponseEntity<Feedback> response = controller.saveFeedback(input, authed("user-123", "MEMBER"));
 
             assertEquals(saved, response.getBody());
-            verify(service, times(1)).saveFeedback(input);
+            verify(service, times(1)).submitFeedback(input, "user-123");
+        }
+
+        @Test
+        @DisplayName("Autoria vem do token: sem sessão o envio é recusado")
+        void shouldRejectWhenThereIsNoSession() {
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                    () -> controller.saveFeedback(Feedback.builder().toolName("X").build(), new MockHttpServletRequest()));
+            assertEquals(401, ex.getStatusCode().value());
+            verifyNoInteractions(service);
         }
     }
 
@@ -64,7 +76,7 @@ class FeedbackControllerTest {
 
             when(service.getAllFeedbacks()).thenReturn(Arrays.asList(f1, f2));
 
-            ResponseEntity<List<Feedback>> response = controller.getAllFeedbacks();
+            ResponseEntity<List<Feedback>> response = controller.getAllFeedbacks(authed("adm", "ADMIN"));
             List<Feedback> list = response.getBody();
 
             assertNotNull(list);
@@ -78,7 +90,7 @@ class FeedbackControllerTest {
             Feedback open = Feedback.builder().id("1").status("OPEN").build();
             when(service.getFeedbacksByStatus("OPEN")).thenReturn(List.of(open));
 
-            ResponseEntity<List<Feedback>> response = controller.getFeedbacksByStatus("OPEN");
+            ResponseEntity<List<Feedback>> response = controller.getFeedbacksByStatus("OPEN", authed("adm", "ADMIN"));
 
             assertEquals(1, response.getBody().size());
             verify(service, times(1)).getFeedbacksByStatus("OPEN");
@@ -95,7 +107,7 @@ class FeedbackControllerTest {
             Feedback updated = Feedback.builder().id("1").status("REVIEWED").build();
             when(service.updateFeedbackStatus("1", "REVIEWED")).thenReturn(Optional.of(updated));
 
-            ResponseEntity<Feedback> response = controller.updateFeedbackStatus("1", "REVIEWED");
+            ResponseEntity<Feedback> response = controller.updateFeedbackStatus("1", "REVIEWED", authed("adm", "ADMIN"));
 
             assertEquals(updated, response.getBody());
         }
@@ -105,7 +117,7 @@ class FeedbackControllerTest {
         void shouldReturnNotFoundWhenUpdatingMissingFeedback() {
             when(service.updateFeedbackStatus("missing", "REVIEWED")).thenReturn(Optional.empty());
 
-            ResponseEntity<Feedback> response = controller.updateFeedbackStatus("missing", "REVIEWED");
+            ResponseEntity<Feedback> response = controller.updateFeedbackStatus("missing", "REVIEWED", authed("adm", "ADMIN"));
 
             assertEquals(404, response.getStatusCode().value());
         }
@@ -115,9 +127,32 @@ class FeedbackControllerTest {
         void shouldReturnNotFoundWhenDeletingMissingFeedback() {
             when(service.deleteFeedback("missing")).thenReturn(false);
 
-            ResponseEntity<Void> response = controller.deleteFeedback("missing");
+            ResponseEntity<Void> response = controller.deleteFeedback("missing", authed("adm", "ADMIN"));
 
             assertEquals(404, response.getStatusCode().value());
         }
+    }
+
+    @Nested
+    @DisplayName("Autorização")
+    class AuthorizationTests {
+
+        @Test
+        @DisplayName("Quem não é ADMIN não lista, não muda status e não apaga")
+        void nonAdminCannotReadOrModify() {
+            MockHttpServletRequest member = authed("u1", "MEMBER");
+            assertEquals(403, assertThrows(ResponseStatusException.class, () -> controller.getAllFeedbacks(member)).getStatusCode().value());
+            assertEquals(403, assertThrows(ResponseStatusException.class, () -> controller.getFeedbacksByStatus("OPEN", member)).getStatusCode().value());
+            assertEquals(403, assertThrows(ResponseStatusException.class, () -> controller.updateFeedbackStatus("1", "ARCHIVED", member)).getStatusCode().value());
+            assertEquals(403, assertThrows(ResponseStatusException.class, () -> controller.deleteFeedback("1", member)).getStatusCode().value());
+            verifyNoInteractions(service);
+        }
+    }
+
+    private static MockHttpServletRequest authed(String userId, String role) {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setAttribute(JwtAuthenticationFilter.ATTR_USER_ID, userId);
+        request.setAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE, role);
+        return request;
     }
 }

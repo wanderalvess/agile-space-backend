@@ -18,7 +18,6 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/support/tickets")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class SupportTicketController {
 
     private final SupportTicketService supportTicketService;

@@ -130,4 +130,46 @@ class FeedbackServiceTest {
             verify(repository, never()).deleteById(anyString());
         }
     }
+
+    @Nested
+    @DisplayName("Envio vindo do cliente")
+    class SubmitTests {
+
+        @Test
+        @DisplayName("Ignora id e autoria do corpo: id novo, userId do token, status OPEN")
+        void shouldIgnoreClientIdAndAuthor() {
+            Feedback incoming = Feedback.builder().id("id-de-outra-pessoa").toolName(" Poker ").score(8)
+                    .comment(" ótimo ").userId("outro-usuario").status("ARCHIVED").build();
+            when(repository.save(any(Feedback.class))).thenAnswer(i -> i.getArgument(0));
+
+            Feedback saved = service.submitFeedback(incoming, "user-1");
+
+            assertNotEquals("id-de-outra-pessoa", saved.getId());
+            assertEquals("user-1", saved.getUserId());
+            assertEquals("OPEN", saved.getStatus());
+            assertEquals("Poker", saved.getToolName());
+            assertEquals("ótimo", saved.getComment());
+        }
+
+        @Test
+        @DisplayName("Recusa nota fora da faixa, comentário gigante e ferramenta vazia")
+        void shouldValidate() {
+            assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                    () -> service.submitFeedback(Feedback.builder().toolName("X").score(99).build(), "u"));
+            assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                    () -> service.submitFeedback(Feedback.builder().toolName("X").comment("a".repeat(4001)).build(), "u"));
+            assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                    () -> service.submitFeedback(Feedback.builder().toolName("  ").build(), "u"));
+            verify(repository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Aceita -1 (sugestão sem nota) e recusa status desconhecido na triagem")
+        void shouldAcceptSuggestionAndRejectBadStatus() {
+            when(repository.save(any(Feedback.class))).thenAnswer(i -> i.getArgument(0));
+            assertEquals(-1, service.submitFeedback(Feedback.builder().toolName("X").score(-1).build(), "u").getScore());
+            assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                    () -> service.updateFeedbackStatus("1", "QUALQUER"));
+        }
+    }
 }

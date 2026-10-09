@@ -102,9 +102,10 @@ public class JwtTokenUtil {
             byte[] payloadBytes = Base64.getUrlDecoder().decode(parts[1]);
             JsonNode payload = objectMapper.readTree(payloadBytes);
 
+            // Token sem "exp" nunca é emitido por generateToken; aceitá-lo criaria sessão eterna.
             long exp = payload.has("exp") ? payload.get("exp").asLong() : 0;
-            if (exp > 0 && exp < Instant.now().getEpochSecond()) {
-                log.warn("Token JWT expirado");
+            if (exp <= 0 || exp < Instant.now().getEpochSecond()) {
+                log.warn("Token JWT expirado ou sem validade");
                 return null;
             }
 

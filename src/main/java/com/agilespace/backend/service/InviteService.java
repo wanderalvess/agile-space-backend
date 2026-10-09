@@ -28,6 +28,7 @@ import java.util.UUID;
 public class InviteService {
 
     private static final int EXPIRATION_DAYS = 7;
+    static final int MAX_ROLE_NAME = 80;
 
     private final InviteRepository inviteRepository;
     private final AuditLogRepository auditLogRepository;
@@ -35,6 +36,13 @@ public class InviteService {
 
     @Transactional
     public Invite createInvite(String squadId, String roleName, String email, String invitedByUserId) {
+        roleName = roleName == null ? "" : roleName.trim();
+        if (roleName.isEmpty() || roleName.length() > MAX_ROLE_NAME) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe o papel do convite (até " + MAX_ROLE_NAME + " caracteres).");
+        }
+        if (email != null && !email.isBlank() && (email.length() > 254 || !email.contains("@"))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "E-mail do convite inválido.");
+        }
         Invite invite = Invite.builder()
                 .id(UUID.randomUUID().toString())
                 .token(generateToken())
@@ -69,6 +77,10 @@ public class InviteService {
         Invite invite = inviteRepository.findById(id)
                 .filter(i -> i.getSquadId().equalsIgnoreCase(squadId))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Convite não encontrado"));
+        // Convite já aceito é histórico: marcá-lo como revogado apagaria o registro de quem entrou.
+        if (!"PENDING".equalsIgnoreCase(invite.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Só convites pendentes podem ser revogados");
+        }
         invite.setStatus("REVOKED");
         inviteRepository.save(invite);
         audit("INVITE_REVOKED", revokedBy, "Convite " + id + " revogado");
@@ -76,7 +88,7 @@ public class InviteService {
 
     @Transactional
     public SquadMember acceptInvite(String token, User acceptingUser) {
-        Invite invite = inviteRepository.findByToken(token)
+        Invite invite = inviteRepository.findByTokenForUpdate(token)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Convite não encontrado"));
 
         if (!"PENDING".equalsIgnoreCase(invite.getStatus())) {

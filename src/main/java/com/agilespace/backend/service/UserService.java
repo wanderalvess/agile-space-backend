@@ -10,6 +10,8 @@ import com.agilespace.backend.repository.SquadMemberRepository;
 import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.repository.UserJiraConfigRepository;
 import com.agilespace.backend.repository.UserTdnConfigRepository;
+import com.agilespace.backend.security.JiraAccountIdGuard;
+import com.agilespace.backend.security.UserSessionGuard;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -35,6 +37,12 @@ public class UserService {
 
     @Autowired
     private UserProjectResolverService userProjectResolverService;
+
+    @Autowired(required = false)
+    private JiraAccountIdGuard jiraAccountIdGuard;
+
+    @Autowired(required = false)
+    private UserSessionGuard sessionGuard;
 
     @Transactional(readOnly = true)
     public List<User> getAllUsers() {
@@ -68,7 +76,17 @@ public class UserService {
         if (incoming.getName() != null) existing.setName(incoming.getName());
         if (incoming.getAvatarSeed() != null) existing.setAvatarSeed(incoming.getAvatarSeed());
         if (incoming.getDailyHours() != null) existing.setDailyHours(incoming.getDailyHours());
-        if (incoming.getJiraAccountId() != null) existing.setJiraAccountId(incoming.getJiraAccountId());
+        if (incoming.getJiraAccountId() != null
+                && !incoming.getJiraAccountId().trim().equals(existing.getJiraAccountId() == null ? "" : existing.getJiraAccountId().trim())) {
+            // O id do Jira liga a conta ao roster (equipes e liderança): só o admin grava um id que
+            // já pertence a outra pessoa; os demais usam "Sou eu" no onboarding.
+            if (!isAdmin && jiraAccountIdGuard != null
+                    && !jiraAccountIdGuard.isFreeFor(incoming.getJiraAccountId(), existing.getId(), existing.getEmail())) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                        "Este id do Jira já pertence a outra pessoa. Para vincular sua conta a uma linha da equipe, use \"Sou eu\" no onboarding.");
+            }
+            existing.setJiraAccountId(incoming.getJiraAccountId().trim());
+        }
         if (incoming.getSegmentName() != null) existing.setSegmentName(incoming.getSegmentName());
         if (incoming.getTribeName() != null) existing.setTribeName(incoming.getTribeName());
         if (incoming.getSquadId() != null && !incoming.getSquadId().equalsIgnoreCase(existing.getSquadId())) {
@@ -92,7 +110,11 @@ public class UserService {
         }
 
         existing.setUpdatedAt(LocalDateTime.now());
-        return userRepository.save(existing);
+        User saved = userRepository.save(existing);
+        if (sessionGuard != null) {
+            sessionGuard.evict(saved.getId());
+        }
+        return saved;
     }
 
     private void requireProjectAccess(User user, String projectId) {

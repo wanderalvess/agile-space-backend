@@ -48,6 +48,15 @@ public class PasswordResetService {
 
         String userName = userOpt.map(User::getName).orElse(null);
 
+        // Pedido repetido enquanto há um pendente não cria outra linha: o endpoint é público e
+        // sem isso daria para lotar a fila do admin.
+        Optional<PasswordResetRequest> pending = resetRequestRepository.findByStatusOrderByRequestedAtDesc("PENDING").stream()
+                .filter(r -> cleanEmail.equalsIgnoreCase(r.getUserEmail()))
+                .findFirst();
+        if (pending.isPresent()) {
+            return pending.get();
+        }
+
         PasswordResetRequest resetReq = PasswordResetRequest.builder()
                 .id(UUID.randomUUID().toString())
                 .userEmail(cleanEmail)
@@ -73,9 +82,20 @@ public class PasswordResetService {
         return resetReq;
     }
 
-    @Transactional(readOnly = true)
+    /** A senha temporária só fica legível por 1 hora após a aprovação; depois é apagada do registro. */
+    static final long TEMP_PASSWORD_VISIBLE_MINUTES = 60;
+
+    @Transactional
     public List<PasswordResetRequest> getAllRequests() {
-        return resetRequestRepository.findAllByOrderByRequestedAtDesc();
+        List<PasswordResetRequest> all = resetRequestRepository.findAllByOrderByRequestedAtDesc();
+        LocalDateTime limit = LocalDateTime.now().minusMinutes(TEMP_PASSWORD_VISIBLE_MINUTES);
+        for (PasswordResetRequest r : all) {
+            if (r.getTempPassword() != null && r.getApprovedAt() != null && r.getApprovedAt().isBefore(limit)) {
+                r.setTempPassword(null);
+                resetRequestRepository.save(r);
+            }
+        }
+        return all;
     }
 
     @Transactional

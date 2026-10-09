@@ -6,7 +6,8 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
+import com.agilespace.backend.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
@@ -29,7 +30,6 @@ import java.util.Set;
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 11)
-@RequiredArgsConstructor
 public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
 
     public static final String ATTR_API_KEY_ID = "authApiKeyId";
@@ -47,6 +47,17 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
     public static final String ATTR_API_KEY_GRANDFATHERED = "authApiKeyGrandfathered";
 
     private final ApiKeyRepository apiKeyRepository;
+    private final UserRepository userRepository;
+
+    @Autowired
+    public ApiKeyAuthenticationFilter(ApiKeyRepository apiKeyRepository, UserRepository userRepository) {
+        this.apiKeyRepository = apiKeyRepository;
+        this.userRepository = userRepository;
+    }
+
+    public ApiKeyAuthenticationFilter(ApiKeyRepository apiKeyRepository) {
+        this(apiKeyRepository, null);
+    }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -54,7 +65,7 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
             return true;
         }
         String uri = request.getRequestURI();
-        return !(uri.startsWith("/api/v1/") || uri.startsWith("/mcp"));
+        return !(uri.equals("/api/v1") || uri.startsWith("/api/v1/") || uri.startsWith("/mcp"));
     }
 
     @Override
@@ -74,6 +85,12 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
         }
 
         ApiKey key = apiKey.get();
+        // Chave de quem foi desativado deixa de valer sem precisar revogar uma a uma.
+        if (key.getOwnerUserId() != null && userRepository != null
+                && userRepository.findById(key.getOwnerUserId()).map(u -> !u.isActive()).orElse(false)) {
+            reject(response, "Chave de API inválida ou revogada.");
+            return;
+        }
         key.setLastUsedAt(LocalDateTime.now());
         apiKeyRepository.save(key);
 

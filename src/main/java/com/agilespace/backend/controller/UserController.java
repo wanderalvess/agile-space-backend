@@ -13,6 +13,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.List;
 
 @RestController
@@ -57,7 +59,8 @@ public class UserController {
             @RequestHeader(value = "X-Admin-Key", required = false) String adminKeyHeader) {
         String authRole = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
         boolean isAdmin = "ADMIN".equalsIgnoreCase(authRole);
-        boolean hasValidAdminKey = adminKey != null && !adminKey.isBlank() && adminKey.equals(adminKeyHeader);
+        boolean hasValidAdminKey = adminKey != null && !adminKey.isBlank() && adminKeyHeader != null
+                && MessageDigest.isEqual(adminKey.getBytes(StandardCharsets.UTF_8), adminKeyHeader.getBytes(StandardCharsets.UTF_8));
 
         if (!isAdmin && !hasValidAdminKey) {
             return forbidden("Acesso restrito a administradores.");
@@ -102,8 +105,12 @@ public class UserController {
         return ResponseEntity.ok(saved);
     }
 
+    /** Vínculos de squad de uma conta — só a própria pessoa ou ADMIN (antes qualquer login consultava qualquer id). */
     @GetMapping("/{uid}/squads")
-    public ResponseEntity<List<SquadMember>> getSquadsForUser(@PathVariable String uid) {
+    public ResponseEntity<?> getSquadsForUser(@PathVariable String uid, HttpServletRequest request) {
+        if (!isOwnerOrAdmin(uid, request)) {
+            return forbidden("Você só pode consultar os seus próprios vínculos de squad.");
+        }
         List<SquadMember> squads = service.getSquadsForUser(uid);
         return ResponseEntity.ok(squads);
     }

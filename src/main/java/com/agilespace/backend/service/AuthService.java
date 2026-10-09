@@ -9,6 +9,7 @@ import com.agilespace.backend.repository.ProjectConfigRepository;
 import com.agilespace.backend.repository.ProjectMemberRoleRepository;
 import com.agilespace.backend.repository.SquadMemberRepository;
 import com.agilespace.backend.repository.UserRepository;
+import com.agilespace.backend.security.JiraAccountIdGuard;
 import com.agilespace.backend.security.JwtTokenUtil;
 import com.agilespace.backend.security.PasswordUtil;
 import lombok.RequiredArgsConstructor;
@@ -34,6 +35,19 @@ public class AuthService {
     private final SquadMemberRepository squadMemberRepository;
     private final UserProjectResolverService userProjectResolverService;
     private final JwtTokenUtil jwtTokenUtil;
+    private final JiraAccountIdGuard jiraAccountIdGuard;
+
+    /** Hash de uma senha qualquer, só para gastar o mesmo tempo quando o e-mail não existe (evita enumeração por tempo de resposta). */
+    private static volatile String dummyHash;
+
+    private static String dummyHash() {
+        String h = dummyHash;
+        if (h == null) {
+            h = PasswordUtil.hashPassword("senha-inexistente-" + UUID.randomUUID());
+            dummyHash = h;
+        }
+        return h;
+    }
 
     // Vazio (default em application.yml) = autocadastro liberado pra qualquer e-mail — usado em
     // dev/teste, onde os fixtures usam @empresa.com.br. Em produção (application-prod.yml) tem
@@ -41,23 +55,31 @@ public class AuthService {
     @Value("${app.security.allowed-email-domain:}")
     private String allowedEmailDomain;
 
+    // Opt-in para fechar o autocadastro (APP_REGISTRATION_ENABLED=false) depois que todo mundo entrou.
+    // Padrão true: o comportamento de quem usa hoje não muda.
+    @Value("${app.security.registration-enabled:true}")
+    private boolean registrationEnabled = true;
+
     /**
      * Realiza o login do usuário, valida a senha com PBKDF2 e resolve seus projetos/cargos.
      */
     @Transactional
     public AuthResponseDto login(LoginRequestDto request) {
         String identifier = request.getEmail().trim().toLowerCase();
-        User user = findUserByIdentifier(identifier)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "E-mail ou senha incorretos"));
+        User user = findUserByIdentifier(identifier).orElse(null);
+        if (user == null) {
+            PasswordUtil.verifyPassword(request.getPassword(), dummyHash());
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "E-mail ou senha incorretos");
+        }
         String cleanEmail = user.getEmail();
+
+        // Validação da senha antes de revelar que a conta está inativa
+        if (user.getPasswordHash() == null || !PasswordUtil.verifyPassword(request.getPassword(), user.getPasswordHash())) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "E-mail ou senha incorretos");
+        }
 
         if (!user.isActive()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Usuário inativo no sistema");
-        }
-
-        // Validação da senha
-        if (user.getPasswordHash() == null || !PasswordUtil.verifyPassword(request.getPassword(), user.getPasswordHash())) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "E-mail ou senha incorretos");
         }
 
         // Resolve projetos e lideranças
@@ -117,6 +139,11 @@ public class AuthService {
     public AuthResponseDto register(RegisterRequestDto request) {
         String cleanEmail = request.getEmail().trim().toLowerCase();
 
+        if (!registrationEnabled) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "O cadastro está fechado. Peça acesso a um administrador.");
+        }
+
         if (allowedEmailDomain != null && !allowedEmailDomain.isBlank()
                 && !cleanEmail.endsWith("@" + allowedEmailDomain.toLowerCase())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
@@ -129,6 +156,15 @@ public class AuthService {
         }
 
         String passwordHash = PasswordUtil.hashPassword(request.getPassword());
+
+        // Id do Jira digitado no cadastro só vale se não for de outra pessoa do roster (ele liga a conta
+        // a equipes e liderança). Se for, o cadastro segue sem ele; o vínculo certo é o "Sou eu".
+        String requestedJiraId = request.getJiraAccountId() != null ? request.getJiraAccountId().trim() : null;
+        if (requestedJiraId != null && !requestedJiraId.isEmpty() && jiraAccountIdGuard != null
+                && !jiraAccountIdGuard.isFreeFor(requestedJiraId, existingUser.map(User::getId).orElse(null), cleanEmail)) {
+            log.warn("Cadastro de {} ignorou jiraAccountId que pertence a outra pessoa do roster", cleanEmail);
+            requestedJiraId = null;
+        }
 
         // Busca se a pessoa já possui papéis atribuídos no Profields
         List<ProjectMemberRole> roles = projectMemberRoleRepository.findByEmailIgnoreCase(cleanEmail);
@@ -164,9 +200,9 @@ public class AuthService {
             if (user.getName() == null || user.getName().isBlank()) {
                 user.setName(request.getName().trim());
             }
-            if (request.getJiraAccountId() != null && !request.getJiraAccountId().isBlank()
+            if (requestedJiraId != null && !requestedJiraId.isEmpty()
                     && (user.getJiraAccountId() == null || user.getJiraAccountId().isBlank())) {
-                user.setJiraAccountId(request.getJiraAccountId().trim());
+                user.setJiraAccountId(requestedJiraId);
             }
             if (user.getDefaultProjectId() == null || user.getDefaultProjectId().isBlank()) {
                 user.setDefaultProjectId(defaultProject);
@@ -188,7 +224,7 @@ public class AuthService {
                     .passwordHash(passwordHash)
                     .authProvider("LOCAL")
                     .role("MEMBER")
-                    .jiraAccountId(request.getJiraAccountId() != null ? request.getJiraAccountId().trim() : null)
+                    .jiraAccountId(requestedJiraId != null && !requestedJiraId.isEmpty() ? requestedJiraId : null)
                     .defaultProjectId(defaultProject)
                     .squadId(defaultProject)
                     .segmentName(segment)

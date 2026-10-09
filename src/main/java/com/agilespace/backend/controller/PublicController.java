@@ -18,7 +18,6 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/public")
 @RequiredArgsConstructor
-@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class PublicController {
 
     private static final List<String> SYSTEM_CONFIG_KEYS = List.of(
