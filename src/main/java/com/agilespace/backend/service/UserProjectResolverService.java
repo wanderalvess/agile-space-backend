@@ -22,6 +22,13 @@ public class UserProjectResolverService {
     private final ProjectMemberRoleRepository projectMemberRoleRepository;
     private final ProjectConfigRepository projectConfigRepository;
 
+    /** True se o projeto já tem alguma pessoa marcada como liderança no cadastro (project_member_roles). */
+    @Transactional(readOnly = true)
+    public boolean hasRegisteredLeadership(String projectId) {
+        if (projectId == null || projectId.isBlank()) return false;
+        return projectMemberRoleRepository.findByProjectId(projectId.trim()).stream().anyMatch(ProjectMemberRole::isLeadership);
+    }
+
     /**
      * Resolve todos os projetos, tribos e cargos associados ao usuário.
      */

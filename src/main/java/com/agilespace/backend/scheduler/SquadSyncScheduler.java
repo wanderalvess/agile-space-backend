@@ -14,6 +14,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Sync automático pros squads que optaram por isso (Squad.syncOwnerUserId configurado) —
@@ -28,6 +30,11 @@ import java.util.List;
 public class SquadSyncScheduler {
 
     private static final int RECONCILE_INTERVAL_DEFAULT_HOURS = 6;
+    // Squad que falhou (token expirado, JQL ruim) não é tentada de novo a cada tick de 15 min: sem isso a
+    // mesma falha se repetia 96 vezes por dia, em cada squad com problema.
+    private static final Duration FAILURE_BACKOFF = Duration.ofHours(1);
+
+    private final Map<String, Instant> lastFailureAt = new ConcurrentHashMap<>();
 
     private final SquadRepository squadRepository;
     private final SquadSyncService squadSyncService;
@@ -43,6 +50,8 @@ public class SquadSyncScheduler {
         List<Squad> candidates = squadRepository.findBySyncOwnerUserIdIsNotNull();
         for (Squad squad : candidates) {
             if (!isDue(squad)) continue;
+            Instant failedAt = lastFailureAt.get(squad.getId());
+            if (failedAt != null && Duration.between(failedAt, Instant.now()).compareTo(FAILURE_BACKOFF) < 0) continue;
             if (!syncGuard.tryAcquire(squad.getId())) {
                 log.info("[squad-scheduler] pulando {} — já há uma sincronização em andamento (manual ou tick anterior).", squad.getId());
                 continue;
@@ -50,7 +59,9 @@ public class SquadSyncScheduler {
             try {
                 log.info("[squad-scheduler] sincronizando {} (owner={})", squad.getId(), squad.getSyncOwnerUserId());
                 squadSyncService.syncSquad(squad.getId(), squad.getSyncOwnerUserId(), false);
+                lastFailureAt.remove(squad.getId());
             } catch (Exception e) {
+                lastFailureAt.put(squad.getId(), Instant.now());
                 log.error("[squad-scheduler] falha ao sincronizar {}: {}", squad.getId(), e.getMessage());
             } finally {
                 syncGuard.release(squad.getId());

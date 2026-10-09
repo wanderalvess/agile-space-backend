@@ -8,6 +8,7 @@ import java.util.List;
 
 @Repository
 public interface SprintPlanningMemberRepository extends JpaRepository<SprintPlanningMember, String> {
+    List<SprintPlanningMember> findByIdIn(java.util.Collection<String> ids);
     List<SprintPlanningMember> findByPlanningIdOrderByOrderAsc(String planningId);
     void deleteByPlanningId(String planningId);
 }

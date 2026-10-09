@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -70,7 +71,10 @@ public class SquadService {
         if (squad.getLastSyncBy() != null) target.setLastSyncBy(squad.getLastSyncBy());
         if (squad.getLastSyncIssueCount() != null) target.setLastSyncIssueCount(squad.getLastSyncIssueCount());
         if (squad.getLastSyncError() != null) target.setLastSyncError(squad.getLastSyncError());
-        if (squad.getSyncOwnerUserId() != null) target.setSyncOwnerUserId(squad.getSyncOwnerUserId());
+        // "" = desligar o sync agendado (null continua significando "não mexer").
+        if (squad.getSyncOwnerUserId() != null) {
+            target.setSyncOwnerUserId(squad.getSyncOwnerUserId().isBlank() ? null : squad.getSyncOwnerUserId().trim());
+        }
         if (squad.getReconcileIntervalHours() != null) target.setReconcileIntervalHours(squad.getReconcileIntervalHours());
         if (squad.getDefaultDailyCapacityHours() != null) target.setDefaultDailyCapacityHours(squad.getDefaultDailyCapacityHours());
         if (squad.getCapacityCalculationMethod() != null) target.setCapacityCalculationMethod(squad.getCapacityCalculationMethod());
@@ -115,10 +119,20 @@ public class SquadService {
 
     @Transactional
     public SquadMetricsRollup saveRollup(SquadMetricsRollup rollup) {
-        if (rollup.getDbId() == null || rollup.getDbId().isBlank()) {
-            rollup.setDbId(rollup.getSquadId() + "_" + rollup.getSprintId());
-        }
+        rollup.setDbId(ownedDbId(rollup.getSquadId(), rollup.getDbId(), String.valueOf(rollup.getSprintId())));
         return rollupRepository.save(rollup);
+    }
+
+    /**
+     * O id da linha tem sempre o prefixo "{squadId}_". Um id vindo do cliente que aponte para outra squad
+     * é descartado: com ele o saveAll sobrescreveria (e mudaria o dono de) a linha de outra squad.
+     */
+    static String ownedDbId(String squadId, String providedDbId, String suffix) {
+        String prefix = squadId + "_";
+        if (providedDbId != null && !providedDbId.isBlank() && providedDbId.startsWith(prefix) && !providedDbId.endsWith("_null")) {
+            return providedDbId;
+        }
+        return prefix + suffix;
     }
 
     // ----- Issue Snapshots -----
@@ -149,9 +163,7 @@ public class SquadService {
                     snap.setJiraKey(snap.getKey());
                 }
             }
-            if (snap.getDbId() == null || snap.getDbId().isBlank() || snap.getDbId().endsWith("_null")) {
-                snap.setDbId(squadId + "_" + (snap.getJiraKey() != null ? snap.getJiraKey() : "unknown"));
-            }
+            snap.setDbId(ownedDbId(squadId, snap.getDbId(), snap.getJiraKey() != null ? snap.getJiraKey() : "unknown"));
         }
         return issueSnapshotRepository.saveAll(snapshots);
     }
@@ -226,13 +238,53 @@ public class SquadService {
 
     @Transactional
     public List<SquadMember> batchUpsertMembers(String squadId, List<SquadMember> members) {
-        for (SquadMember m : members) {
-            m.setSquadId(squadId);
-            if (m.getDbId() == null || m.getDbId().isBlank()) {
-                m.setDbId(squadId + "_" + m.getJiraAccountId());
-            }
+        // Uma leitura só do roster (sem N+1). Campo ausente no payload preserva o que já está salvo,
+        // e o vínculo "sou eu" (claimedByUid) nunca é trocado por este caminho.
+        Map<String, SquadMember> existingByAccount = new LinkedHashMap<>();
+        for (SquadMember e : memberRepository.findBySquadIdOrderByDisplayNameAsc(squadId)) {
+            existingByAccount.put(e.getJiraAccountId(), e);
         }
-        return memberRepository.saveAll(members);
+        List<SquadMember> toSave = new ArrayList<>();
+        for (SquadMember m : members) {
+            if (m.getJiraAccountId() == null || m.getJiraAccountId().isBlank()) continue;
+            m.setSquadId(squadId);
+            SquadMember e = existingByAccount.get(m.getJiraAccountId());
+            if (e != null) {
+                m.setDbId(e.getDbId());
+                if (m.getDisplayName() == null || m.getDisplayName().isBlank()) m.setDisplayName(e.getDisplayName());
+                if (m.getEmail() == null) m.setEmail(e.getEmail());
+                if (m.getRole() == null) m.setRole(e.getRole());
+                if (m.getCapacityHoursPerDay() == null) m.setCapacityHoursPerDay(e.getCapacityHoursPerDay());
+                if (m.getSystemCalculatedCapacityHoursPerDay() == null) m.setSystemCalculatedCapacityHoursPerDay(e.getSystemCalculatedCapacityHoursPerDay());
+                if (m.getCalibrationNotes() == null) m.setCalibrationNotes(e.getCalibrationNotes());
+                if (m.getOverrideType() == null) m.setOverrideType(e.getOverrideType());
+                m.setClaimedByUid(e.getClaimedByUid());
+            } else {
+                m.setDbId(ownedDbId(squadId, m.getDbId(), m.getJiraAccountId()));
+                m.setClaimedByUid(null);
+            }
+            toSave.add(m);
+        }
+        return memberRepository.saveAll(toSave);
+    }
+
+    /**
+     * "Sou eu": liga a conta de quem chama à linha do roster. Só vale para linha que já existe e que está
+     * livre (ou já é da própria pessoa). Não mexe em nome, papel, capacidade nem no usuário.
+     */
+    @Transactional
+    public SquadMember claimMember(String squadId, String jiraAccountId, String callerIdentifier) {
+        SquadMember row = memberRepository.findBySquadIdAndJiraAccountId(squadId, jiraAccountId)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Pessoa não encontrada no time desta squad."));
+        String current = row.getClaimedByUid();
+        if (current != null && !current.isBlank() && !current.equalsIgnoreCase(callerIdentifier)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.CONFLICT, "Esta pessoa do time já está vinculada a outra conta.");
+        }
+        row.setClaimedByUid(callerIdentifier);
+        row.setUpdatedAt(Instant.now().toString());
+        return memberRepository.save(row);
     }
 
     @Transactional
@@ -265,9 +317,7 @@ public class SquadService {
     public List<SquadMemberMetric> batchUpsertMemberMetrics(String squadId, List<SquadMemberMetric> metrics) {
         for (SquadMemberMetric m : metrics) {
             m.setSquadId(squadId);
-            if (m.getDbId() == null || m.getDbId().isBlank()) {
-                m.setDbId(squadId + "_" + m.getAssigneeId());
-            }
+            m.setDbId(ownedDbId(squadId, m.getDbId(), String.valueOf(m.getAssigneeId())));
         }
         memberMetricRepository.deleteBySquadId(squadId);
         return memberMetricRepository.saveAll(metrics);
@@ -286,9 +336,7 @@ public class SquadService {
     public List<SquadDailySnapshot> batchUpsertDailySnapshots(String squadId, List<SquadDailySnapshot> snapshots) {
         for (SquadDailySnapshot s : snapshots) {
             s.setSquadId(squadId);
-            if (s.getDbId() == null || s.getDbId().isBlank()) {
-                s.setDbId(squadId + "_" + s.getSnapshotDate());
-            }
+            s.setDbId(ownedDbId(squadId, s.getDbId(), String.valueOf(s.getSnapshotDate())));
         }
         return dailySnapshotRepository.saveAll(snapshots);
     }
@@ -311,9 +359,7 @@ public class SquadService {
                     w.setJiraKey(w.getKey());
                 }
             }
-            if (w.getDbId() == null || w.getDbId().isBlank() || w.getDbId().endsWith("_null")) {
-                w.setDbId(squadId + "_" + (w.getJiraKey() != null ? w.getJiraKey() : "unknown"));
-            }
+            w.setDbId(ownedDbId(squadId, w.getDbId(), w.getJiraKey() != null ? w.getJiraKey() : "unknown"));
         }
         return worklogCacheRepository.saveAll(entries);
     }

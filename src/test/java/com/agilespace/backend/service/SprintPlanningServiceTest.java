@@ -133,13 +133,44 @@ class SprintPlanningServiceTest {
         @Test
         @DisplayName("Deve listar planejamentos prontos pro poker respeitando o limite")
         void shouldListReadyForPoker() {
-            when(repository.findReadyForPoker(PageRequest.of(0, 5))).thenReturn(List.of(samplePlan));
+            when(repository.findReadyForPokerByCreator("user-sm", PageRequest.of(0, 5))).thenReturn(List.of(samplePlan));
             when(taskRepository.findByPlanningIdOrderByOrderAsc("plan-123")).thenReturn(List.of());
             when(memberRepository.findByPlanningIdOrderByOrderAsc("plan-123")).thenReturn(List.of());
 
-            List<SprintPlanning> result = service.listReadyForPoker(5);
+            List<SprintPlanning> result = service.listReadyForPoker(5, "user-sm", false);
 
             assertEquals(1, result.size());
+            verify(repository, never()).findReadyForPoker(any());
+        }
+
+        @Test
+        @DisplayName("Admin lista todos; o limite tem teto de 100")
+        void shouldListAllForAdminWithCappedLimit() {
+            when(repository.findReadyForPoker(PageRequest.of(0, 100))).thenReturn(List.of());
+
+            assertTrue(service.listReadyForPoker(1_000_000, "admin", true).isEmpty());
+
+            verify(repository).findReadyForPoker(PageRequest.of(0, 100));
+        }
+
+        @Test
+        @DisplayName("Id de tarefa que já pertence a outro planejamento ganha id novo (não sobrescreve o alheio)")
+        void shouldRegenerateTaskIdOwnedByAnotherPlanning() {
+            SprintPlanning incoming = SprintPlanning.builder().id("plan-123").title("Meu").build();
+            SprintPlanningTask hijack = SprintPlanningTask.builder().id("task-do-outro").build();
+            incoming.setTasks(new ArrayList<>(List.of(hijack)));
+            when(repository.findById("plan-123")).thenReturn(Optional.empty());
+            when(repository.save(any(SprintPlanning.class))).thenAnswer(i -> i.getArgument(0));
+            when(taskRepository.findByIdIn(any())).thenReturn(List.of(SprintPlanningTask.builder().id("task-do-outro").planningId("plan-outro").build()));
+            when(taskRepository.findByPlanningIdOrderByOrderAsc(any())).thenReturn(List.of());
+            when(memberRepository.findByPlanningIdOrderByOrderAsc(any())).thenReturn(List.of());
+
+            service.saveOrUpdatePlanner(incoming, "user-sm", false);
+
+            org.mockito.ArgumentCaptor<SprintPlanningTask> saved = org.mockito.ArgumentCaptor.forClass(SprintPlanningTask.class);
+            verify(taskRepository).save(saved.capture());
+            assertNotEquals("task-do-outro", saved.getValue().getId());
+            assertEquals("plan-123", saved.getValue().getPlanningId());
         }
     }
 

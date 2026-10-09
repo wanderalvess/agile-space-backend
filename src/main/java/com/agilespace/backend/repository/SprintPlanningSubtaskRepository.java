@@ -8,6 +8,7 @@ import java.util.List;
 
 @Repository
 public interface SprintPlanningSubtaskRepository extends JpaRepository<SprintPlanningSubtask, String> {
+    List<SprintPlanningSubtask> findByIdIn(java.util.Collection<String> ids);
     List<SprintPlanningSubtask> findByTaskIdInOrderByOrderAsc(List<String> taskIds);
     void deleteByTaskIdIn(List<String> taskIds);
 }

@@ -18,8 +18,10 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -109,10 +111,19 @@ public class SprintPlanningService {
         return createdBy != null && !createdBy.isBlank() && !"anonymous".equalsIgnoreCase(createdBy.trim());
     }
 
+    private static final int MAX_LIST_LIMIT = 100;
+
+    /**
+     * Planejamentos prontos para o Poker. Planejamento não tem squad; para não expor o de outras pessoas,
+     * quem não é admin só lista os que ele mesmo criou. O limite tem teto (antes: qualquer número).
+     */
     @Transactional(readOnly = true)
-    public List<SprintPlanning> listReadyForPoker(int limit) {
-        return sprintPlanningRepository.findReadyForPoker(PageRequest.of(0, Math.max(1, limit)))
-                .stream().map(this::attachChildren).toList();
+    public List<SprintPlanning> listReadyForPoker(int limit, String callerId, boolean isAdmin) {
+        PageRequest page = PageRequest.of(0, Math.min(MAX_LIST_LIMIT, Math.max(1, limit)));
+        List<SprintPlanning> found = isAdmin
+                ? sprintPlanningRepository.findReadyForPoker(page)
+                : (callerId == null ? List.of() : sprintPlanningRepository.findReadyForPokerByCreator(callerId, page));
+        return found.stream().map(this::attachChildren).toList();
     }
 
     // --- Montagem/gravação das tabelas filhas (sem relação JPA, mesmo padrão de ActionPlanTask/boardId) ---
@@ -131,6 +142,15 @@ public class SprintPlanningService {
         return planning;
     }
 
+    private static <T> Set<String> idsAlreadyTaken(List<String> sentIds, java.util.function.Function<List<String>, List<T>> finder,
+                                                    java.util.function.Function<T, String> idOf) {
+        List<String> ids = sentIds.stream().filter(i -> i != null && !i.isBlank()).distinct().toList();
+        if (ids.isEmpty()) return Set.of();
+        Set<String> taken = new HashSet<>();
+        for (T found : finder.apply(ids)) taken.add(idOf.apply(found));
+        return taken;
+    }
+
     private void replaceChildren(String planningId, List<SprintPlanningTask> tasks, List<SprintPlanningMember> members) {
         List<SprintPlanningTask> existingTasks = taskRepository.findByPlanningIdOrderByOrderAsc(planningId);
         if (!existingTasks.isEmpty()) {
@@ -140,10 +160,15 @@ public class SprintPlanningService {
         memberRepository.deleteByPlanningId(planningId);
 
         List<SprintPlanningTask> safeTasks = tasks != null ? tasks : Collections.emptyList();
+        // Depois do delete acima, qualquer id que ainda exista pertence a OUTRO planejamento: o save o
+        // sobrescreveria e o tiraria de lá. Ids que colidem ganham um id novo.
+        Set<String> takenTaskIds = idsAlreadyTaken(safeTasks.stream().map(SprintPlanningTask::getId).toList(), taskRepository::findByIdIn, SprintPlanningTask::getId);
+        Set<String> takenSubtaskIds = idsAlreadyTaken(safeTasks.stream().filter(t -> t.getSubtasks() != null)
+                .flatMap(t -> t.getSubtasks().stream()).map(SprintPlanningSubtask::getId).toList(), subtaskRepository::findByIdIn, SprintPlanningSubtask::getId);
         List<SprintPlanningSubtask> subtasksToSave = new ArrayList<>();
         int taskOrder = 0;
         for (SprintPlanningTask task : safeTasks) {
-            if (task.getId() == null || task.getId().isBlank()) {
+            if (task.getId() == null || task.getId().isBlank() || takenTaskIds.contains(task.getId())) {
                 task.setId(UUID.randomUUID().toString());
             }
             task.setPlanningId(planningId);
@@ -155,7 +180,7 @@ public class SprintPlanningService {
             if (subtasks != null) {
                 int subtaskOrder = 0;
                 for (SprintPlanningSubtask subtask : subtasks) {
-                    if (subtask.getId() == null || subtask.getId().isBlank()) {
+                    if (subtask.getId() == null || subtask.getId().isBlank() || takenSubtaskIds.contains(subtask.getId())) {
                         subtask.setId(UUID.randomUUID().toString());
                     }
                     subtask.setTaskId(task.getId());
@@ -170,9 +195,10 @@ public class SprintPlanningService {
         }
 
         List<SprintPlanningMember> safeMembers = members != null ? members : Collections.emptyList();
+        Set<String> takenMemberIds = idsAlreadyTaken(safeMembers.stream().map(SprintPlanningMember::getId).toList(), memberRepository::findByIdIn, SprintPlanningMember::getId);
         int memberOrder = 0;
         for (SprintPlanningMember member : safeMembers) {
-            if (member.getId() == null || member.getId().isBlank()) {
+            if (member.getId() == null || member.getId().isBlank() || takenMemberIds.contains(member.getId())) {
                 member.setId(UUID.randomUUID().toString());
             }
             member.setPlanningId(planningId);

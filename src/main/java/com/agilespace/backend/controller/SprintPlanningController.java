@@ -21,11 +21,13 @@ public class SprintPlanningController {
     @GetMapping
     public ResponseEntity<List<SprintPlanning>> listReadyForPoker(
             @RequestParam(value = "readyForPoker", required = false, defaultValue = "false") boolean readyForPoker,
-            @RequestParam(value = "limit", required = false, defaultValue = "20") int limit) {
+            @RequestParam(value = "limit", required = false, defaultValue = "20") int limit,
+            HttpServletRequest request) {
         if (!readyForPoker) {
             return ResponseEntity.ok(List.of());
         }
-        return ResponseEntity.ok(sprintPlanningService.listReadyForPoker(limit));
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        return ResponseEntity.ok(sprintPlanningService.listReadyForPoker(limit, callerId, isAdmin(request)));
     }
 
     @GetMapping("/{id}")

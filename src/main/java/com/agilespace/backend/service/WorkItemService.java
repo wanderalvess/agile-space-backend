@@ -42,7 +42,7 @@ public class WorkItemService {
                 .squadId(s.getSquadId())
                 .sprintId(s.getSprintId())
                 .jiraKey(s.getJiraKey())
-                .title(s.getJiraKey())
+                .title(s.getTitle() != null && !s.getTitle().isBlank() ? s.getTitle() : s.getJiraKey())
                 .type(s.getType())
                 .assigneeName(s.getAssigneeName())
                 .assigneeId(s.getAssigneeId())
@@ -57,8 +57,18 @@ public class WorkItemService {
                 .build();
     }
 
+    /** Estimativa: vazio limpa; senão um número finito entre 0 e 1000 (NaN/negativo/absurdo viravam dado da sprint). */
+    static void requireValidPoints(Double points) {
+        if (points == null) return;
+        if (points.isNaN() || points.isInfinite() || points < 0 || points > 1000) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "Estimativa inválida: use um número entre 0 e 1000.");
+        }
+    }
+
     @Transactional
     public void estimateWorkItem(String squadId, String jiraKey, Double pointsEstimated) {
+        requireValidPoints(pointsEstimated);
         SquadIssueSnapshot item = findOrCreate(squadId, jiraKey);
         if (item.getCeremonyStatus() == null || item.getCeremonyStatus().isBlank()) {
             item.setCeremonyStatus("backlog");
@@ -69,6 +79,9 @@ public class WorkItemService {
 
     @Transactional
     public void commitWorkItem(String squadId, String jiraKey, String sprintId) {
+        if (sprintId == null || sprintId.isBlank()) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "Informe a sprint do compromisso.");
+        }
         SquadIssueSnapshot item = findOrCreate(squadId, jiraKey);
         item.setCeremonyStatus("committed");
         item.setSprintId(sprintId);
@@ -108,8 +121,10 @@ public class WorkItemService {
                 items = Collections.emptyList();
             }
 
-            // Fallback: se nenhum item estiver amarrado ao ID exato, busca todos os itens ativos (não-backlog) da squad
-            if (items.isEmpty()) {
+            // Squad com sprint ativa conhecida e sem itens nela: zero. Antes caía para "todos os itens não-backlog
+            // da squad", de TODAS as sprints, e o painel mostrava esse total como se fosse da sprint.
+            // Só squad SEM sprint ativa gravada (nunca sincronizou) usa os itens em jogo, porque não há sprint a separar.
+            if (items.isEmpty() && activeSprint == null) {
                 items = issueSnapshotRepository.findBySquadId(squadId).stream()
                         .filter(w -> w.getCeremonyStatus() != null && !"backlog".equalsIgnoreCase(w.getCeremonyStatus()))
                         .toList();

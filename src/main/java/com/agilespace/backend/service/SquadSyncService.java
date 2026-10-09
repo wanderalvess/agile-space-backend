@@ -51,6 +51,9 @@ public class SquadSyncService {
     private static final int BATCH_CHUNK_SIZE = 400;
     private static final int PAGE_SIZE = 100;
     private static final int MAX_PAGES = 20; // teto de segurança: 2000 issues
+    private static final List<String> FULL_SYNC_ONLY_METRICS = List.of("cycleTimeByStatus", "scopeChurn", "estimateAdjustedTotalSec");
+    // Dias úteis, "hoje", horário comercial e a data da JQL são do Brasil; o servidor roda em UTC.
+    private static final ZoneId BR_ZONE = ZoneId.of("America/Sao_Paulo");
 
     private static final List<String> SQUAD_SYNC_FIELDS_BASE = List.of(
             "summary", "issuetype", "status", "created", "updated", "duedate",
@@ -89,6 +92,30 @@ public class SquadSyncService {
     // ===================== API pública =====================
 
     public void syncSquad(String squadId, String callerUserId, boolean forceFull) {
+        try {
+            doSyncSquad(squadId, callerUserId, forceFull);
+        } catch (RuntimeException e) {
+            recordSyncFailure(squadId, callerUserId, e);
+            throw e;
+        }
+    }
+
+    /**
+     * Grava que a última sincronização falhou (a tela mostra o motivo e o próximo sync vira completo).
+     * Antes nada gravava "error": o aviso de falha da tela nunca aparecia e uma JQL ruim ficava invisível.
+     */
+    private void recordSyncFailure(String squadId, String callerUserId, RuntimeException e) {
+        try {
+            String reason = e instanceof ResponseStatusException rse && rse.getReason() != null ? rse.getReason() : e.getMessage();
+            if (reason == null || reason.isBlank()) reason = e.getClass().getSimpleName();
+            if (reason.length() > 500) reason = reason.substring(0, 500);
+            squadService.saveSquad(Squad.builder().id(squadId).lastSyncStatus("error").lastSyncError(reason).lastSyncBy(callerUserId).build());
+        } catch (Exception ignored) {
+            log.warn("[squad:{}] não foi possível gravar o erro da sincronização: {}", squadId, ignored.getMessage());
+        }
+    }
+
+    private void doSyncSquad(String squadId, String callerUserId, boolean forceFull) {
         Squad config = ensureSquadConfig(squadId);
         JiraCreds creds = resolveCredentials(config, callerUserId);
         config = withDiscoveredSprintFieldId(config, creds.domain(), creds.token());
@@ -205,6 +232,9 @@ public class SquadSyncService {
             int sprintWorkdays = meta != null ? countWorkdays(meta.startDate, meta.endDate) : 0;
             int removedCount = sprintId.equals(effectiveSprintId) ? removedFromEffectiveSprint : 0;
             SquadMetricsRollup rollupForGroup = buildRollup(squadId, sprintId, mergedSnapshots, groupRawIssues, meta, sprintWorkdays, syncedAt, removedCount);
+            if (!isFull) {
+                keepFullSyncOnlyMetrics(rollupForGroup, squadService.getRollup(squadId, sprintId).orElse(null));
+            }
             squadService.saveRollup(rollupForGroup);
 
             if (sprintId.equals(effectiveSprintId)) {
@@ -247,6 +277,10 @@ public class SquadSyncService {
     }
 
     public void forceResyncSprint(String squadId, String callerUserId, String targetSprintId) {
+        // O id entra direto na JQL; só letras, números, _ e - (o id de sprint do Jira é numérico). Espaço, aspas ou parênteses abririam a JQL.
+        if (targetSprintId == null || !targetSprintId.matches("[A-Za-z0-9_-]{1,40}")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Sprint inválida.");
+        }
         Squad config = squadService.getSquad(squadId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Squad sem configuração."));
         JiraCreds creds = resolveCredentials(config, callerUserId);
@@ -354,7 +388,9 @@ public class SquadSyncService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Configure seu Token de Acesso do Jira em Conexão Jira antes de sincronizar.");
         }
-        String domain = !isBlank(squad.getJiraDomain()) ? squad.getJiraDomain() : cfg.getDomain();
+        // O token é do domínio salvo na conta de quem sincroniza. Só cai no domínio da squad quando a conta
+        // não tem um: assim quem edita a squad não consegue apontar o token dos outros para outro servidor.
+        String domain = !isBlank(cfg.getDomain()) ? cfg.getDomain() : squad.getJiraDomain();
         return new JiraCreds(domain, cfg.getToken());
     }
 
@@ -964,6 +1000,20 @@ public class SquadSyncService {
                 .build();
     }
 
+    /**
+     * O sync delta só traz as issues que mudaram e não pede changelog; cycle time, scope churn e estimativa
+     * ajustada calculados em cima dele seriam parciais e apagariam o valor do último sync completo. O delta
+     * mantém o que o completo gravou (e não emite nada se ainda não houve completo).
+     */
+    private void keepFullSyncOnlyMetrics(SquadMetricsRollup fresh, SquadMetricsRollup previous) {
+        if (!(fresh.getExtraMetrics() instanceof ObjectNode freshExtra)) return;
+        for (String key : FULL_SYNC_ONLY_METRICS) {
+            freshExtra.remove(key);
+            JsonNode old = previous != null && previous.getExtraMetrics() != null ? previous.getExtraMetrics().get(key) : null;
+            if (old != null && !old.isNull()) freshExtra.set(key, old.deepCopy());
+        }
+    }
+
     // Taxa de escape de bugs — adaptado de issue-service.js:getSprintBugs (jiradash).
     // Simplificações conscientes: sem o "Tipo do Defeito" quebrado por customfield
     // específico deste tenant (mesma razão de não copiar customfields hardcoded pra cá),
@@ -1065,7 +1115,7 @@ public class SquadSyncService {
         int workStartHour = 8;
         int workEndHour = 18;
         double prodRatio = horasProdutivasPorDia / (workEndHour - workStartHour);
-        ZoneId zone = ZoneId.systemDefault();
+        ZoneId zone = BR_ZONE;
         ZonedDateTime a = start.atZone(zone);
         ZonedDateTime b = end.atZone(zone);
 
@@ -1397,17 +1447,17 @@ public class SquadSyncService {
     private static int daysUntil(String isoDate) {
         LocalDate due = parseToLocalDate(isoDate);
         if (due == null) return Integer.MIN_VALUE;
-        return (int) java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(), due);
+        return (int) java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(BR_ZONE), due);
     }
 
     private static String todayStr() {
-        return LocalDate.now().toString();
+        return LocalDate.now(BR_ZONE).toString();
     }
 
     private static String formatForJql(String iso) {
         Instant instant = parseInstantFlexible(iso);
         if (instant == null) instant = Instant.now();
-        ZonedDateTime zdt = instant.atZone(ZoneId.systemDefault());
+        ZonedDateTime zdt = instant.atZone(BR_ZONE);
         return String.format("%04d-%02d-%02d %02d:%02d", zdt.getYear(), zdt.getMonthValue(), zdt.getDayOfMonth(), zdt.getHour(), zdt.getMinute());
     }
 

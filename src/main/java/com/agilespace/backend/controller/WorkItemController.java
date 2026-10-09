@@ -1,8 +1,6 @@
 package com.agilespace.backend.controller;
 
-import com.agilespace.backend.domain.User;
 import com.agilespace.backend.domain.WorkItem;
-import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.WorkItemService;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -20,11 +18,14 @@ import java.util.List;
 public class WorkItemController {
 
     private final WorkItemService workItemService;
-    private final UserRepository userRepository;
-    private final com.agilespace.backend.repository.ProjectMemberRoleRepository projectMemberRoleRepository;
+    private final com.agilespace.backend.service.SquadAccessService squadAccessService;
 
-    private boolean isLeadershipJobTitle(String jobTitle) {
-        return com.agilespace.backend.security.SquadLeadership.isLeadershipJobTitle(jobTitle);
+    private static final java.util.regex.Pattern JIRA_KEY = java.util.regex.Pattern.compile("[A-Za-z][A-Za-z0-9_]*-\\d+");
+
+    private static void requireJiraKey(String jiraKey) {
+        if (jiraKey == null || !JIRA_KEY.matcher(jiraKey).matches()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Chave da issue inválida (use o formato ABC-123).");
+        }
     }
 
     private String resolveSquad(String squadId, String jiraKey) {
@@ -44,100 +45,16 @@ public class WorkItemController {
     }
 
     /**
-     * Núcleo comum de leitura E escrita: ADMIN/LEAD, ou um caller já vinculado a esta squad
-     * (User.squadId/defaultProjectId, papel de projeto via ProjectMemberRoleRepository, ou
-     * jobTitle de liderança quando já pertence à squad). Sem efeito colateral — nunca grava
-     * nada — por isso serve tanto pra decidir leitura quanto como primeira parte de
-     * requireSquadWriteAccess. Mesmo padrão de SquadController.matchesSquad.
-     */
-    private boolean matchesSquad(String squadId, HttpServletRequest request) {
-        String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
-        if ("ADMIN".equalsIgnoreCase(role) || "LEAD".equalsIgnoreCase(role)) {
-            return true;
-        }
-        String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
-        User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
-        if (caller == null) {
-            return false;
-        }
-
-        // 0. Papel administrativo no banco
-        if ("ADMIN".equalsIgnoreCase(caller.getRole()) || "LEAD".equalsIgnoreCase(caller.getRole())) {
-            return true;
-        }
-
-        // 1. Checagem direta por squadId ou defaultProjectId
-        boolean matches = (caller.getSquadId() != null && caller.getSquadId().equalsIgnoreCase(squadId))
-                || (caller.getDefaultProjectId() != null && caller.getDefaultProjectId().equalsIgnoreCase(squadId));
-
-        // 2. Tratamento de alias DDWMISSI <-> MISSI
-        if (!matches && ("DDWMISSI".equalsIgnoreCase(squadId) || "MISSI".equalsIgnoreCase(squadId))) {
-            matches = ("DDWMISSI".equalsIgnoreCase(caller.getSquadId()) || "MISSI".equalsIgnoreCase(caller.getSquadId()))
-                    || ("DDWMISSI".equalsIgnoreCase(caller.getDefaultProjectId()) || "MISSI".equalsIgnoreCase(caller.getDefaultProjectId()));
-        }
-
-        // 0.1 Cargos de liderança/governança de squad — só vale se o caller já pertence a este squad
-        // (senão qualquer usuário autodeclarando jobTitle de liderança ganharia acesso a squads alheios)
-        if (matches && isLeadershipJobTitle(caller.getJobTitle())) {
-            return true;
-        }
-        if (matches) {
-            return true;
-        }
-
-        // 2.1 Checagem via papéis de membros de projeto (Profields / ProjectMemberRole)
-        if (caller.getEmail() != null && !caller.getEmail().isBlank()) {
-            matches = projectMemberRoleRepository.findByEmailIgnoreCase(caller.getEmail().trim())
-                    .stream()
-                    .anyMatch(r -> r.getProjectId() != null && (
-                            r.getProjectId().equalsIgnoreCase(squadId) ||
-                            ("DDWMISSI".equalsIgnoreCase(squadId) && "MISSI".equalsIgnoreCase(r.getProjectId())) ||
-                            ("MISSI".equalsIgnoreCase(squadId) && "DDWMISSI".equalsIgnoreCase(r.getProjectId()))
-                    ));
-        }
-
-        return matches;
-    }
-
-    /**
-     * Leitura: qualquer membro real da squad (ou admin/liderança) — nunca auto-vincula.
-     * Antes desta checagem, todo GET de /api/work-items/** exigia só autenticação, sem checar
-     * pertencimento — qualquer usuário autenticado da aplicação lia work items de qualquer squad.
+     * Mesma regra das demais telas por squad (SquadAccessService): membro real da squad, admin ou liderança da
+     * tribo. Quem não pertence à squad é barrado — antes quem não tinha squad era vinculado a qualquer squad
+     * só por escrever aqui.
      */
     private void requireSquadReadAccess(String squadId, HttpServletRequest request) {
-        if (!matchesSquad(squadId, request)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a membros desta squad ou administradores.");
-        }
+        squadAccessService.requireSquadReadAccess(squadId, request);
     }
 
-    /**
-     * Escrita: igual à leitura, mas com um fallback a mais — em ambientes limpos onde o
-     * usuário ainda não possui squad/projeto configurado, auto-associa pra permitir o
-     * primeiro fluxo de sincronização (efeito colateral que uma leitura nunca deve ter).
-     */
     private void requireSquadWriteAccess(String squadId, HttpServletRequest request) {
-        if (matchesSquad(squadId, request)) {
-            return;
-        }
-        String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
-        User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
-        if (caller == null) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a membros desta squad ou administradores.");
-        }
-
-        // Auto-vinculação caso não possua squad
-        boolean hasNoSquad = caller.getSquadId() == null || caller.getSquadId().isBlank() || "Sem Time".equalsIgnoreCase(caller.getSquadId().trim());
-        boolean hasNoProject = caller.getDefaultProjectId() == null || caller.getDefaultProjectId().isBlank() || "Sem Time".equalsIgnoreCase(caller.getDefaultProjectId().trim());
-        if (hasNoSquad) {
-            caller.setSquadId(squadId);
-            if (hasNoProject) {
-                caller.setDefaultProjectId(squadId);
-            }
-            userRepository.save(caller);
-            return;
-        }
-
-        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a membros desta squad ou administradores.");
+        squadAccessService.requireSquadReadAccess(squadId, request);
     }
 
     public record EstimateRequest(@JsonProperty("points_estimated") Double points_estimated) {}
@@ -148,6 +65,7 @@ public class WorkItemController {
             @PathVariable String jiraKey,
             @RequestBody EstimateRequest request,
             HttpServletRequest httpRequest) {
+        requireJiraKey(jiraKey);
         String resolvedSquad = resolveSquad(squadId, jiraKey);
         requireSquadWriteAccess(resolvedSquad, httpRequest);
         workItemService.estimateWorkItem(resolvedSquad, jiraKey, request.points_estimated());
@@ -173,6 +91,7 @@ public class WorkItemController {
             @PathVariable String jiraKey,
             @RequestBody CommitRequest request,
             HttpServletRequest httpRequest) {
+        requireJiraKey(jiraKey);
         String resolvedSquad = resolveSquad(squadId, jiraKey);
         requireSquadWriteAccess(resolvedSquad, httpRequest);
         workItemService.commitWorkItem(resolvedSquad, jiraKey, request.sprint_id());
@@ -187,6 +106,7 @@ public class WorkItemController {
             @PathVariable String jiraKey,
             @RequestBody ShowcaseDecisionRequest request,
             HttpServletRequest httpRequest) {
+        requireJiraKey(jiraKey);
         String resolvedSquad = resolveSquad(squadId, jiraKey);
         requireSquadWriteAccess(resolvedSquad, httpRequest);
         workItemService.showcaseDecision(resolvedSquad, jiraKey, request.status(), request.feedback());

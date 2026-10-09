@@ -78,9 +78,9 @@ public class SquadAccessService {
         if (userProjectResolverService != null) {
             UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(caller);
             if (access != null) {
-                if (access.isTransversalLeader()) {
-                    return true;
-                }
+                // Liderança transversal (PL, Tribe Lead, Agile Coach) já vem com a tribo/segmento inteiro
+                // expandido em access.getProjects(). Antes, ser transversal em QUALQUER projeto liberava
+                // TODAS as squads do banco, inclusive de outras tribos.
                 if (access.getProjects() != null) {
                     matches = access.getProjects().stream().anyMatch(p ->
                             p.getProjectId().equalsIgnoreCase(squadId)
@@ -112,6 +112,66 @@ public class SquadAccessService {
             );
         }
         return matches;
+    }
+
+    /**
+     * Gestão da squad (config, roster, capacidade, dado nominal por pessoa): admin, ou quem pertence à
+     * squad E tem papel de liderança nela (cargo de liderança, ou papel de liderança no cadastro do projeto,
+     * inclusive a liderança transversal da tribo).
+     * <p>
+     * Squad que ainda não tem NENHUMA liderança cadastrada (projeto importado sem Profields, ambiente novo)
+     * mantém a regra antiga: qualquer membro gerencia. Sem isso ninguém conseguiria configurar a squad.
+     */
+    public boolean canManageSquad(String squadId, HttpServletRequest request) {
+        return canManageSquad(squadId,
+                (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID),
+                (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE));
+    }
+
+    public boolean canManageSquad(String squadId, String userId, String role) {
+        if ("ADMIN".equalsIgnoreCase(role) || "LEAD".equalsIgnoreCase(role)) {
+            return true;
+        }
+        User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
+        if (caller == null) {
+            return false;
+        }
+        if ("ADMIN".equalsIgnoreCase(caller.getRole()) || "LEAD".equalsIgnoreCase(caller.getRole())) {
+            return true;
+        }
+        if (!matchesSquad(squadId, userId, role)) {
+            return false;
+        }
+        if (SquadLeadership.isLeadershipJobTitle(caller.getJobTitle())) {
+            return true;
+        }
+        if (userProjectResolverService == null) {
+            return false;
+        }
+        UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(caller);
+        if (access != null && access.getProjects() != null
+                && access.getProjects().stream().anyMatch(p -> p.isLeadership() && sameSquad(p.getProjectId(), squadId))) {
+            return true;
+        }
+        return !hasRegisteredLeadership(squadId);
+    }
+
+    /** True se o cadastro do projeto (ou o alias DDWMISSI/MISSI) já tem alguma pessoa de liderança. */
+    private boolean hasRegisteredLeadership(String squadId) {
+        if (userProjectResolverService.hasRegisteredLeadership(squadId)) {
+            return true;
+        }
+        if ("DDWMISSI".equalsIgnoreCase(squadId) || "MISSI".equalsIgnoreCase(squadId)) {
+            return userProjectResolverService.hasRegisteredLeadership("DDWMISSI".equalsIgnoreCase(squadId) ? "MISSI" : "DDWMISSI");
+        }
+        return false;
+    }
+
+    private static boolean sameSquad(String projectId, String squadId) {
+        if (projectId == null || squadId == null) return false;
+        if (projectId.equalsIgnoreCase(squadId)) return true;
+        return ("DDWMISSI".equalsIgnoreCase(squadId) || "MISSI".equalsIgnoreCase(squadId))
+                && ("DDWMISSI".equalsIgnoreCase(projectId) || "MISSI".equalsIgnoreCase(projectId));
     }
 
     /**

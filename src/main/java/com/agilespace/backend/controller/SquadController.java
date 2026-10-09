@@ -49,31 +49,69 @@ public class SquadController {
         if (squadAccessService.matchesSquad(squadId, request)) {
             return;
         }
-        String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
-        User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
-        if (caller == null) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a membros desta squad ou administradores.");
-        }
-
-        // Se o usuário ainda não tem squad vinculada (ou possui marcador como "Sem Time"), auto-vincula ao squad
-        boolean hasNoSquad = caller.getSquadId() == null || caller.getSquadId().isBlank() || "Sem Time".equalsIgnoreCase(caller.getSquadId().trim());
-        boolean hasNoProject = caller.getDefaultProjectId() == null || caller.getDefaultProjectId().isBlank() || "Sem Time".equalsIgnoreCase(caller.getDefaultProjectId().trim());
-        if (hasNoSquad) {
-            caller.setSquadId(squadId);
-            if (hasNoProject) {
-                caller.setDefaultProjectId(squadId);
-            }
-            userRepository.save(caller);
+        if (bootstrapNewSquad(squadId, request)) {
             return;
         }
-
         throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a membros desta squad ou administradores.");
     }
 
+    /**
+     * Gestão: configuração da squad, roster, capacidade e dado nominal por pessoa. Só liderança da squad
+     * (ou admin); ver SquadAccessService.canManageSquad.
+     */
+    private void requireSquadManageAccess(String squadId, HttpServletRequest request) {
+        if (squadAccessService.canManageSquad(squadId, request)) {
+            return;
+        }
+        if (bootstrapNewSquad(squadId, request)) {
+            return;
+        }
+        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só a liderança da squad (Agile Master, People Lead, Tech Lead, PO…) ou um administrador pode fazer isso.");
+    }
+
+    /**
+     * Primeiro uso em ambiente limpo: a squad ainda não existe (nem config, nem pessoas) e quem chama não tem
+     * squad. Só nesse caso vincula quem chama à squad nova. Antes, qualquer usuário sem squad se vinculava a
+     * QUALQUER squad já existente só chamando uma escrita, e passava a ler os dados dela.
+     */
+    private boolean bootstrapNewSquad(String squadId, HttpServletRequest request) {
+        String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
+        if (caller == null) {
+            return false;
+        }
+        boolean hasNoSquad = caller.getSquadId() == null || caller.getSquadId().isBlank() || "Sem Time".equalsIgnoreCase(caller.getSquadId().trim());
+        if (!hasNoSquad) {
+            return false;
+        }
+        boolean squadAlreadyExists = squadService.getSquad(squadId).isPresent() || !squadService.getMembers(squadId).isEmpty();
+        if (squadAlreadyExists) {
+            return false;
+        }
+        boolean hasNoProject = caller.getDefaultProjectId() == null || caller.getDefaultProjectId().isBlank() || "Sem Time".equalsIgnoreCase(caller.getDefaultProjectId().trim());
+        caller.setSquadId(squadId);
+        if (hasNoProject) {
+            caller.setDefaultProjectId(squadId);
+        }
+        userRepository.save(caller);
+        return true;
+    }
+
+    private String callerId(HttpServletRequest request) {
+        return (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+    }
+
+    private boolean isAdmin(HttpServletRequest request) {
+        return "ADMIN".equalsIgnoreCase((String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE));
+    }
+
     // ----- Squad Config -----
+    /** Só as squads que quem chama pode ler (antes: a lista inteira, com JQL e dono do sync, para qualquer login). */
     @GetMapping
-    public ResponseEntity<List<Squad>> getAllSquads() {
-        return ResponseEntity.ok(squadService.getAllSquads());
+    public ResponseEntity<List<Squad>> getAllSquads(HttpServletRequest request) {
+        return ResponseEntity.ok(squadService.getAllSquads().stream()
+                .filter(sq -> squadAccessService.matchesSquad(sq.getId(), request))
+                .toList());
     }
 
     // Motor de sync roda no backend (SquadSyncService) em vez de client-side —
@@ -131,23 +169,47 @@ public class SquadController {
 
     @PostMapping("/{squadId}")
     public ResponseEntity<Squad> saveSquad(@PathVariable String squadId, @RequestBody Squad squad, HttpServletRequest request) {
-        requireSquadWriteAccess(squadId, request);
+        requireSquadManageAccess(squadId, request);
+        // Campos que só o sync grava (estado da sincronização, sprint ativa, histórico) não vêm do cliente.
+        squad.setActiveSprintId(null);
+        squad.setSchemaVersion(null);
+        squad.setLastSyncAt(null);
+        squad.setLastFullReconcileAt(null);
+        squad.setLastSyncStatus(null);
+        squad.setLastSyncBy(null);
+        squad.setLastSyncIssueCount(null);
+        squad.setLastSyncError(null);
+        squad.setSprintHistory(null);
+        // O sync agendado usa o token do Jira do "dono". Ninguém indica outra pessoa como dono: só a si mesmo
+        // (ou desliga com vazio); admin pode indicar qualquer um.
+        String owner = squad.getSyncOwnerUserId();
+        if (owner != null && !owner.isBlank() && !owner.trim().equals(callerId(request)) && !isAdmin(request)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "O sincronismo agendado só pode usar o token do Jira de quem o ativa.");
+        }
         squad.setId(squadId);
         return ResponseEntity.ok(squadService.saveSquad(squad));
     }
 
     // ----- Metrics Rollup -----
+    /** Sem sprintId: o rollup da sprint ativa (ou o mais recente). Com sprintId: o daquela sprint, ou 404. */
     @GetMapping("/{squadId}/rollup")
-    public ResponseEntity<SquadMetricsRollup> getRollup(@PathVariable String squadId, HttpServletRequest request) {
+    public ResponseEntity<SquadMetricsRollup> getRollup(
+            @PathVariable String squadId,
+            @RequestParam(required = false) String sprintId,
+            HttpServletRequest request) {
         requireSquadReadAccess(squadId, request);
-        return squadService.getRollup(squadId)
-                .map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
+        java.util.Optional<SquadMetricsRollup> rollup = (sprintId != null && !sprintId.isBlank())
+                ? squadService.getRollup(squadId, sprintId)
+                : squadService.getRollup(squadId);
+        return rollup.map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping("/{squadId}/rollup")
     public ResponseEntity<SquadMetricsRollup> saveRollup(@PathVariable String squadId, @RequestBody SquadMetricsRollup rollup, HttpServletRequest request) {
-        requireSquadWriteAccess(squadId, request);
+        requireSquadManageAccess(squadId, request);
+        if (rollup.getSprintId() == null || rollup.getSprintId().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe a sprint do rollup.");
+        }
         rollup.setSquadId(squadId);
         return ResponseEntity.ok(squadService.saveRollup(rollup));
     }
@@ -187,7 +249,7 @@ public class SquadController {
             @PathVariable String squadId,
             @RequestBody List<SquadIssueSnapshot> snapshots,
             HttpServletRequest request) {
-        requireSquadWriteAccess(squadId, request);
+        requireSquadManageAccess(squadId, request);
         return ResponseEntity.ok(squadService.batchUpsertIssues(squadId, snapshots));
     }
 
@@ -196,14 +258,27 @@ public class SquadController {
             @PathVariable String squadId,
             @RequestBody List<String> keys,
             HttpServletRequest request) {
-        requireSquadWriteAccess(squadId, request);
+        requireSquadManageAccess(squadId, request);
         squadService.batchDeleteIssues(squadId, keys);
         return ResponseEntity.noContent().build();
     }
 
     // ----- Members -----
+    /** Squads da própria pessoa. Consultar o vínculo de outra pessoa (por e-mail, id…) é só de admin. */
     @GetMapping("/by-user")
-    public ResponseEntity<List<SquadMember>> getSquadMembersForUser(@RequestParam String identifier) {
+    public ResponseEntity<List<SquadMember>> getSquadMembersForUser(@RequestParam String identifier, HttpServletRequest request) {
+        if (!isAdmin(request) && !"LEAD".equalsIgnoreCase((String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE))) {
+            String userId = callerId(request);
+            User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
+            String wanted = identifier == null ? "" : identifier.trim();
+            boolean isSelf = caller != null && !wanted.isEmpty() && (
+                    wanted.equalsIgnoreCase(caller.getId())
+                            || wanted.equalsIgnoreCase(caller.getEmail() == null ? "" : caller.getEmail().trim())
+                            || wanted.equalsIgnoreCase(caller.getJiraAccountId() == null ? "" : caller.getJiraAccountId().trim()));
+            if (!isSelf) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Você só pode consultar as suas próprias squads.");
+            }
+        }
         return ResponseEntity.ok(squadService.getSquadMembersForUser(identifier));
     }
 
@@ -219,8 +294,37 @@ public class SquadController {
             @PathVariable String jiraAccountId,
             @RequestBody SquadMember member,
             HttpServletRequest request) {
-        requireSquadWriteAccess(squadId, request);
+        if (isSelfClaimOnly(member)) {
+            // "Sou eu": qualquer membro da squad liga a PRÓPRIA conta a uma linha livre do roster.
+            requireSquadWriteAccess(squadId, request);
+            String callerIdentifier = claimIdentifierOf(member, request);
+            return ResponseEntity.ok(squadService.claimMember(squadId, jiraAccountId, callerIdentifier));
+        }
+        requireSquadManageAccess(squadId, request);
+        // O vínculo de conta nunca é gravado por aqui (só por "Sou eu"): senão a liderança poderia vincular
+        // a conta de outra pessoa a uma linha e, por ela, dar acesso à squad.
+        member.setClaimedByUid(null);
         return ResponseEntity.ok(squadService.saveMember(squadId, jiraAccountId, member));
+    }
+
+    /** Payload só com claimedByUid (e, no máximo, updatedAt/ids): é o "Sou eu". */
+    private static boolean isSelfClaimOnly(SquadMember m) {
+        return m.getClaimedByUid() != null && !m.getClaimedByUid().isBlank()
+                && m.getDisplayName() == null && m.getEmail() == null && m.getRole() == null
+                && m.getCapacityHoursPerDay() == null && m.getSystemCalculatedCapacityHoursPerDay() == null
+                && m.getCalibrationNotes() == null && m.getOverrideType() == null;
+    }
+
+    /** O claimedByUid enviado tem que ser a identidade de quem chama (id da conta ou e-mail). */
+    private String claimIdentifierOf(SquadMember member, HttpServletRequest request) {
+        String userId = callerId(request);
+        User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
+        String sent = member.getClaimedByUid().trim();
+        if (caller == null || !(sent.equalsIgnoreCase(caller.getId())
+                || (caller.getEmail() != null && sent.equalsIgnoreCase(caller.getEmail().trim())))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Você só pode vincular a sua própria conta.");
+        }
+        return caller.getId();
     }
 
     @DeleteMapping("/{squadId}/members/{jiraAccountId}")
@@ -228,7 +332,7 @@ public class SquadController {
             @PathVariable String squadId,
             @PathVariable String jiraAccountId,
             HttpServletRequest request) {
-        requireSquadWriteAccess(squadId, request);
+        requireSquadManageAccess(squadId, request);
         squadService.deleteMember(squadId, jiraAccountId);
         return ResponseEntity.noContent().build();
     }
@@ -238,14 +342,15 @@ public class SquadController {
             @PathVariable String squadId,
             @RequestBody List<SquadMember> members,
             HttpServletRequest request) {
-        requireSquadWriteAccess(squadId, request);
+        requireSquadManageAccess(squadId, request);
         return ResponseEntity.ok(squadService.batchUpsertMembers(squadId, members));
     }
 
     // ----- Member Metrics -----
     @GetMapping("/{squadId}/member-metrics")
     public ResponseEntity<List<SquadMemberMetric>> getMemberMetrics(@PathVariable String squadId, HttpServletRequest request) {
-        requireSquadReadAccess(squadId, request);
+        // Horas e utilização por pessoa: dado nominal, só da liderança (ranking é opt-in por squad).
+        requireSquadManageAccess(squadId, request);
         return ResponseEntity.ok(squadService.getMemberMetrics(squadId));
     }
 
@@ -254,7 +359,7 @@ public class SquadController {
             @PathVariable String squadId,
             @RequestBody List<SquadMemberMetric> metrics,
             HttpServletRequest request) {
-        requireSquadWriteAccess(squadId, request);
+        requireSquadManageAccess(squadId, request);
         return ResponseEntity.ok(squadService.batchUpsertMemberMetrics(squadId, metrics));
     }
 
@@ -273,7 +378,7 @@ public class SquadController {
             @PathVariable String squadId,
             @RequestBody List<SquadDailySnapshot> snapshots,
             HttpServletRequest request) {
-        requireSquadWriteAccess(squadId, request);
+        requireSquadManageAccess(squadId, request);
         return ResponseEntity.ok(squadService.batchUpsertDailySnapshots(squadId, snapshots));
     }
 
@@ -283,7 +388,8 @@ public class SquadController {
             @PathVariable String squadId,
             @RequestParam(required = false) String sprintId,
             HttpServletRequest request) {
-        requireSquadReadAccess(squadId, request);
+        // Horas lançadas por autor: dado nominal, só da liderança.
+        requireSquadManageAccess(squadId, request);
         return ResponseEntity.ok(squadService.getWorklogCache(squadId, sprintId));
     }
 
@@ -292,7 +398,7 @@ public class SquadController {
             @PathVariable String squadId,
             @RequestBody List<SquadIssueWorklogCache> entries,
             HttpServletRequest request) {
-        requireSquadWriteAccess(squadId, request);
+        requireSquadManageAccess(squadId, request);
         return ResponseEntity.ok(squadService.batchUpsertWorklogCache(squadId, entries));
     }
 
@@ -301,7 +407,7 @@ public class SquadController {
             @PathVariable String squadId,
             @PathVariable String jiraKey,
             HttpServletRequest request) {
-        requireSquadWriteAccess(squadId, request);
+        requireSquadManageAccess(squadId, request);
         squadService.deleteWorklogCacheEntry(squadId, jiraKey);
         return ResponseEntity.noContent().build();
     }
@@ -324,7 +430,7 @@ public class SquadController {
             @RequestParam(required = false) String sprintId,
             @RequestBody SquadPersonConfig updates,
             HttpServletRequest request) {
-        requireSquadWriteAccess(squadId, request);
+        requireSquadManageAccess(squadId, request);
         return ResponseEntity.ok(squadCapacityService.save(squadId, jiraAccountId, sprintId, updates));
     }
 
