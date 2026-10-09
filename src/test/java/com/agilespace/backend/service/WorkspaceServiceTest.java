@@ -178,7 +178,8 @@ class WorkspaceServiceTest {
                     .thenReturn(Optional.of(UserQuickLink.builder().id("l1").userId("user-123").build()));
             when(linkRepository.save(any(UserQuickLink.class))).thenAnswer(i -> i.getArgument(0));
 
-            UserQuickLink saved = service.saveQuickLink(UserQuickLink.builder().id("l1").userId("user-123").build());
+            UserQuickLink saved = service.saveQuickLink(
+                    UserQuickLink.builder().id("l1").userId("user-123").title("Jira").url("https://jira.exemplo.com").build());
 
             assertEquals("l1", saved.getId());
         }

@@ -7,5 +7,6 @@ import java.util.List;
 
 @Repository
 public interface UserKanbanCardRepository extends JpaRepository<UserKanbanCard, String> {
+    long countByUserId(String userId);
     List<UserKanbanCard> findByUserIdOrderByUpdatedAtDesc(String userId);
 }

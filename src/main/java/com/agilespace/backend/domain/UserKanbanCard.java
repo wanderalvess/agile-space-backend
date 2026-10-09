@@ -36,7 +36,7 @@ public class UserKanbanCard {
 
     private String tag;
 
-    @Column(name = "origin_link")
+    @Column(name = "origin_link", length = 2048)
     private String originLink;
 
     @Column(name = "exported_at")

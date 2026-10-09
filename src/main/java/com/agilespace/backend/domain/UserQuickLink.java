@@ -22,8 +22,15 @@ public class UserQuickLink {
     @Column(nullable = false)
     private String title;
 
-    @Column(nullable = false)
+    @Column(nullable = false, length = 2048)
     private String url;
+
+    // Ícone e cor escolhidos na tela (chaves livres do frontend); opcionais.
+    @Column(name = "icon_type", length = 32)
+    private String iconType;
+
+    @Column(length = 160)
+    private String color;
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;

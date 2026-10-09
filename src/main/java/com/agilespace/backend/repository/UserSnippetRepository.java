@@ -7,5 +7,6 @@ import java.util.List;
 
 @Repository
 public interface UserSnippetRepository extends JpaRepository<UserSnippet, String> {
+    long countByUserId(String userId);
     List<UserSnippet> findByUserIdOrderByCreatedAtDesc(String userId);
 }
