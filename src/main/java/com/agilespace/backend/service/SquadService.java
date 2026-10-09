@@ -30,6 +30,7 @@ public class SquadService {
     private final SquadIssueWorklogCacheRepository worklogCacheRepository;
     private final UserRepository userRepository;
     private final SquadPanelRepository panelRepository;
+    private final SquadMemberExclusionRepository exclusionRepository;
 
     // ----- Squad Config -----
     @Transactional(readOnly = true)
@@ -177,6 +178,15 @@ public class SquadService {
     @Transactional(readOnly = true)
     public List<SquadMember> getMembers(String squadId) {
         return memberRepository.findBySquadIdOrderByDisplayNameAsc(squadId);
+    }
+
+    /** Contas do Jira que a liderança removeu à mão do time: o sync não as recoloca no roster. */
+    @Transactional(readOnly = true)
+    public java.util.Set<String> excludedAccountIds(String squadId) {
+        if (exclusionRepository == null) return java.util.Set.of();
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        for (SquadMemberExclusion e : exclusionRepository.findBySquadId(squadId)) ids.add(e.getJiraAccountId());
+        return ids;
     }
 
     @Transactional(readOnly = true)

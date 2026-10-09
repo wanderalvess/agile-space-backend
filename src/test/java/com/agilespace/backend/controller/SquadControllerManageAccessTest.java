@@ -37,13 +37,14 @@ class SquadControllerManageAccessTest {
     @Mock private com.agilespace.backend.service.SquadSyncGuard squadSyncGuard;
     @Mock private UserRepository userRepository;
     @Mock private UserProjectResolverService resolver;
+    @Mock private com.agilespace.backend.service.SquadTeamService teamService;
 
     private SquadController controller;
 
     @BeforeEach
     void setUp() {
         SquadAccessService access = new SquadAccessService(userRepository, service, resolver);
-        controller = new SquadController(service, squadSyncService, squadSyncGuard, null, userRepository, resolver, access);
+        controller = new SquadController(service, squadSyncService, squadSyncGuard, null, userRepository, resolver, access, teamService);
     }
 
     private HttpServletRequest as(String userId, String role) {
@@ -172,6 +173,7 @@ class SquadControllerManageAccessTest {
         HttpServletRequest dev = as("dev1", "MEMBER");
 
         assertThrows(ResponseStatusException.class, () -> controller.saveMember("SQ1", "acc-1", SquadMember.builder().role("Tech Lead").build(), dev));
+        doThrow(new ResponseStatusException(HttpStatus.FORBIDDEN)).when(teamService).removeMember(any(), any(), any());
         assertThrows(ResponseStatusException.class, () -> controller.deleteMember("SQ1", "acc-1", dev));
         assertThrows(ResponseStatusException.class, () -> controller.batchUpsertMembers("SQ1", List.of(), dev));
         assertThrows(ResponseStatusException.class, () -> controller.savePersonConfig("SQ1", "acc-1", null, new com.agilespace.backend.domain.SquadPersonConfig(), dev));

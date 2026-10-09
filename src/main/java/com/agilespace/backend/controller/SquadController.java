@@ -28,6 +28,7 @@ public class SquadController {
     private final UserRepository userRepository;
     private final com.agilespace.backend.service.UserProjectResolverService userProjectResolverService;
     private final com.agilespace.backend.service.SquadAccessService squadAccessService;
+    private final com.agilespace.backend.service.SquadTeamService squadTeamService;
 
     /**
      * Leitura: qualquer membro real da squad (ou admin/liderança) — nunca auto-vincula.
@@ -95,6 +96,11 @@ public class SquadController {
         }
         userRepository.save(caller);
         return true;
+    }
+
+    private User callerUser(HttpServletRequest request) {
+        String id = callerId(request);
+        return id != null ? userRepository.findById(id).orElse(null) : null;
     }
 
     private String callerId(HttpServletRequest request) {
@@ -313,6 +319,8 @@ public class SquadController {
         // O vínculo de conta nunca é gravado por aqui (só por "Sou eu"): senão a liderança poderia vincular
         // a conta de outra pessoa a uma linha e, por ela, dar acesso à squad.
         member.setClaimedByUid(null);
+        // O papel na equipe só muda por POST/PATCH /team/members (Agile Master/People Lead, validado e com auditoria).
+        member.setRole(null);
         return ResponseEntity.ok(squadService.saveMember(squadId, jiraAccountId, member));
     }
 
@@ -368,8 +376,8 @@ public class SquadController {
             @PathVariable String squadId,
             @PathVariable String jiraAccountId,
             HttpServletRequest request) {
-        requireSquadManageAccess(squadId, request);
-        squadService.deleteMember(squadId, jiraAccountId);
+        // Remover pessoa do time: Agile Master/People Lead da equipe (ou admin), sem tirar a última liderança.
+        squadTeamService.removeMember(squadId, callerUser(request), jiraAccountId);
         return ResponseEntity.noContent().build();
     }
 

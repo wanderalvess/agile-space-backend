@@ -51,7 +51,7 @@ public class SquadControllerTest {
         // acesso abaixo (não-membro é barrado, alias DDWMISSI/MISSI, etc.) perderiam o sentido.
         com.agilespace.backend.service.SquadAccessService squadAccessService =
                 new com.agilespace.backend.service.SquadAccessService(userRepository, service, userProjectResolverService);
-        controller = new SquadController(service, squadSyncService, squadSyncGuard, null, userRepository, userProjectResolverService, squadAccessService);
+        controller = new SquadController(service, squadSyncService, squadSyncGuard, null, userRepository, userProjectResolverService, squadAccessService, null);
     }
 
     private HttpServletRequest adminRequest() {

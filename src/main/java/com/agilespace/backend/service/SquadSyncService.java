@@ -816,6 +816,8 @@ public class SquadSyncService {
         List<SquadMember> existingMembers = squadService.getMembers(squadId);
         Map<String, SquadMember> rosterMap = new HashMap<>();
         for (SquadMember m : existingMembers) rosterMap.put(m.getJiraAccountId(), m);
+        // Quem a liderança removeu à mão não volta só porque ainda aparece como responsável de issue.
+        Set<String> removedByHand = squadService.excludedAccountIds(squadId);
 
         Map<String, String> seenAssignees = new LinkedHashMap<>();
         for (SquadIssueSnapshot s : snapshots) {
@@ -823,7 +825,7 @@ public class SquadSyncService {
         }
         List<SquadMember> rosterSeeds = new ArrayList<>();
         for (Map.Entry<String, String> e : seenAssignees.entrySet()) {
-            if (rosterMap.containsKey(e.getKey())) continue;
+            if (rosterMap.containsKey(e.getKey()) || removedByHand.contains(e.getKey())) continue;
             SquadMember seed = SquadMember.builder()
                     .dbId(squadId + "_" + e.getKey()).squadId(squadId).jiraAccountId(e.getKey())
                     .displayName(isBlank(e.getValue()) ? e.getKey() : e.getValue())

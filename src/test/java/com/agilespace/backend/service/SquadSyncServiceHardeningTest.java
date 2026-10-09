@@ -129,4 +129,31 @@ public class SquadSyncServiceHardeningTest {
         assertEquals(7200, extra.path("estimateAdjustedTotalSec").asLong());
         verify(jiraService, times(1)).searchIssues(any());
     }
+
+    @Test
+    @DisplayName("Quem a liderança removeu à mão não volta ao roster só porque ainda é responsável de issue")
+    void removedByHandIsNotReseeded() {
+        Squad squad = Squad.builder().id("SQ1").name("SQ1").jiraProjectKey("P").syncJql("project = P").build();
+        when(squadService.getSquad("SQ1")).thenReturn(Optional.of(squad));
+        when(userJiraConfigRepository.findById("u1")).thenReturn(Optional.of(creds()));
+        when(jiraService.getFields(anyString(), anyString())).thenReturn(ResponseEntity.ok("[]"));
+        String issue = "{\"key\":\"A-1\",\"fields\":{\"summary\":\"T\",\"issuetype\":{\"name\":\"Story\"},"
+                + "\"status\":{\"name\":\"To Do\",\"statusCategory\":{\"key\":\"new\"}},\"assignee\":{\"accountId\":\"saiu\",\"displayName\":\"Quem Saiu\"},"
+                + "\"created\":\"2026-01-01T10:00:00.000-0300\",\"updated\":\"2026-01-02T10:00:00.000-0300\"}}";
+        String issue2 = issue.replace("A-1", "A-2").replace("saiu", "ficou").replace("Quem Saiu", "Quem Ficou");
+        when(jiraService.searchIssues(any())).thenReturn(ResponseEntity.ok("{\"total\":2,\"issues\":[" + issue + "," + issue2 + "]}"));
+        when(squadService.getMembers("SQ1")).thenReturn(List.of());
+        when(squadService.excludedAccountIds("SQ1")).thenReturn(java.util.Set.of("saiu"));
+        when(squadService.getIssues(eq("SQ1"), any())).thenReturn(List.of());
+        when(squadService.batchUpsertIssues(anyString(), any())).thenAnswer(i -> i.getArgument(1));
+        when(squadService.saveSquad(any())).thenAnswer(i -> i.getArgument(0));
+        when(squadService.saveRollup(any())).thenAnswer(i -> i.getArgument(0));
+
+        syncService.syncSquad("SQ1", "u1", false);
+
+        ArgumentCaptor<List<com.agilespace.backend.domain.SquadMember>> seeded = ArgumentCaptor.forClass(List.class);
+        verify(squadService, atLeastOnce()).batchUpsertMembers(eq("SQ1"), seeded.capture());
+        var ids = seeded.getAllValues().stream().flatMap(List::stream).map(com.agilespace.backend.domain.SquadMember::getJiraAccountId).toList();
+        assertEquals(List.of("ficou"), ids);
+    }
 }
