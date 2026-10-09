@@ -17,6 +17,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -56,7 +57,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
-        boolean isAuthPath = request.getRequestURI().startsWith("/api/auth/");
+        boolean isAuthPath = isStrictAuthPath(request.getRequestURI());
         String clientIp = clientIp(request);
 
         ConcurrentMap<String, Bucket> buckets = isAuthPath ? authBuckets : generalBuckets;
@@ -73,6 +74,21 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * Só as rotas sem sessão e alvo de força bruta/enumeração entram na faixa apertada (10/min por IP).
+     * /api/auth/me e /api/auth/switch-project exigem token válido e são chamadas a cada carregamento de
+     * página: na faixa apertada, poucas navegações seguidas (ou um escritório inteiro atrás do mesmo IP)
+     * recebiam 429 e eram mandadas ao login. Elas ficam na faixa geral.
+     */
+    private static final Set<String> STRICT_AUTH_PATHS = Set.of(
+            "/api/auth/login", "/api/auth/register", "/api/auth/forgot-password");
+
+    static boolean isStrictAuthPath(String uri) {
+        if (uri == null) return false;
+        String path = uri.length() > 1 && uri.endsWith("/") ? uri.substring(0, uri.length() - 1) : uri;
+        return STRICT_AUTH_PATHS.contains(path);
     }
 
     private Bucket newAuthBucket() {

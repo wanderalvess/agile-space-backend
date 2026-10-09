@@ -80,17 +80,23 @@ public class ShowcaseSessionService {
         }
         session.setCoverImage(UrlSafety.sanitize(session.getCoverImage()));
 
+        boolean existed = false;
         if (session.getId() != null && !session.getId().isEmpty()) {
             // FOR UPDATE: serializa saves simultâneos da mesma Review (apagar e regravar as filhas em
             // paralelo estourava chave duplicada e um dos dois saves se perdia).
-            repository.findByIdForUpdate(session.getId()).ifPresent(existing -> {
-                session.setCreatedBy(existing.getCreatedBy() != null ? existing.getCreatedBy() : callerId);
-                session.setCreatedAt(existing.getCreatedAt());
-            });
+            var existing = repository.findByIdForUpdate(session.getId());
+            if (existing.isPresent()) {
+                existed = true;
+                session.setCreatedBy(existing.get().getCreatedBy() != null ? existing.get().getCreatedBy() : callerId);
+                session.setCreatedAt(existing.get().getCreatedAt());
+            }
         } else {
             session.setId(UUID.randomUUID().toString());
         }
-        if (session.getCreatedBy() == null || session.getCreatedBy().isEmpty()) {
+        // Quem cria é quem está logado: o criador vindo do corpo podia ser de outra pessoa.
+        if (!existed && callerId != null && !callerId.isBlank()) {
+            session.setCreatedBy(callerId);
+        } else if (session.getCreatedBy() == null || session.getCreatedBy().isEmpty()) {
             session.setCreatedBy(callerId);
         }
         if (session.getCreatedAt() == null) {

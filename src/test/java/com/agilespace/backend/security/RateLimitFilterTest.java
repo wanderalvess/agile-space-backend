@@ -80,6 +80,32 @@ class RateLimitFilterTest {
     }
 
     @Test
+    @DisplayName("/api/auth/me NÃO usa a faixa apertada: 15 chamadas seguidas passam")
+    void authMeUsesGeneralLimit() throws Exception {
+        when(request.getRequestURI()).thenReturn("/api/auth/me");
+        when(request.getRemoteAddr()).thenReturn("10.0.0.9");
+        when(request.getHeader("X-Forwarded-For")).thenReturn(null);
+
+        for (int i = 0; i < 15; i++) {
+            filter.doFilterInternal(request, response, filterChain);
+        }
+
+        verify(filterChain, times(15)).doFilter(request, response);
+        verify(response, never()).setStatus(429);
+    }
+
+    @Test
+    @DisplayName("Rotas de entrada sem sessão continuam na faixa apertada")
+    void strictPathsAreLoginRegisterAndForgotPassword() {
+        assertEquals(true, RateLimitFilter.isStrictAuthPath("/api/auth/login"));
+        assertEquals(true, RateLimitFilter.isStrictAuthPath("/api/auth/register"));
+        assertEquals(true, RateLimitFilter.isStrictAuthPath("/api/auth/forgot-password/"));
+        assertEquals(false, RateLimitFilter.isStrictAuthPath("/api/auth/me"));
+        assertEquals(false, RateLimitFilter.isStrictAuthPath("/api/auth/switch-project"));
+        assertEquals(false, RateLimitFilter.isStrictAuthPath("/api/squads/X"));
+    }
+
+    @Test
     @DisplayName("IPs diferentes têm buckets independentes")
     void shouldTrackSeparateBucketsPerIp() throws Exception {
         when(request.getRequestURI()).thenReturn("/api/auth/login");
