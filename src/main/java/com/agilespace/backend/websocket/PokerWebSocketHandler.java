@@ -5,20 +5,27 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.*;
+import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
-import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.function.Predicate;
 
 @Component
 @Slf4j
 public class PokerWebSocketHandler extends TextWebSocketHandler {
 
-    private static final Map<String, Set<WebSocketSession>> roomSessions = new ConcurrentHashMap<>();
+    /** Envio por sessão é serializado pelo decorator: requests concorrentes não podem escrever no mesmo socket ao mesmo tempo. */
+    private static final int SEND_TIME_LIMIT_MS = 10_000;
+    private static final int BUFFER_SIZE_LIMIT_BYTES = 512 * 1024;
+
+    // roomId -> (sessionId -> sessão decorada)
+    private static final Map<String, Map<String, WebSocketSession>> roomSessions = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper;
 
     public PokerWebSocketHandler(@Autowired(required = false) ObjectMapper objectMapper) {
@@ -29,32 +36,34 @@ public class PokerWebSocketHandler extends TextWebSocketHandler {
     public void afterConnectionEstablished(WebSocketSession session) {
         String roomId = getRoomId(session);
         if (roomId != null) {
-            roomSessions.computeIfAbsent(roomId, k -> new CopyOnWriteArraySet<>()).add(session);
-            log.info("Poker WebSocket connected. RoomId: {}, SessionId: {}, Total connected in room: {}", 
-                     roomId, session.getId(), roomSessions.get(roomId).size());
+            WebSocketSession safe = new ConcurrentWebSocketSessionDecorator(session, SEND_TIME_LIMIT_MS, BUFFER_SIZE_LIMIT_BYTES);
+            Map<String, WebSocketSession> sessions = roomSessions.computeIfAbsent(roomId, k -> new ConcurrentHashMap<>());
+            sessions.put(session.getId(), safe);
+            log.info("Poker WebSocket connected. RoomId: {}, SessionId: {}, Total connected in room: {}",
+                     roomId, session.getId(), sessions.size());
         }
     }
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         String roomId = getRoomId(session);
-        if (roomId != null && roomSessions.containsKey(roomId)) {
-            Set<WebSocketSession> sessions = roomSessions.get(roomId);
-            sessions.remove(session);
-            if (sessions.isEmpty()) {
-                roomSessions.remove(roomId);
-            }
+        if (roomId != null) {
+            roomSessions.computeIfPresent(roomId, (k, sessions) -> {
+                sessions.remove(session.getId());
+                return sessions.isEmpty() ? null : sessions;
+            });
             log.info("Poker WebSocket closed. RoomId: {}, SessionId: {}", roomId, session.getId());
         }
     }
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) {
-        log.info("Received client Poker WebSocket message from session {}: {}", session.getId(), message.getPayload());
+        // Conteúdo vindo do cliente não vai para o log (injeção de linhas); só o tamanho.
+        log.debug("Received client Poker WebSocket message from session {} ({} chars)", session.getId(), message.getPayloadLength());
     }
 
     public void broadcastEvent(String roomId, String eventType, Object payload) {
-        broadcastEventToUsers(roomId, eventType, payload, null);
+        broadcast(roomId, eventType, payload, s -> true);
     }
 
     /**
@@ -63,27 +72,39 @@ public class PokerWebSocketHandler extends TextWebSocketHandler {
      * Usado nas DMs do chat, cujo texto não pode chegar aos demais participantes.
      */
     public void broadcastEventToUsers(String roomId, String eventType, Object payload, Set<String> userIds) {
-        Set<WebSocketSession> sessions = roomSessions.get(roomId);
-        if (sessions != null && userIds != null) {
-            sessions = sessions.stream()
-                    .filter(s -> userIds.contains(String.valueOf(s.getAttributes().get("userId"))))
-                    .collect(java.util.stream.Collectors.toSet());
+        if (userIds == null) {
+            broadcastEvent(roomId, eventType, payload);
+            return;
         }
-        if (sessions != null && !sessions.isEmpty()) {
-            try {
-                Map<String, Object> messageMap = new HashMap<>();
-                messageMap.put("type", eventType);
-                messageMap.put("roomId", roomId);
-                messageMap.put("payload", payload);
-                messageMap.put("timestamp", System.currentTimeMillis());
+        broadcast(roomId, eventType, payload, s -> userIds.contains(String.valueOf(s.getAttributes().get("userId"))));
+    }
 
-                String json = objectMapper.writeValueAsString(messageMap);
-                TextMessage textMessage = new TextMessage(json);
-                log.info("Broadcasting event '{}' to {} sessions on room {}", eventType, sessions.size(), roomId);
-                broadcastToSessions(sessions, textMessage);
-            } catch (Exception e) {
-                log.error("Failed to serialize or broadcast event '{}' for room {}", eventType, roomId, e);
-            }
+    /** Entrega a todos da sala, exceto às sessões dos usuários informados (ex.: voto às cegas). */
+    public void broadcastEventExcludingUsers(String roomId, String eventType, Object payload, Set<String> excludedUserIds) {
+        broadcast(roomId, eventType, payload,
+                s -> excludedUserIds == null || !excludedUserIds.contains(String.valueOf(s.getAttributes().get("userId"))));
+    }
+
+    private void broadcast(String roomId, String eventType, Object payload, Predicate<WebSocketSession> filter) {
+        Map<String, WebSocketSession> all = roomSessions.get(roomId);
+        if (all == null || all.isEmpty()) return;
+        List<WebSocketSession> targets = new ArrayList<>();
+        for (WebSocketSession s : all.values()) {
+            if (filter.test(s)) targets.add(s);
+        }
+        if (targets.isEmpty()) return;
+        try {
+            Map<String, Object> messageMap = new HashMap<>();
+            messageMap.put("type", eventType);
+            messageMap.put("roomId", roomId);
+            messageMap.put("payload", payload);
+            messageMap.put("timestamp", System.currentTimeMillis());
+
+            String json = objectMapper.writeValueAsString(messageMap);
+            log.debug("Broadcasting event '{}' to {} sessions on room {}", eventType, targets.size(), roomId);
+            broadcastToSessions(targets, new TextMessage(json));
+        } catch (Exception e) {
+            log.error("Failed to serialize or broadcast event '{}' for room {}", eventType, roomId, e);
         }
     }
 
@@ -92,22 +113,21 @@ public class PokerWebSocketHandler extends TextWebSocketHandler {
     }
 
     public void broadcastReaction(String roomId, String payload) {
-        Set<WebSocketSession> sessions = roomSessions.get(roomId);
-        if (sessions != null && !sessions.isEmpty()) {
-            TextMessage reactionMessage = new TextMessage(payload);
-            log.info("Broadcasting REACTION to {} sessions on room {}", sessions.size(), roomId);
-            broadcastToSessions(sessions, reactionMessage);
+        Map<String, WebSocketSession> all = roomSessions.get(roomId);
+        if (all != null && !all.isEmpty()) {
+            log.debug("Broadcasting REACTION to {} sessions on room {}", all.size(), roomId);
+            broadcastToSessions(new ArrayList<>(all.values()), new TextMessage(payload));
         }
     }
 
-    private void broadcastToSessions(Set<WebSocketSession> sessions, TextMessage message) {
+    /** Falha em uma sessão (fechada, lenta, buffer cheio) nunca impede a entrega às demais. */
+    private void broadcastToSessions(List<WebSocketSession> sessions, TextMessage message) {
         for (WebSocketSession session : sessions) {
-            if (session.isOpen()) {
-                try {
-                    session.sendMessage(message);
-                } catch (IOException e) {
-                    log.error("Failed to send message to session {}", session.getId(), e);
-                }
+            if (!session.isOpen()) continue;
+            try {
+                session.sendMessage(message);
+            } catch (Exception e) {
+                log.warn("Failed to send message to session {}: {}", session.getId(), e.toString());
             }
         }
     }

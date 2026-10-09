@@ -4,9 +4,9 @@ import jakarta.persistence.*;
 import lombok.*;
 
 @Entity
-@Table(name = "poker_votes", uniqueConstraints = {
-    @UniqueConstraint(columnNames = {"room_id", "participant_id"})
-})
+// Unicidade (sala, participante, tarefa) vive no índice uq_poker_votes_room_participant_issue (V38):
+// salas assíncronas guardam um voto por tarefa.
+@Table(name = "poker_votes")
 @Getter
 @Setter
 @NoArgsConstructor

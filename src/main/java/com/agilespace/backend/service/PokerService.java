@@ -1,6 +1,7 @@
 package com.agilespace.backend.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
@@ -21,8 +22,11 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.Map;
@@ -45,6 +49,39 @@ public class PokerService {
     static final int CHAT_MAX_SENDER_CATEGORY = 255;
     private static final Set<String> CHAT_KINDS = Set.of("text", "code");
 
+    private static final ObjectMapper JSON = new ObjectMapper();
+    /** Janela em que o organizador atual ainda conta como presente (o cliente bate heartbeat a cada 25s). */
+    private static final long HOST_PRESENCE_WINDOW_SECONDS = 90;
+    private static final int MAX_VOTE_VALUE_LENGTH = 50;
+    private static final int MAX_REACTION_EMOJI_LENGTH = 16;
+    /** Valor que substitui o voto real para quem não pode vê-lo (salas com votos às cegas). */
+    static final String MASKED_VOTE = "*";
+    private static final Set<String> FIBONACCI_DECK = Set.of("0", "1", "2", "3", "5", "8", "13", "21", "?", "☕");
+    private static final Set<String> HOURS_DECK = Set.of("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12", "14",
+            "16", "18", "20", "25", "30", "35", "40", "45", "50", "?", "☕");
+    private static final Set<String> TSHIRT_DECK = Set.of("PP", "P", "M", "G", "GG", "?", "☕");
+
+    /**
+     * Eventos só saem depois do commit: antes disso o cliente que reage ao evento pode ler o estado
+     * antigo, e um rollback deixaria a sala toda com o aviso de algo que não aconteceu.
+     */
+    private void afterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+        } else {
+            action.run();
+        }
+    }
+
+    private void publish(String roomId, String eventType, Object payload) {
+        afterCommit(() -> webSocketHandler.broadcastEvent(roomId, eventType, payload));
+    }
+
     // --- Room Logic ---
     @Transactional(readOnly = true)
     public Optional<PokerRoom> getRoom(String roomId) {
@@ -55,11 +92,13 @@ public class PokerService {
     public PokerRoom saveOrUpdateRoom(PokerRoom room, String callerId, String callerRole) {
         Optional<PokerRoom> existing = room.getId() != null ? roomRepository.findById(room.getId()) : Optional.empty();
         if (existing.isPresent()) {
-            requireRoomParticipant(existing.get(), callerId, callerRole);
+            PokerRoom current = existing.get();
+            requireRoomParticipant(current, callerId, callerRole);
+            guardCreatorChange(current, room, callerId, callerRole);
             // Quem não envia a versão (cliente antigo, MCP) mantém o comportamento anterior, última
             // gravação vence. Sem isso o Spring Data trataria a sala como nova e tentaria um INSERT.
             if (room.getVersion() == null) {
-                room.setVersion(existing.get().getVersion());
+                room.setVersion(current.getVersion());
             }
         } else {
             room.setCreatorId(callerId);
@@ -68,8 +107,47 @@ public class PokerService {
         // da transação. Com save() os clientes receberiam a versão antiga e o próprio autor tomaria
         // 409 na ação seguinte.
         PokerRoom saved = roomRepository.saveAndFlush(room);
-        webSocketHandler.broadcastEvent(saved.getId(), "ROOM_UPDATED", saved);
+        publish(saved.getId(), "ROOM_UPDATED", saved);
         return saved;
+    }
+
+    /**
+     * Trocar o organizador (creatorId) é a única forma de "assumir o controle". Um facilitador pode
+     * repassar a sala; um participante comum só assume para si mesmo e só se o organizador atual
+     * sumiu (sem heartbeat recente). Sem isso, qualquer participante sequestrava a sala pelo corpo do POST.
+     */
+    private void guardCreatorChange(PokerRoom current, PokerRoom incoming, String callerId, String callerRole) {
+        String newCreator = incoming.getCreatorId();
+        if (newCreator == null || newCreator.isBlank()) {
+            incoming.setCreatorId(current.getCreatorId());
+            return;
+        }
+        if (newCreator.equals(current.getCreatorId())) {
+            return;
+        }
+        if (callerId != null && isRoomFacilitator(current, callerId, callerRole)) {
+            return;
+        }
+        if (!newCreator.equals(callerId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só é possível assumir o controle da sala para si mesmo.");
+        }
+        boolean hostPresent = current.getCreatorId() != null && participantRepository
+                .findById(current.getId() + "_" + current.getCreatorId())
+                .map(p -> isRecent(p.getLastSeen()))
+                .orElse(false);
+        if (hostPresent) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "O organizador atual ainda está na sala.");
+        }
+    }
+
+    private static boolean isRecent(String isoInstant) {
+        if (isoInstant == null || isoInstant.isBlank()) return false;
+        try {
+            return java.time.Instant.parse(isoInstant)
+                    .isAfter(java.time.Instant.now().minusSeconds(HOST_PRESENCE_WINDOW_SECONDS));
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private static final int MAX_REFINEMENT_NOTES_LENGTH = 20_000;
@@ -117,7 +195,7 @@ public class PokerService {
 
         room.setIssuesQueue(queue);
         PokerRoom saved = roomRepository.saveAndFlush(room);
-        webSocketHandler.broadcastEvent(saved.getId(), "ROOM_UPDATED", saved);
+        publish(saved.getId(), "ROOM_UPDATED", saved);
         return saved;
     }
 
@@ -162,6 +240,8 @@ public class PokerService {
      * o próprio usuário se registra, mas só vira facilitador se for o criador da sala,
      * ADMIN/LEAD ou já for facilitador (o "assumir controle" do frontend grava o creatorId
      * da sala antes). Editar outro participante (papel, rebaixar facilitador antigo) é coisa de facilitador.
+     * A entrada também registra o usuário em participantIds da sala, com a sala travada, para que
+     * entradas simultâneas não se atropelem nem tomem 409.
      */
     @Transactional
     public PokerParticipant joinRoom(PokerParticipant participant, String callerId, String callerRole) {
@@ -191,17 +271,50 @@ public class PokerService {
                 participant.getIsFacilitator(),
                 participant.getGlobalRole(),
                 participant.getLastSeen());
+        // O upsert nunca rebaixa (OR com o valor antigo). Quando um facilitador edita OUTRO participante
+        // e manda a flag explicitamente, ela vale de verdade — é assim que "assumir controle" tira o antigo.
+        if (facilitatorCaller && !self && participant.getIsFacilitator() != null) {
+            participantRepository.setFacilitator(dbId, participant.getIsFacilitator());
+        }
         PokerParticipant saved = participantRepository.findById(dbId).orElse(participant);
-        webSocketHandler.broadcastEvent(participant.getRoomId(), "PARTICIPANT_JOINED", saved);
+        registerParticipantId(room, participant.getId());
+        publish(participant.getRoomId(), "PARTICIPANT_JOINED", saved);
         return saved;
     }
 
+    private void registerParticipantId(PokerRoom room, String userId) {
+        if (!(userId != null && !userId.isBlank())) return;
+        if (containsText(room.getParticipantIds(), userId)) return;
+        PokerRoom locked = roomRepository.findByIdForUpdate(room.getId()).orElse(room);
+        if (containsText(locked.getParticipantIds(), userId)) return;
+        ArrayNode ids = JSON.createArrayNode();
+        if (locked.getParticipantIds() != null && locked.getParticipantIds().isArray()) {
+            locked.getParticipantIds().forEach(ids::add);
+        }
+        ids.add(userId);
+        locked.setParticipantIds(ids);
+        roomRepository.saveAndFlush(locked);
+        publish(locked.getId(), "ROOM_UPDATED", locked);
+    }
+
+    private static boolean containsText(JsonNode array, String value) {
+        if (array == null || !array.isArray()) return false;
+        for (JsonNode n : array) {
+            if (value.equals(n.asText(null))) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Facilitador no servidor: criador, ADMIN/LEAD, participante marcado como facilitador ou com papel
+     * "organizador" (é o mesmo critério que o cliente usa para mostrar os controles de facilitação).
+     */
     private boolean isRoomFacilitator(PokerRoom room, String callerId, String callerRole) {
         if (isPrivilegedRole(callerRole) || callerId.equals(room.getCreatorId())) {
             return true;
         }
         return participantRepository.findById(room.getId() + "_" + callerId)
-                .map(p -> Boolean.TRUE.equals(p.getIsFacilitator()))
+                .map(p -> Boolean.TRUE.equals(p.getIsFacilitator()) || "organizador".equalsIgnoreCase(p.getRole()))
                 .orElse(false);
     }
 
@@ -212,25 +325,83 @@ public class PokerService {
                 .format(java.time.Instant.now());
     }
 
+    /**
+     * Heartbeat atualiza só a coluna last_seen. Ler e regravar a entidade inteira podia desfazer um
+     * papel ou a flag de facilitador alterados no mesmo instante por outro request.
+     */
     @Transactional
     public void updateHeartbeat(String roomId, String userId) {
-        String dbId = roomId + "_" + userId;
-        participantRepository.findById(dbId).ifPresent(p -> {
-            p.setLastSeen(nowUtcIso());
-            participantRepository.save(p);
-        });
+        participantRepository.updateLastSeen(roomId + "_" + userId, nowUtcIso());
     }
 
+    /** Sair da sala: o próprio usuário, ADMIN ou um facilitador (remover participante). */
     @Transactional
-    public void leaveRoom(String roomId, String userId) {
+    public void leaveRoom(String roomId, String userId, String callerId, String callerRole) {
+        requireSelfOrFacilitator(roomId, userId, callerId, callerRole);
         participantRepository.deleteByRoomIdAndId(roomId, userId);
-        webSocketHandler.broadcastEvent(roomId, "PARTICIPANT_LEFT", Map.of("userId", userId));
+        publish(roomId, "PARTICIPANT_LEFT", Map.of("userId", userId));
+    }
+
+    private void requireSelfOrFacilitator(String roomId, String userId, String callerId, String callerRole) {
+        if (isPrivilegedRole(callerRole) || (callerId != null && callerId.equals(userId))) {
+            return;
+        }
+        PokerRoom room = roomRepository.findById(roomId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sala não encontrada"));
+        if (callerId == null || !isRoomFacilitator(room, callerId, callerRole)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Apenas o próprio usuário ou um facilitador pode fazer isso.");
+        }
     }
 
     // --- Votes Logic ---
+    private static boolean isBlind(PokerRoom room) {
+        return room.getSettings() != null && room.getSettings().path("blindVotes").asBoolean(false);
+    }
+
+    private static boolean isAsync(PokerRoom room) {
+        return "async".equalsIgnoreCase(room.getMode());
+    }
+
+    /** Votos de um tópico já revelados: sala síncrona = flag da sala; assíncrona = lista por tópico. */
+    private static boolean isRevealed(PokerRoom room, String issueId) {
+        if (isAsync(room)) {
+            return issueId != null && containsText(room.getRevealedIssues(), issueId);
+        }
+        return Boolean.TRUE.equals(room.getVotesRevealed());
+    }
+
+    private static PokerVote masked(PokerVote vote) {
+        return PokerVote.builder()
+                .id(vote.getId())
+                .roomId(vote.getRoomId())
+                .participantId(vote.getParticipantId())
+                .value(MASKED_VOTE)
+                .timestamp(vote.getTimestamp())
+                .issueId(vote.getIssueId())
+                .participantNickname(vote.getParticipantNickname())
+                .participantRole(vote.getParticipantRole())
+                .participantGlobalRole(vote.getParticipantGlobalRole())
+                .build();
+    }
+
+    /**
+     * Em salas com votos às cegas (settings.blindVotes, opt-in do facilitador) o valor dos votos de
+     * terceiros só sai depois da revelação; antes disso o REST e o WebSocket entregavam o número a
+     * qualquer um e a ancoragem que o baralho escondido evita voltava pelo DevTools.
+     */
     @Transactional(readOnly = true)
-    public List<PokerVote> getVotes(String roomId) {
-        return voteRepository.findByRoomId(roomId);
+    public List<PokerVote> getVotes(String roomId, String callerId, String callerRole) {
+        List<PokerVote> votes = voteRepository.findByRoomId(roomId);
+        PokerRoom room = roomRepository.findById(roomId).orElse(null);
+        if (room == null || !isBlind(room) || (callerId != null && isRoomFacilitator(room, callerId, callerRole))) {
+            return votes;
+        }
+        List<PokerVote> visible = new ArrayList<>();
+        for (PokerVote v : votes) {
+            boolean own = callerId != null && callerId.equals(v.getParticipantId());
+            visible.add(own || isRevealed(room, v.getIssueId()) ? v : masked(v));
+        }
+        return visible;
     }
 
     @Transactional
@@ -238,17 +409,97 @@ public class PokerService {
         if (callerId == null || !callerId.equals(vote.getParticipantId())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só é possível registrar o próprio voto.");
         }
-        String id = vote.getRoomId() + "_" + vote.getParticipantId();
+        String value = vote.getValue();
+        if (value == null || value.isBlank() || value.length() > MAX_VOTE_VALUE_LENGTH) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Valor de voto inválido.");
+        }
+        PokerRoom room = roomRepository.findById(vote.getRoomId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sala não encontrada"));
+        boolean member = callerId.equals(room.getCreatorId())
+                || participantRepository.existsById(room.getId() + "_" + callerId);
+        if (!member) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Apenas participantes da sala podem votar.");
+        }
+        Set<String> deck = deckValues(room.getDeckType());
+        if (deck != null && !deck.contains(value)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Esta carta não existe no baralho da sala.");
+        }
+
+        String id;
+        if (isAsync(room)) {
+            if (vote.getIssueId() == null || vote.getIssueId().isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe a tarefa do voto.");
+            }
+            id = vote.getRoomId() + "_" + vote.getParticipantId() + "_" + vote.getIssueId();
+        } else {
+            id = vote.getRoomId() + "_" + vote.getParticipantId();
+            String active = room.getActiveIssueId();
+            if (vote.getIssueId() != null && active != null && !active.equals(vote.getIssueId())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "A tarefa em votação mudou. Atualize a sala.");
+            }
+        }
+        if (isRevealed(room, isAsync(room) ? vote.getIssueId() : null)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Os votos desta rodada já foram revelados.");
+        }
         vote.setId(id);
+        // Atualizar só a confiança (ou o valor) não pode apagar quem votou, o papel congelado nem a tarefa.
+        voteRepository.findById(id).ifPresent(old -> {
+            if (vote.getParticipantNickname() == null) vote.setParticipantNickname(old.getParticipantNickname());
+            if (vote.getParticipantRole() == null) vote.setParticipantRole(old.getParticipantRole());
+            if (vote.getParticipantGlobalRole() == null) vote.setParticipantGlobalRole(old.getParticipantGlobalRole());
+            if (vote.getIssueId() == null) vote.setIssueId(old.getIssueId());
+        });
+        if (vote.getTimestamp() == null || vote.getTimestamp().isBlank()) {
+            vote.setTimestamp(nowUtcIso());
+        }
         PokerVote saved = voteRepository.save(vote);
-        webSocketHandler.broadcastEvent(vote.getRoomId(), "VOTE_SAVED", saved);
+        if (isBlind(room) && !isRevealed(room, saved.getIssueId())) {
+            PokerVote hidden = masked(saved);
+            afterCommit(() -> {
+                webSocketHandler.broadcastEventToUsers(saved.getRoomId(), "VOTE_SAVED", saved, Set.of(callerId));
+                webSocketHandler.broadcastEventExcludingUsers(saved.getRoomId(), "VOTE_SAVED", hidden, Set.of(callerId));
+            });
+        } else {
+            publish(vote.getRoomId(), "VOTE_SAVED", saved);
+        }
         return saved;
     }
 
+    private static Set<String> deckValues(String deckType) {
+        if (deckType == null) return null;
+        return switch (deckType.toLowerCase()) {
+            case "fibonacci" -> FIBONACCI_DECK;
+            case "hours" -> HOURS_DECK;
+            case "tshirt" -> TSHIRT_DECK;
+            default -> null;
+        };
+    }
+
+    /**
+     * Remove o voto de um participante (todos os dele, ou só o do tópico informado nas salas assíncronas).
+     * O próprio usuário remove o seu (até a revelação); facilitador/ADMIN removem de qualquer um.
+     */
     @Transactional
-    public void removeVote(String roomId, String userId) {
-        voteRepository.deleteByRoomIdAndParticipantId(roomId, userId);
-        webSocketHandler.broadcastEvent(roomId, "VOTE_REMOVED", Map.of("userId", userId));
+    public void removeVote(String roomId, String userId, String issueId, String callerId, String callerRole) {
+        PokerRoom room = roomRepository.findById(roomId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sala não encontrada"));
+        boolean self = callerId != null && callerId.equals(userId);
+        boolean facilitator = callerId != null && isRoomFacilitator(room, callerId, callerRole);
+        if (!self && !facilitator) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Apenas o próprio usuário ou um facilitador pode remover este voto.");
+        }
+        if (!facilitator && isRevealed(room, issueId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Os votos desta rodada já foram revelados.");
+        }
+        if (issueId != null && !issueId.isBlank() && isAsync(room)) {
+            voteRepository.deleteById(roomId + "_" + userId + "_" + issueId);
+        } else {
+            voteRepository.deleteByRoomIdAndParticipantId(roomId, userId);
+        }
+        Map<String, String> payload = new java.util.HashMap<>();
+        payload.put("userId", userId);
+        if (issueId != null && !issueId.isBlank()) payload.put("issueId", issueId);
+        publish(roomId, "VOTE_REMOVED", payload);
     }
 
     @Transactional
@@ -257,7 +508,7 @@ public class PokerService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sala não encontrada"));
         requireRoomParticipant(room, callerId, callerRole);
         voteRepository.deleteByRoomId(roomId);
-        webSocketHandler.broadcastEvent(roomId, "VOTES_CLEARED", Map.of());
+        publish(roomId, "VOTES_CLEARED", Map.of());
     }
 
     // --- Rounds (History) Logic ---
@@ -270,12 +521,22 @@ public class PokerService {
     }
 
     @Transactional
-    public PokerRound saveRound(PokerRound round) {
+    public PokerRound saveRound(PokerRound round, String callerId, String callerRole) {
+        PokerRoom room = roomRepository.findById(round.getRoomId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sala não encontrada"));
+        requireRoomParticipant(room, callerId, callerRole);
         if (round.getId() == null || round.getId().trim().isEmpty()) {
             round.setId(java.util.UUID.randomUUID().toString());
+        } else {
+            // id vindo do cliente (idempotência / atualização da própria rodada) nunca toca rodada de outra sala
+            roundRepository.findById(round.getId()).ifPresent(existing -> {
+                if (!round.getRoomId().equals(existing.getRoomId())) {
+                    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Esta rodada pertence a outra sala.");
+                }
+            });
         }
         PokerRound saved = roundRepository.save(round);
-        webSocketHandler.broadcastEvent(round.getRoomId(), "ROUND_SAVED", saved);
+        publish(round.getRoomId(), "ROUND_SAVED", saved);
         return saved;
     }
 
@@ -290,14 +551,38 @@ public class PokerService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sala não encontrada"));
         requireRoomParticipant(room, callerId, callerRole);
         roundRepository.deleteByRoomId(roomId);
-        webSocketHandler.broadcastEvent(roomId, "ROUNDS_CLEARED", Map.of());
+        publish(roomId, "ROUNDS_CLEARED", Map.of());
     }
 
     // --- Reaction Logic (WebSocket Only) ---
-    public void sendReaction(String roomId, String reactionPayload) {
-        // Dispara o payload direto via WebSocket para as sessões ativas da sala
-        // sem persistência em banco para alta performance de animações de emojis
-        webSocketHandler.broadcastReaction(roomId, reactionPayload);
+    /**
+     * Reação efêmera. Só participante da sala; o corpo do cliente nunca é repassado cru: remetente,
+     * apelido e hora são do servidor e o emoji é limitado, senão qualquer um forjava reação de outro.
+     */
+    @Transactional(readOnly = true)
+    public void sendReaction(String roomId, String reactionPayload, String callerId, String callerRole) {
+        PokerRoom room = roomRepository.findById(roomId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sala não encontrada"));
+        requireRoomParticipant(room, callerId, callerRole);
+        String emoji;
+        try {
+            emoji = JSON.readTree(reactionPayload).path("emoji").asText("");
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Reação inválida.");
+        }
+        if (emoji.isBlank() || emoji.length() > MAX_REACTION_EMOJI_LENGTH) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Reação inválida.");
+        }
+        String nickname = participantRepository.findById(roomId + "_" + callerId)
+                .map(PokerParticipant::getNickname).orElse(null);
+        ObjectNode out = JSON.createObjectNode();
+        out.put("type", "REACTION");
+        out.put("uid", callerId);
+        out.put("emoji", emoji);
+        out.put("ts", nowUtcIso());
+        if (nickname != null) out.put("nickname", nickname);
+        // Dispara direto via WebSocket, sem persistência
+        webSocketHandler.broadcastReaction(roomId, out.toString());
     }
 
     // --- Chat Messages Logic ---
@@ -421,9 +706,9 @@ public class PokerService {
     /** Eventos de DM chegam só aos dois participantes; os demais canais, à sala toda. */
     private void publishChatEvent(String roomId, String eventType, Object payload, String channelId, String callerId) {
         if (isDmChannel(channelId)) {
-            webSocketHandler.broadcastEventToUsers(roomId, eventType, payload, dmUsers(channelId, callerId));
+            afterCommit(() -> webSocketHandler.broadcastEventToUsers(roomId, eventType, payload, dmUsers(channelId, callerId)));
         } else {
-            webSocketHandler.broadcastEvent(roomId, eventType, payload);
+            publish(roomId, eventType, payload);
         }
     }
 

@@ -17,6 +17,16 @@ public interface PokerParticipantRepository extends JpaRepository<PokerParticipa
     void deleteByRoomIdAndId(String roomId, String id);
     void deleteByRoomId(String roomId);
 
+    /** Heartbeat: grava só last_seen, sem reescrever o resto da linha (papel/facilitador). */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("update PokerParticipant p set p.lastSeen = :lastSeen where p.dbId = :dbId")
+    int updateLastSeen(@Param("dbId") String dbId, @Param("lastSeen") String lastSeen);
+
+    /** Define a flag de facilitador explicitamente (o upsert só promove, nunca rebaixa). */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("update PokerParticipant p set p.isFacilitator = :value where p.dbId = :dbId")
+    int setFacilitator(@Param("dbId") String dbId, @Param("value") boolean value);
+
     /**
      * Entrada idempotente na sala. Dois POSTs simultâneos (ex.: join + sincronização de perfil)
      * não geram mais violação da PK: o segundo apenas atualiza. A flag de facilitador nunca é rebaixada.

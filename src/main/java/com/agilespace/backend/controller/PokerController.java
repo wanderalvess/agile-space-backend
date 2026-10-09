@@ -41,6 +41,14 @@ public class PokerController {
         }
     }
 
+    private static String callerId(HttpServletRequest request) {
+        return (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+    }
+
+    private static String callerRole(HttpServletRequest request) {
+        return (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+    }
+
     // --- Room Endpoints ---
     @GetMapping("/{id}")
     public ResponseEntity<PokerRoom> getRoom(@PathVariable("id") String roomId) {
@@ -108,15 +116,14 @@ public class PokerController {
             @PathVariable("roomId") String roomId,
             @PathVariable("userId") String userId,
             HttpServletRequest request) {
-        requireSelfOrAdmin(userId, request);
-        pokerService.leaveRoom(roomId, userId);
+        pokerService.leaveRoom(roomId, userId, callerId(request), callerRole(request));
         return ResponseEntity.noContent().build();
     }
 
     // --- Votes Endpoints ---
     @GetMapping("/{roomId}/votes")
-    public ResponseEntity<List<PokerVote>> getVotes(@PathVariable("roomId") String roomId) {
-        return ResponseEntity.ok(pokerService.getVotes(roomId));
+    public ResponseEntity<List<PokerVote>> getVotes(@PathVariable("roomId") String roomId, HttpServletRequest request) {
+        return ResponseEntity.ok(pokerService.getVotes(roomId, callerId(request), callerRole(request)));
     }
 
     @PostMapping("/{roomId}/votes")
@@ -133,9 +140,9 @@ public class PokerController {
     public ResponseEntity<Void> removeVote(
             @PathVariable("roomId") String roomId,
             @PathVariable("userId") String userId,
+            @RequestParam(value = "issueId", required = false) String issueId,
             HttpServletRequest request) {
-        requireSelfOrAdmin(userId, request);
-        pokerService.removeVote(roomId, userId);
+        pokerService.removeVote(roomId, userId, issueId, callerId(request), callerRole(request));
         return ResponseEntity.noContent().build();
     }
 
@@ -158,9 +165,10 @@ public class PokerController {
     @PostMapping("/{roomId}/rounds")
     public ResponseEntity<PokerRound> saveRound(
             @PathVariable("roomId") String roomId,
-            @RequestBody PokerRound round) {
+            @RequestBody PokerRound round,
+            HttpServletRequest request) {
         round.setRoomId(roomId);
-        return ResponseEntity.status(HttpStatus.CREATED).body(pokerService.saveRound(round));
+        return ResponseEntity.status(HttpStatus.CREATED).body(pokerService.saveRound(round, callerId(request), callerRole(request)));
     }
 
     @DeleteMapping("/{roomId}/rounds")
@@ -175,8 +183,9 @@ public class PokerController {
     @PostMapping("/{roomId}/reactions")
     public ResponseEntity<Void> sendReaction(
             @PathVariable("roomId") String roomId,
-            @RequestBody String reactionPayload) {
-        pokerService.sendReaction(roomId, reactionPayload);
+            @RequestBody String reactionPayload,
+            HttpServletRequest request) {
+        pokerService.sendReaction(roomId, reactionPayload, callerId(request), callerRole(request));
         return ResponseEntity.ok().build();
     }
 
