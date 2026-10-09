@@ -33,6 +33,8 @@ public class JoltProjectDto {
     private String flowEdges;
 
     private int versionCount;
+    /** Versão de edição (lock otimista); o cliente devolve em expectedVersion ao salvar. */
+    private Long version;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

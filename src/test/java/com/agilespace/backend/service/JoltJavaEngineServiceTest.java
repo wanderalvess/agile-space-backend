@@ -120,4 +120,97 @@ class JoltJavaEngineServiceTest {
         assertFalse(response.isSuccess());
         assertNotNull(response.getError());
     }
+
+    private static final String IDENTITY_SPEC = "[{\"operation\":\"shift\",\"spec\":{\"*\":\"&\"}}]";
+
+    @Test
+    @DisplayName("Recusa payload com aninhamento profundo demais")
+    void testRejectsDeepNesting() {
+        StringBuilder open = new StringBuilder();
+        StringBuilder close = new StringBuilder();
+        for (int i = 0; i < 200; i++) {
+            open.append("{\"a\":");
+            close.append("}");
+        }
+        String deep = open + "1" + close;
+
+        JoltTransformResponseDto response = joltService.transform(
+                JoltTransformRequestDto.builder().input(deep).spec(IDENTITY_SPEC).build());
+
+        assertFalse(response.isSuccess());
+        assertTrue(response.getError().contains("aninhamento"));
+    }
+
+    @Test
+    @DisplayName("Recusa payload com elementos demais")
+    void testRejectsTooManyNodes() {
+        List<Integer> big = new java.util.ArrayList<>();
+        for (int i = 0; i <= JoltJavaEngineService.MAX_INPUT_NODES; i++) big.add(i);
+
+        JoltTransformResponseDto response = joltService.transform(
+                JoltTransformRequestDto.builder().input(Map.of("itens", big)).spec(IDENTITY_SPEC).build());
+
+        assertFalse(response.isSuccess());
+        assertTrue(response.getError().contains("grande demais"));
+    }
+
+    @Test
+    @DisplayName("Recusa texto de entrada acima do limite sem tentar fazer o parse")
+    void testRejectsHugeText() {
+        String huge = "\"" + "x".repeat((int) JoltJavaEngineService.MAX_TEXT_CHARS + 10) + "\"";
+
+        JoltTransformResponseDto response = joltService.transform(
+                JoltTransformRequestDto.builder().input(huge).spec(IDENTITY_SPEC).build());
+
+        assertFalse(response.isSuccess());
+        assertTrue(response.getError().contains("limite"));
+    }
+
+    @Test
+    @DisplayName("Recusa spec com operações demais")
+    void testRejectsTooManyOperations() {
+        List<Object> ops = new java.util.ArrayList<>();
+        for (int i = 0; i <= JoltJavaEngineService.MAX_SPEC_OPERATIONS; i++) {
+            ops.add(Map.of("operation", "shift", "spec", Map.of("*", "&")));
+        }
+
+        JoltTransformResponseDto response = joltService.transform(
+                JoltTransformRequestDto.builder().input("{\"a\":1}").spec(ops).build());
+
+        assertFalse(response.isSuccess());
+        assertTrue(response.getError().contains("operações demais"));
+    }
+
+    @Test
+    @DisplayName("JSON inválido devolve mensagem curta, sem trecho do código-fonte do Jackson")
+    void testInvalidJsonMessageIsShort() {
+        JoltTransformResponseDto response = joltService.transform(
+                JoltTransformRequestDto.builder().input("{\"a\": ").spec(IDENTITY_SPEC).build());
+
+        assertFalse(response.isSuccess());
+        assertTrue(response.getError().startsWith("JSON inválido"));
+        assertFalse(response.getError().contains("\n"));
+        assertFalse(response.getError().contains("Source:"));
+    }
+
+    @Test
+    @DisplayName("Falha inesperada não vaza detalhe interno")
+    void testUnexpectedFailureIsGeneric() {
+        // Spec com operação shift cujo conteúdo não é um objeto: erro do Jolt ou interno, nunca stack.
+        JoltTransformResponseDto response = joltService.transform(
+                JoltTransformRequestDto.builder().input("{\"a\":1}")
+                        .spec("[{\"operation\":\"shift\",\"spec\":5}]").build());
+
+        assertFalse(response.isSuccess());
+        assertFalse(response.getError().contains("at com."));
+        assertTrue(response.getError().length() <= 410);
+    }
+
+    @Test
+    @DisplayName("safeMessage corta em uma linha e limita o tamanho")
+    void testSafeMessage() {
+        assertEquals("linha1", JoltJavaEngineService.safeMessage("linha1\nlinha2"));
+        assertEquals("Entrada inválida.", JoltJavaEngineService.safeMessage(null));
+        assertTrue(JoltJavaEngineService.safeMessage("x".repeat(1000)).length() <= 401);
+    }
 }

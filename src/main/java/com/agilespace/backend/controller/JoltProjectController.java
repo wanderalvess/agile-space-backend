@@ -7,17 +7,22 @@ import com.agilespace.backend.dto.SaveJoltProjectRequestDto;
 import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.JoltProjectService;
+import com.agilespace.backend.service.JoltProjectService.Caller;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -31,10 +36,21 @@ public class JoltProjectController {
     private final JoltProjectService joltProjectService;
     private final UserRepository userRepository;
 
-    private User resolveUser(HttpServletRequest request) {
+    /** Identidade vem do JWT (atributos do filtro); o cadastro só complementa nome, e-mail e squad. */
+    private Caller caller(HttpServletRequest request) {
         String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
-        if (userId == null) return null;
-        return userRepository.findById(userId).orElse(null);
+        if (userId == null || userId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Autenticação necessária");
+        }
+        String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        String email = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_EMAIL);
+        User user = userRepository.findById(userId).orElse(null);
+        return new Caller(
+                userId,
+                role,
+                user != null ? user.getSquadId() : null,
+                user != null ? user.getName() : null,
+                user != null && user.getEmail() != null ? user.getEmail() : email);
     }
 
     @Operation(summary = "Lista projetos JOLT acessíveis ao usuário")
@@ -43,18 +59,13 @@ public class JoltProjectController {
             @RequestParam(value = "search", required = false) String search,
             HttpServletRequest request
     ) {
-        User user = resolveUser(request);
-        String userId = user != null ? user.getId() : "anonymous";
-        String squadId = user != null ? user.getSquadId() : null;
-
-        List<JoltProjectDto> list = joltProjectService.listProjects(userId, squadId, search);
-        return ResponseEntity.ok(list);
+        return ResponseEntity.ok(joltProjectService.listProjects(caller(request), search));
     }
 
     @Operation(summary = "Obtém detalhes completos de um projeto JOLT")
     @GetMapping("/{id}")
-    public ResponseEntity<JoltProjectDto> getProject(@PathVariable("id") UUID id) {
-        return ResponseEntity.ok(joltProjectService.getProject(id));
+    public ResponseEntity<JoltProjectDto> getProject(@PathVariable("id") UUID id, HttpServletRequest request) {
+        return ResponseEntity.ok(joltProjectService.getProject(id, caller(request)));
     }
 
     @Operation(summary = "Cria um novo projeto JOLT com versão inicial v1")
@@ -63,12 +74,7 @@ public class JoltProjectController {
             @Valid @RequestBody SaveJoltProjectRequestDto dto,
             HttpServletRequest request
     ) {
-        User user = resolveUser(request);
-        String userId = user != null ? user.getId() : "local-user";
-        String userName = user != null ? user.getName() : "Desenvolvedor";
-        String userEmail = user != null ? user.getEmail() : null;
-
-        JoltProjectDto created = joltProjectService.createProject(dto, userId, userName, userEmail);
+        JoltProjectDto created = joltProjectService.createProject(dto, caller(request));
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
@@ -79,12 +85,7 @@ public class JoltProjectController {
             @Valid @RequestBody SaveJoltProjectRequestDto dto,
             HttpServletRequest request
     ) {
-        User user = resolveUser(request);
-        String userId = user != null ? user.getId() : "local-user";
-        String userName = user != null ? user.getName() : "Desenvolvedor";
-
-        JoltProjectDto updated = joltProjectService.updateProject(id, dto, userId, userName);
-        return ResponseEntity.ok(updated);
+        return ResponseEntity.ok(joltProjectService.updateProject(id, dto, caller(request)));
     }
 
     @Operation(summary = "Exclui um projeto JOLT e todo seu histórico de versões")
@@ -93,17 +94,14 @@ public class JoltProjectController {
             @PathVariable("id") UUID id,
             HttpServletRequest request
     ) {
-        User user = resolveUser(request);
-        String userId = user != null ? user.getId() : "local-user";
-
-        joltProjectService.deleteProject(id, userId);
+        joltProjectService.deleteProject(id, caller(request));
         return ResponseEntity.noContent().build();
     }
 
     @Operation(summary = "Lista o histórico de versões de um projeto JOLT")
     @GetMapping("/{id}/versions")
-    public ResponseEntity<List<JoltProjectVersionDto>> listVersions(@PathVariable("id") UUID id) {
-        return ResponseEntity.ok(joltProjectService.listVersions(id));
+    public ResponseEntity<List<JoltProjectVersionDto>> listVersions(@PathVariable("id") UUID id, HttpServletRequest request) {
+        return ResponseEntity.ok(joltProjectService.listVersions(id, caller(request)));
     }
 
     @Operation(summary = "Restaura o projeto para uma versão anterior (Rollback)")
@@ -113,11 +111,21 @@ public class JoltProjectController {
             @PathVariable("versionId") UUID versionId,
             HttpServletRequest request
     ) {
-        User user = resolveUser(request);
-        String userId = user != null ? user.getId() : "local-user";
-        String userName = user != null ? user.getName() : "Desenvolvedor";
+        return ResponseEntity.ok(joltProjectService.rollbackToVersion(id, versionId, caller(request)));
+    }
 
-        JoltProjectDto restored = joltProjectService.rollbackToVersion(id, versionId, userId, userName);
-        return ResponseEntity.ok(restored);
+    /** Gravação concorrente do mesmo projeto (@Version): o cliente recarrega e tenta de novo. */
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<Map<String, String>> handleOptimisticLock(OptimisticLockingFailureException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                "error", "CONFLICT",
+                "message", "Este projeto foi alterado em outra aba ou por outra pessoa. Recarregue antes de salvar para não perder alterações."));
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<Map<String, String>> handleDataIntegrity(DataIntegrityViolationException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
+                "error", "BAD_REQUEST",
+                "message", "Dados inválidos ou fora dos limites permitidos."));
     }
 }
