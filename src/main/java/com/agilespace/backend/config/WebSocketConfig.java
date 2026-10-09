@@ -1,6 +1,7 @@
 package com.agilespace.backend.config;
 
 import com.agilespace.backend.security.JwtHandshakeInterceptor;
+import com.agilespace.backend.security.RetroBoardHandshakeInterceptor;
 import com.agilespace.backend.websocket.BrainstormingWebSocketHandler;
 import com.agilespace.backend.websocket.HealthCheckWebSocketHandler;
 import com.agilespace.backend.websocket.PokerWebSocketHandler;
@@ -26,6 +27,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
     private final BrainstormingWebSocketHandler brainstormingWebSocketHandler;
     private final ShowcaseWebSocketHandler showcaseWebSocketHandler;
     private final JwtHandshakeInterceptor jwtHandshakeInterceptor;
+    private final RetroBoardHandshakeInterceptor retroBoardHandshakeInterceptor;
 
     @Value("${app.cors.allowed-origins}")
     private List<String> allowedOrigins;
@@ -37,7 +39,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
         // autenticado por token (JwtHandshakeInterceptor), isso só evita que qualquer site
         // abra uma conexão de WebSocket contra a API a partir do browser de um usuário logado.
         registry.addHandler(retroWebSocketHandler, "/ws/retro/*")
-                .addInterceptors(jwtHandshakeInterceptor)
+                .addInterceptors(jwtHandshakeInterceptor, retroBoardHandshakeInterceptor)
                 .setAllowedOrigins(origins);
         registry.addHandler(pokerWebSocketHandler, "/ws/poker/*")
                 .addInterceptors(jwtHandshakeInterceptor)

@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.*;
+import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
@@ -18,6 +19,8 @@ import java.util.concurrent.CopyOnWriteArraySet;
 @Slf4j
 public class RetroWebSocketHandler extends TextWebSocketHandler {
 
+    private static final int SEND_TIME_LIMIT_MS = 10_000;
+    private static final int BUFFER_SIZE_LIMIT = 512 * 1024;
     private static final Map<String, Set<WebSocketSession>> boardSessions = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper;
 
@@ -29,28 +32,31 @@ public class RetroWebSocketHandler extends TextWebSocketHandler {
     public void afterConnectionEstablished(WebSocketSession session) {
         String boardId = getBoardId(session);
         if (boardId != null) {
-            boardSessions.computeIfAbsent(boardId, k -> new CopyOnWriteArraySet<>()).add(session);
-            log.info("Retro WebSocket connected. BoardId: {}, SessionId: {}, Total connected in board: {}", 
-                     boardId, session.getId(), boardSessions.get(boardId).size());
+            // sendMessage concorrente na mesma sessão (broadcasts de threads de requisição diferentes)
+            // corrompe o frame; o decorator serializa os envios e limita o buffer de um cliente lento.
+            WebSocketSession safe = new ConcurrentWebSocketSessionDecorator(session, SEND_TIME_LIMIT_MS, BUFFER_SIZE_LIMIT);
+            boardSessions.computeIfAbsent(boardId, k -> new CopyOnWriteArraySet<>()).add(safe);
+            log.debug("Retro WebSocket connected. BoardId: {}, SessionId: {}", boardId, session.getId());
         }
     }
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         String boardId = getBoardId(session);
-        if (boardId != null && boardSessions.containsKey(boardId)) {
-            Set<WebSocketSession> sessions = boardSessions.get(boardId);
-            sessions.remove(session);
-            if (sessions.isEmpty()) {
-                boardSessions.remove(boardId);
-            }
-            log.info("Retro WebSocket closed. BoardId: {}, SessionId: {}", boardId, session.getId());
+        if (boardId != null) {
+            // atômico: sem a janela entre isEmpty() e remove() em que uma conexão nova era perdida
+            boardSessions.computeIfPresent(boardId, (k, sessions) -> {
+                sessions.removeIf(s -> s.getId().equals(session.getId()));
+                return sessions.isEmpty() ? null : sessions;
+            });
+            log.debug("Retro WebSocket closed. BoardId: {}, SessionId: {}", boardId, session.getId());
         }
     }
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) {
-        log.info("Received client Retro WebSocket message from session {}: {}", session.getId(), message.getPayload());
+        // O cliente não envia nada útil por aqui; nunca logar o conteúdo.
+        log.debug("Ignored client Retro WebSocket message from session {}", session.getId());
     }
 
     public void broadcastEvent(String boardId, String eventType, Object payload) {
@@ -80,7 +86,7 @@ public class RetroWebSocketHandler extends TextWebSocketHandler {
 
                 String json = objectMapper.writeValueAsString(messageMap);
                 TextMessage textMessage = new TextMessage(json);
-                log.info("Broadcasting event '{}' to {} sessions on board {}", eventType, sessions.size(), boardId);
+                log.debug("Broadcasting event '{}' to {} sessions on board {}", eventType, sessions.size(), boardId);
                 broadcastToSessions(sessions, textMessage);
             } catch (Exception e) {
                 log.error("Failed to serialize or broadcast event '{}' for board {}", eventType, boardId, e);

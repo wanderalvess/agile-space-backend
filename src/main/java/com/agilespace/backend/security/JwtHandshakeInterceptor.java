@@ -37,6 +37,7 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
         }
 
         attributes.put("userId", claims.get("sub").asText());
+        attributes.put("role", claims.hasNonNull("role") ? claims.get("role").asText() : "MEMBER");
         return true;
     }
 
