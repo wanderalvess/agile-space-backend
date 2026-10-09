@@ -301,4 +301,21 @@ class SquadControllerManageAccessTest {
         assertEquals(HttpStatus.NOT_FOUND, controller.getRollup("SQ1", "43", as("dev1", "MEMBER")).getStatusCode());
         verify(service, never()).getRollup("SQ1");
     }
+
+    @Test
+    @DisplayName("meetLink da cerimônia: javascript:/data:/sem host dão 400; https e vazio passam")
+    void ceremonyMeetLinkMustBeHttp() throws Exception {
+        userInSq1("dev1");
+        squadHasLeadershipAndCallerIsNot();
+        when(service.saveSquad(any())).thenAnswer(i -> i.getArgument(0));
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+
+        for (String bad : List.of("javascript:alert(1)", "JAVASCRIPT:alert(1)", "data:text/html,x", "//evil.com", "meet.google.com/abc", "https://")) {
+            Squad body = Squad.builder().ceremonies(mapper.readTree("[{\"id\":\"1\",\"meetLink\":\"" + bad + "\"}]")).build();
+            assertEquals(HttpStatus.BAD_REQUEST,
+                    assertThrows(ResponseStatusException.class, () -> controller.saveSquad("SQ1", body, as("dev1", "MEMBER"))).getStatusCode(), bad);
+        }
+        Squad ok = Squad.builder().ceremonies(mapper.readTree("[{\"id\":\"1\",\"meetLink\":\"https://meet.google.com/abc-defg\"},{\"id\":\"2\",\"meetLink\":\"\"},{\"id\":\"3\"}]")).build();
+        assertEquals(HttpStatus.OK, controller.saveSquad("SQ1", ok, as("dev1", "MEMBER")).getStatusCode());
+    }
 }

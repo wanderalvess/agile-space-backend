@@ -194,6 +194,7 @@ public class SquadController {
         if (owner != null && !owner.isBlank() && !owner.trim().equals(callerId(request)) && !isAdmin(request)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "O sincronismo agendado só pode usar o token do Jira de quem o ativa.");
         }
+        requireSafeCeremonyLinks(squad);
         squad.setId(squadId);
         return ResponseEntity.ok(squadService.saveSquad(squad));
     }
@@ -313,6 +314,25 @@ public class SquadController {
         // a conta de outra pessoa a uma linha e, por ela, dar acesso à squad.
         member.setClaimedByUid(null);
         return ResponseEntity.ok(squadService.saveMember(squadId, jiraAccountId, member));
+    }
+
+    /** meetLink vira href no Painel: só http(s) (javascript:, data: etc. executam código ao clicar). */
+    static void requireSafeCeremonyLinks(Squad sq) {
+        if (sq.getCeremonies() == null || !sq.getCeremonies().isArray()) return;
+        for (com.fasterxml.jackson.databind.JsonNode c : sq.getCeremonies()) {
+            String link = c.path("meetLink").asText("").trim();
+            if (link.isEmpty()) continue;
+            boolean ok;
+            try {
+                java.net.URI u = java.net.URI.create(link);
+                ok = ("https".equalsIgnoreCase(u.getScheme()) || "http".equalsIgnoreCase(u.getScheme())) && u.getHost() != null;
+            } catch (IllegalArgumentException e) {
+                ok = false;
+            }
+            if (!ok) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Link da cerimônia inválido: use um endereço que comece com https:// (ou http://).");
+            }
+        }
     }
 
     private static boolean touchesLeadershipOnlyFields(Squad sq) {
