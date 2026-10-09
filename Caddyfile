@@ -2,7 +2,7 @@
 	# Rotas de API que existem SÓ no Next.js (app/api/**). Precisam vir antes do /api/* abaixo, senão caem no
 	# Spring e dão 404 (o backend não tem esses caminhos): chat de IA, embeddings/ingestão do conhecimento,
 	# TDN, mocks e llms.
-	@nextApi path /api/ai/* /api/llms /api/mock-config /api/mock/* /api/tdn/* /api/knowledge/embed /api/knowledge/ingest-pdf /api/knowledge/sync-manuals
+	@nextApi path /api/ai/* /api/llms /api/mock-config /api/mock/* /api/tdn/* /api/knowledge/embed /api/knowledge/ingest-pdf /api/knowledge/sync-manuals /api/v1/knowledge/docs/*/download
 	handle @nextApi {
 		reverse_proxy frontend:9002
 	}

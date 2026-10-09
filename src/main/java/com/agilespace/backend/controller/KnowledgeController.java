@@ -27,7 +27,6 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/knowledge")
 @RequiredArgsConstructor
-@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class KnowledgeController {
 
     private final KnowledgeService knowledgeService;
@@ -52,14 +51,17 @@ public class KnowledgeController {
     public ResponseEntity<Page<KnowledgeDocument>> semanticSearch(
             @RequestBody Map<String, Object> body,
             @PageableDefault(size = 10) Pageable pageable) {
-        @SuppressWarnings("unchecked")
-        List<Double> rawEmbedding = (List<Double>) body.get("embedding");
-        if (rawEmbedding == null || rawEmbedding.isEmpty()) {
+        Object raw = body.get("embedding");
+        if (!(raw instanceof List<?> rawEmbedding) || rawEmbedding.isEmpty() || rawEmbedding.size() > KnowledgeService.MAX_EMBEDDING_DIMS) {
             return ResponseEntity.badRequest().build();
         }
         float[] queryEmbedding = new float[rawEmbedding.size()];
         for (int i = 0; i < rawEmbedding.size(); i++) {
-            queryEmbedding[i] = rawEmbedding.get(i).floatValue();
+            // JSON com inteiros (ex.: 0) chegava como Integer e estourava ClassCastException (500).
+            if (!(rawEmbedding.get(i) instanceof Number n)) {
+                return ResponseEntity.badRequest().build();
+            }
+            queryEmbedding[i] = n.floatValue();
         }
         return ResponseEntity.ok(knowledgeService.semanticSearch(queryEmbedding, pageable));
     }
@@ -87,9 +89,11 @@ public class KnowledgeController {
             @PathVariable("id") UUID id,
             @Valid @RequestBody KnowledgeDocument doc,
             HttpServletRequest request) {
-        doc.setUpdatedBy(resolveUserId(request));
+        String callerId = resolveUserId(request);
+        String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        doc.setUpdatedBy(callerId);
         try {
-            return ResponseEntity.ok(knowledgeService.updateDocument(id, doc));
+            return ResponseEntity.ok(knowledgeService.updateDocument(id, doc, callerId, "ADMIN".equalsIgnoreCase(role)));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }
@@ -195,7 +199,7 @@ public class KnowledgeController {
             @RequestBody Map<String, Object> body, HttpServletRequest request) {
         String userId = resolveUserId(request);
         String userName = userRepository.findById(userId).map(User::getName).orElse(userId);
-        long tokens = body.get("tokens") != null ? ((Number) body.get("tokens")).longValue() : 0L;
+        long tokens = body.get("tokens") instanceof Number n ? n.longValue() : 0L;
         knowledgeService.incrementTokenUsage(userId, userName, tokens);
         return ResponseEntity.ok().build();
     }

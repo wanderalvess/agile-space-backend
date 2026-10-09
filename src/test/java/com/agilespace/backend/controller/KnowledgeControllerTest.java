@@ -79,7 +79,7 @@ public class KnowledgeControllerTest {
     public void testUpdateDocumentSetsUpdatedByFromTokenForAnyAuthenticated() {
         UUID id = UUID.randomUUID();
         KnowledgeDocument doc = new KnowledgeDocument();
-        when(service.updateDocument(eq(id), any())).thenReturn(doc);
+        when(service.updateDocument(eq(id), any(), eq("u1"), eq(false))).thenReturn(doc);
 
         ResponseEntity<KnowledgeDocument> response = controller.updateDocument(id, doc, mockRequest("u1", "MEMBER"));
 

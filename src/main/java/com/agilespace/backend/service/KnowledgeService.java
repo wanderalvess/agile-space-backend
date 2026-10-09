@@ -14,7 +14,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,6 +56,17 @@ public class KnowledgeService {
     // se a base de conhecimento real mostrar muito falso positivo/negativo em produção.
     private static final float MIN_SIMILARITY = 0.2f;
 
+    static final int MAX_TITLE = 255;
+    static final int MAX_META = 255;
+    static final int MAX_CONTENT = 2_000_000;
+    static final int MAX_TAGS = 50;
+    static final int MAX_TAG_LENGTH = 100;
+    static final int MAX_MESSAGE_CHARS = 100_000;
+    static final int MAX_CONVERSATION_CHARS = 2_000_000;
+    public static final int MAX_EMBEDDING_DIMS = 2048;
+    static final long MAX_TOKENS_PER_CALL = 200_000L;
+    static final Set<String> DOC_STATUS = Set.of("indexed", "published", "deleted");
+
     // Overload preservado para compatibilidade de origem com chamadas existentes sem filtro de status.
     @Transactional(readOnly = true)
     public Page<KnowledgeDocument> listDocuments(String query, Set<String> tags, Pageable pageable) {
@@ -62,6 +75,10 @@ public class KnowledgeService {
 
     @Transactional(readOnly = true)
     public Page<KnowledgeDocument> listDocuments(String query, Set<String> tags, String status, Pageable pageable) {
+        // Sem ordenação pedida, a página vinha em ordem arbitrária do banco: mais recentes primeiro.
+        if (pageable.isPaged() && pageable.getSort().isUnsorted()) {
+            pageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), Sort.by(Sort.Direction.DESC, "updatedAt"));
+        }
         Page<KnowledgeDocument> docsPage;
         if (query != null && !query.trim().isEmpty()) {
             String trimmedQuery = query.trim();
@@ -149,6 +166,16 @@ public class KnowledgeService {
 
     @Transactional
     public KnowledgeDocument saveOrUpdateDocument(KnowledgeDocument doc) {
+        validateDocument(doc);
+        // Documento novo nunca herda id/contadores/lixeira vindos do corpo: um POST com o id de um
+        // documento existente virava "merge" e sobrescrevia (inclusive a autoria) o de outra pessoa.
+        doc.setId(null);
+        doc.setViews(0);
+        doc.setDeletedAt(null);
+        doc.setDeletedBy(null);
+        if ("deleted".equals(doc.getStatus())) {
+            throw badRequest("Para apagar um documento use a exclusão (lixeira).");
+        }
         // Se for uma importação do TDN, verifica se o documento com esse tdnId já existe
         if (doc.getTdnId() != null && !doc.getTdnId().trim().isEmpty()) {
             Optional<KnowledgeDocument> existingOpt = knowledgeRepository.findByTdnId(doc.getTdnId());
@@ -180,9 +207,22 @@ public class KnowledgeService {
         return knowledgeRepository.save(doc);
     }
 
+    /** Mantido para chamadas internas sem contexto de usuário: não permite apagar via status. */
     @Transactional
     public KnowledgeDocument updateDocument(UUID id, KnowledgeDocument updatedDoc) {
+        return updateDocument(id, updatedDoc, updatedDoc.getUpdatedBy(), false);
+    }
+
+    @Transactional
+    public KnowledgeDocument updateDocument(UUID id, KnowledgeDocument updatedDoc, String callerId, boolean isAdmin) {
+        validateDocument(updatedDoc);
         KnowledgeDocument existing = getDocumentById(id);
+        String newStatus = updatedDoc.getStatus() != null ? updatedDoc.getStatus() : existing.getStatus();
+        boolean deleting = "deleted".equals(newStatus) && !"deleted".equals(existing.getStatus());
+        if (deleting && !isAdmin && (callerId == null || !callerId.equals(existing.getAuthorId()))) {
+            // Mudar o status para "deleted" pelo PUT contornava a regra "só autor ou admin apaga".
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Apenas o autor ou um administrador pode apagar este documento.");
+        }
         existing.setTitle(updatedDoc.getTitle());
         existing.setContent(updatedDoc.getContent());
         existing.setCategory(updatedDoc.getCategory());
@@ -191,14 +231,61 @@ public class KnowledgeService {
         existing.setModuleName(updatedDoc.getModuleName());
         existing.setFolderId(updatedDoc.getFolderId());
         existing.setFolderName(updatedDoc.getFolderName());
-        existing.setStatus(updatedDoc.getStatus());
-        existing.setTags(updatedDoc.getTags());
+        // Status ausente no corpo não pode virar null: documento com status nulo some de todas as listas.
+        existing.setStatus(newStatus);
+        if (deleting) {
+            existing.setDeletedAt(LocalDateTime.now());
+            existing.setDeletedBy(callerId);
+        } else if (!"deleted".equals(newStatus)) {
+            existing.setDeletedAt(null);
+            existing.setDeletedBy(null);
+        }
+        existing.setTags(updatedDoc.getTags() != null ? updatedDoc.getTags() : existing.getTags());
         existing.setByteSize(updatedDoc.getByteSize());
         existing.setUpdatedBy(updatedDoc.getUpdatedBy());
         if (updatedDoc.getEmbedding() != null) {
             existing.setEmbedding(updatedDoc.getEmbedding());
         }
         return knowledgeRepository.save(existing);
+    }
+
+    static ResponseStatusException badRequest(String message) {
+        return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+    }
+
+    static void validateDocument(KnowledgeDocument doc) {
+        if (doc.getTitle() == null || doc.getTitle().isBlank()) {
+            throw badRequest("O título é obrigatório.");
+        }
+        doc.setTitle(doc.getTitle().trim());
+        if (doc.getTitle().length() > MAX_TITLE) {
+            throw badRequest("O título passa do limite de " + MAX_TITLE + " caracteres.");
+        }
+        if (doc.getContent() != null && doc.getContent().length() > MAX_CONTENT) {
+            throw badRequest("O conteúdo passa do limite de " + MAX_CONTENT + " caracteres.");
+        }
+        for (String field : new String[]{doc.getCategory(), doc.getFullPath(), doc.getModuleId(), doc.getModuleName(),
+                doc.getFolderId(), doc.getFolderName(), doc.getTdnId()}) {
+            if (field != null && field.length() > MAX_META) {
+                throw badRequest("Categoria, caminho e demais campos passam do limite de " + MAX_META + " caracteres.");
+            }
+        }
+        if (doc.getStatus() != null && !DOC_STATUS.contains(doc.getStatus())) {
+            throw badRequest("Status inválido: " + doc.getStatus());
+        }
+        if (doc.getTags() != null) {
+            if (doc.getTags().size() > MAX_TAGS) {
+                throw badRequest("No máximo " + MAX_TAGS + " tags por documento.");
+            }
+            for (String tag : doc.getTags()) {
+                if (tag != null && tag.length() > MAX_TAG_LENGTH) {
+                    throw badRequest("Cada tag pode ter até " + MAX_TAG_LENGTH + " caracteres.");
+                }
+            }
+        }
+        if (doc.getEmbedding() != null && doc.getEmbedding().length > MAX_EMBEDDING_DIMS) {
+            throw badRequest("Embedding inválido.");
+        }
     }
 
     @Transactional
@@ -240,7 +327,7 @@ public class KnowledgeService {
     public KnowledgeConversation createConversation(String userId, String title) {
         KnowledgeConversation conversation = KnowledgeConversation.builder()
                 .userId(userId)
-                .title(title)
+                .title(cleanTitle(title))
                 .messages("[]")
                 .updatedAt(LocalDateTime.now())
                 .build();
@@ -250,7 +337,7 @@ public class KnowledgeService {
     @Transactional
     public KnowledgeConversation renameConversation(UUID id, String userId, String newTitle) {
         KnowledgeConversation existing = getConversation(id, userId);
-        existing.setTitle(newTitle);
+        existing.setTitle(cleanTitle(newTitle));
         existing.setUpdatedAt(LocalDateTime.now());
         return knowledgeConversationRepository.save(existing);
     }
@@ -262,13 +349,29 @@ public class KnowledgeService {
             List<Object> messages = existing.getMessages() != null
                     ? objectMapper.readValue(existing.getMessages(), new TypeReference<List<Object>>() {})
                     : new ArrayList<>();
+            String serializedMessage = objectMapper.writeValueAsString(message);
+            if (serializedMessage.length() > MAX_MESSAGE_CHARS) {
+                throw badRequest("A mensagem passa do limite de " + MAX_MESSAGE_CHARS + " caracteres.");
+            }
             messages.add(message);
-            existing.setMessages(objectMapper.writeValueAsString(messages));
+            String serialized = objectMapper.writeValueAsString(messages);
+            if (serialized.length() > MAX_CONVERSATION_CHARS) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Esta conversa ficou longa demais. Inicie uma nova consulta.");
+            }
+            existing.setMessages(serialized);
         } catch (JsonProcessingException e) {
             throw new RuntimeException("Erro ao processar mensagens da conversa", e);
         }
         existing.setUpdatedAt(LocalDateTime.now());
         return knowledgeConversationRepository.save(existing);
+    }
+
+    private static String cleanTitle(String title) {
+        if (title == null || title.isBlank()) {
+            return "Nova Consulta de Conhecimento";
+        }
+        String t = title.trim();
+        return t.length() > MAX_TITLE ? t.substring(0, MAX_TITLE) : t;
     }
 
     @Transactional
@@ -287,6 +390,12 @@ public class KnowledgeService {
     public KnowledgeUserAiSettings saveAiSettings(String userId, KnowledgeUserAiSettings updates) {
         KnowledgeUserAiSettings existing = knowledgeUserAiSettingsRepository.findById(userId)
                 .orElseGet(() -> KnowledgeUserAiSettings.builder().userId(userId).build());
+        if (updates.getModel() != null && updates.getModel().length() > 100) {
+            throw badRequest("Modelo inválido.");
+        }
+        if (updates.getByokApiKey() != null && updates.getByokApiKey().length() > 400) {
+            throw badRequest("A chave de API passa do limite de 400 caracteres.");
+        }
         if (updates.getModel() != null) {
             existing.setModel(updates.getModel());
         }
@@ -302,7 +411,9 @@ public class KnowledgeService {
         KnowledgeTokenUsage usage = knowledgeTokenUsageRepository.findById(userId)
                 .orElseGet(() -> KnowledgeTokenUsage.builder().userId(userId).totalTokens(0L).build());
         usage.setUserName(userName);
-        usage.setTotalTokens(usage.getTotalTokens() + tokens);
+        // O cliente informa o consumo: ignora negativos e limita cada chamada para não distorcer o ranking.
+        long safe = Math.max(0L, Math.min(tokens, MAX_TOKENS_PER_CALL));
+        usage.setTotalTokens(usage.getTotalTokens() + safe);
         usage.setUpdatedAt(LocalDateTime.now());
         knowledgeTokenUsageRepository.save(usage);
     }
