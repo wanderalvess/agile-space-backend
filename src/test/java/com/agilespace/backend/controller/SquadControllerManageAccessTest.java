@@ -77,9 +77,45 @@ class SquadControllerManageAccessTest {
         squadHasLeadershipAndCallerIsNot();
 
         ResponseStatusException ex = assertThrows(ResponseStatusException.class,
-                () -> controller.saveSquad("SQ1", new Squad(), as("dev1", "MEMBER")));
+                () -> controller.saveSquad("SQ1", Squad.builder().jiraDomain("servidor-do-atacante.exemplo.com").build(), as("dev1", "MEMBER")));
 
         assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+        verify(service, never()).saveSquad(any());
+    }
+
+    @Test
+    @DisplayName("Dev continua salvando o que o Painel já deixa qualquer membro mexer (cerimônias, unidade de estimativa), mas não o nome")
+    void developerStillSavesCeremoniesAndEstimationUnit() {
+        userInSq1("dev1");
+        squadHasLeadershipAndCallerIsNot();
+        when(service.saveSquad(any())).thenAnswer(i -> i.getArgument(0));
+        Squad body = Squad.builder().ceremonyMode("manual").estimationUnit("HOURS").name("Nome trocado").build();
+
+        controller.saveSquad("SQ1", body, as("dev1", "MEMBER"));
+
+        org.mockito.ArgumentCaptor<Squad> saved = org.mockito.ArgumentCaptor.forClass(Squad.class);
+        verify(service).saveSquad(saved.capture());
+        assertEquals("manual", saved.getValue().getCeremonyMode());
+        assertEquals("HOURS", saved.getValue().getEstimationUnit());
+        assertNull(saved.getValue().getName());
+    }
+
+    @Test
+    @DisplayName("Dev não liga o ranking, não troca a JQL nem a capacidade, não define fases nem dono do sync")
+    void developerCannotTouchEachLeadershipOnlyField() {
+        userInSq1("dev1");
+        squadHasLeadershipAndCallerIsNot();
+        HttpServletRequest dev = as("dev1", "MEMBER");
+
+        for (Squad body : List.of(
+                Squad.builder().syncJql("project = X").build(),
+                Squad.builder().jiraProjectKey("OUTRO").build(),
+                Squad.builder().rankingEnabled(true).build(),
+                Squad.builder().defaultDailyCapacityHours(2.0).build(),
+                Squad.builder().syncOwnerUserId("dev1").build(),
+                Squad.builder().phases(new com.fasterxml.jackson.databind.ObjectMapper().createArrayNode()).build())) {
+            assertEquals(HttpStatus.FORBIDDEN, assertThrows(ResponseStatusException.class, () -> controller.saveSquad("SQ1", body, dev)).getStatusCode());
+        }
         verify(service, never()).saveSquad(any());
     }
 

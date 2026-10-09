@@ -169,7 +169,15 @@ public class SquadController {
 
     @PostMapping("/{squadId}")
     public ResponseEntity<Squad> saveSquad(@PathVariable String squadId, @RequestBody Squad squad, HttpServletRequest request) {
-        requireSquadManageAccess(squadId, request);
+        if (!squadAccessService.canManageSquad(squadId, request)) {
+            // Membro comum continua podendo salvar o que a tela do Painel já deixa qualquer membro mexer (cerimônias, unidade
+            // de estimativa, número do quadro). Projeto, JQL, domínio do Jira, capacidade, fases e sync agendado são da liderança.
+            requireSquadWriteAccess(squadId, request);
+            if (touchesLeadershipOnlyFields(squad)) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só a liderança da squad (Agile Master, People Lead, Tech Lead, PO…) ou um administrador pode alterar a configuração do Jira, a capacidade e as fases.");
+            }
+            squad.setName(null);
+        }
         // Campos que só o sync grava (estado da sincronização, sprint ativa, histórico) não vêm do cliente.
         squad.setActiveSprintId(null);
         squad.setSchemaVersion(null);
@@ -305,6 +313,14 @@ public class SquadController {
         // a conta de outra pessoa a uma linha e, por ela, dar acesso à squad.
         member.setClaimedByUid(null);
         return ResponseEntity.ok(squadService.saveMember(squadId, jiraAccountId, member));
+    }
+
+    private static boolean touchesLeadershipOnlyFields(Squad sq) {
+        return sq.getJiraProjectKey() != null || sq.getSyncJql() != null || sq.getJiraDomain() != null
+                || sq.getSprintFieldId() != null || sq.getRankingEnabled() != null || sq.getRankingEnabledAt() != null
+                || sq.getReconcileIntervalHours() != null || sq.getDefaultDailyCapacityHours() != null
+                || sq.getCapacityCalculationMethod() != null || sq.getCapacityJql() != null || sq.getCapacityFormula() != null
+                || sq.getPhases() != null || sq.getSyncOwnerUserId() != null;
     }
 
     /** Payload só com claimedByUid (e, no máximo, updatedAt/ids): é o "Sou eu". */

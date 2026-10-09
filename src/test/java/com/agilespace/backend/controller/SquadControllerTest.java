@@ -169,7 +169,7 @@ public class SquadControllerTest {
 
         // requireSquadWriteAccess consulta squadService.getMembers como último fallback
         // (checagem por squad_members) antes de negar — interação esperada, não um bug.
-        verify(service).getMembers("sq-1");
+        verify(service, atLeastOnce()).getMembers("sq-1");
     }
 
     @Test
