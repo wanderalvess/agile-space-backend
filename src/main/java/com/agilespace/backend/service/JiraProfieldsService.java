@@ -89,7 +89,10 @@ public class JiraProfieldsService {
     public ProjectDetailDto syncProjectFromProfields(String domain, String projectKey, String token, User creator) {
         requireCanOverwriteProject(projectKey, creator);
         // Consulta ao Jira (rede, até dezenas de segundos) fora da transação: só a gravação segura conexão do pool.
-        ProfieldsSnapshot snapshot = fetchProfieldsSnapshot(domain, projectKey, token, creator);
+        ProfieldsSnapshot snapshot = fetchProfieldsSnapshot(domain, projectKey, token, creator, false);
+        if (creator != null && !canImportTeam(creator, snapshot.members())) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN, TEAM_MANAGER_ONLY_MESSAGE);
+        }
         return persistImport(snapshot.project(), snapshot.members());
     }
 
@@ -124,6 +127,68 @@ public class JiraProfieldsService {
         }
     }
 
+    /** Papéis que podem cadastrar equipes: Agile Master (e o Scrum Master, mesmo cargo) e People Lead. */
+    private static final Set<String> TEAM_MANAGER_ROLE_KEYS = Set.of("AGILE_MASTER", "SCRUM_MASTER", "PEOPLE_LEAD");
+
+    /** User.jobTitle só é gravável por ADMIN (ver UserService), então vale como atribuição de cargo. */
+    private static final Set<String> TEAM_MANAGER_JOB_TITLES = Set.of("agile master", "scrum master", "people lead");
+
+    static boolean isTeamManagerRow(ProjectMemberRole row) {
+        return row != null && row.getRoleKey() != null
+                && TEAM_MANAGER_ROLE_KEYS.contains(row.getRoleKey().toUpperCase(java.util.Locale.ROOT));
+    }
+
+    /** A linha do roster é desta pessoa? E-mail, conta do Jira ou nome completo (sem acento/caixa). */
+    static boolean rowMatchesUser(ProjectMemberRole row, User user) {
+        if (row == null || user == null) return false;
+        if (user.getId() != null && user.getId().equals(row.getUserId())) return true;
+        if (notBlank(user.getEmail()) && notBlank(row.getEmail()) && user.getEmail().trim().equalsIgnoreCase(row.getEmail().trim())) return true;
+        if (notBlank(user.getJiraAccountId()) && notBlank(row.getJiraAccountId()) && user.getJiraAccountId().trim().equals(row.getJiraAccountId().trim())) return true;
+        String myName = OnboardingService.normalize(user.getName());
+        return !myName.isBlank() && myName.equals(OnboardingService.normalize(row.getDisplayName()));
+    }
+
+    private static boolean notBlank(String s) {
+        return s != null && !s.isBlank();
+    }
+
+    /**
+     * Quem pode criar/importar equipes: ADMIN, quem um admin marcou como Agile Master/People Lead (jobTitle)
+     * ou quem já consta no roster como AM/PL de alguma equipe. Autodeclaração não conta.
+     */
+    boolean canManageTeams(User user) {
+        if (user == null) return false;
+        if ("ADMIN".equalsIgnoreCase(user.getRole())) return true;
+        if (notBlank(user.getJobTitle()) && TEAM_MANAGER_JOB_TITLES.contains(user.getJobTitle().trim().toLowerCase(java.util.Locale.ROOT))) return true;
+        List<ProjectMemberRole> rows = new ArrayList<>();
+        if (user.getId() != null) rows.addAll(projectMemberRoleRepository.findByUserId(user.getId()));
+        if (notBlank(user.getEmail())) rows.addAll(projectMemberRoleRepository.findByEmailIgnoreCase(user.getEmail().trim()));
+        return rows.stream().anyMatch(JiraProfieldsService::isTeamManagerRow);
+    }
+
+    /** Papel {nome, chave} com que o fundador de uma equipe manual entra: o que ele já tem como AM/PL. */
+    private String[] founderRoleFor(User user) {
+        List<ProjectMemberRole> rows = new ArrayList<>();
+        if (user.getId() != null) rows.addAll(projectMemberRoleRepository.findByUserId(user.getId()));
+        if (notBlank(user.getEmail())) rows.addAll(projectMemberRoleRepository.findByEmailIgnoreCase(user.getEmail().trim()));
+        boolean agile = rows.stream().anyMatch(r -> r.getRoleKey() != null
+                && ("AGILE_MASTER".equalsIgnoreCase(r.getRoleKey()) || "SCRUM_MASTER".equalsIgnoreCase(r.getRoleKey())));
+        boolean people = rows.stream().anyMatch(r -> "PEOPLE_LEAD".equalsIgnoreCase(r.getRoleKey()));
+        String title = notBlank(user.getJobTitle()) ? user.getJobTitle().trim().toLowerCase(java.util.Locale.ROOT) : "";
+        if (agile || "agile master".equals(title) || "scrum master".equals(title)) return new String[] {"Agile Master", "AGILE_MASTER"};
+        if (people || "people lead".equals(title)) return new String[] {"People Lead", "PEOPLE_LEAD"};
+        return new String[] {"Developer", "DEVELOPER"};
+    }
+
+    /** Pode importar esta equipe: gerencia equipes em geral, ou o Jira lista a pessoa como AM/PL nela. */
+    private boolean canImportTeam(User user, List<ProjectMemberRole> jiraMembers) {
+        if (canManageTeams(user)) return true;
+        return jiraMembers.stream().anyMatch(m -> isTeamManagerRow(m) && rowMatchesUser(m, user));
+    }
+
+    private static final String TEAM_MANAGER_ONLY_MESSAGE =
+            "Só Agile Master ou People Lead cadastram equipes. Peça a quem lidera o seu time para importá-lo, ou use um link de convite.";
+
     /** Cargos sem governança: qualquer um pode ser escolhido na prévia da importação. */
     private static final Set<String> SELF_ASSIGNABLE_ROLES = Set.of(
             "DEVELOPER", "DESENVOLVEDOR(A)", "QA", "ANALISTA DE QA", "DESIGNER", "UX", "SME", "STAKEHOLDER / OBSERVADOR");
@@ -142,6 +207,9 @@ public class JiraProfieldsService {
         }
         requireCanOverwriteProject(projectKey, creator);
         ProfieldsSnapshot base = fetchProfieldsSnapshot(domain, projectKey, token, creator, false);
+        if (creator != null && !canImportTeam(creator, base.members())) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN, TEAM_MANAGER_ONLY_MESSAGE);
+        }
         ProfieldsSnapshot applied = applyConfirmation(base, request, creator);
         return persistImport(applied.project(), applied.members());
     }
@@ -191,7 +259,8 @@ public class JiraProfieldsService {
             }
             String upper = finalRole.toUpperCase(java.util.Locale.ROOT);
             String userId = base.getUserId();
-            if (req.isLinkToMe() && creator != null && (userId == null || userId.equals(creator.getId()))) {
+            if (req.isLinkToMe() && creator != null && (userId == null || userId.equals(creator.getId()))
+                    && (!base.isLeadership() || rowMatchesUser(base, creator))) {
                 userId = creator.getId();
             }
             if (creator != null && creator.getId().equals(userId)) creatorLinked = true;
@@ -233,8 +302,10 @@ public class JiraProfieldsService {
      * Usado pelo onboarding pra o usuário conferir o que vai entrar antes de confirmar.
      */
     public ProjectDetailDto previewProjectFromProfields(String domain, String projectKey, String token, User creator) {
-        ProfieldsSnapshot snapshot = fetchProfieldsSnapshot(domain, projectKey, token, creator);
-        return toDetailDto(snapshot.project(), snapshot.members());
+        ProfieldsSnapshot snapshot = fetchProfieldsSnapshot(domain, projectKey, token, creator, false);
+        ProjectDetailDto dto = toDetailDto(snapshot.project(), snapshot.members());
+        dto.setCanImport(creator == null || canImportTeam(creator, snapshot.members()));
+        return dto;
     }
 
     record ProfieldsSnapshot(ProjectConfig project, List<ProjectMemberRole> members) {}
@@ -1019,10 +1090,13 @@ public class JiraProfieldsService {
 
     /**
      * Cria um projeto do zero, sem depender do Jira — para quem quer começar sem sincronizar nada.
-     * O criador vira automaticamente o Agile Master do projeto recém-criado.
+     * O criador entra com o papel que já tem (Agile Master ou People Lead); criar não promove ninguém.
      */
     @Transactional
     public ProjectDetailDto createManualProject(com.agilespace.backend.dto.CreateProjectRequestDto request, User creator) {
+        if (!canManageTeams(creator)) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN, TEAM_MANAGER_ONLY_MESSAGE);
+        }
         String key = request.getId().trim().toUpperCase();
         if (projectConfigRepository.existsById(key)) {
             throw new org.springframework.web.server.ResponseStatusException(
@@ -1039,15 +1113,18 @@ public class JiraProfieldsService {
                 .build();
         project = projectConfigRepository.save(project);
 
+        // Criar a equipe não dá papel a ninguém: o fundador entra com o papel que já tem (o Jira diz).
+        // Sem papel de AM/PL conhecido (ex.: admin puro), entra sem liderança.
+        String[] founderRole = founderRoleFor(creator);
         ProjectMemberRole founder = ProjectMemberRole.builder()
                 .projectId(key)
-                .roleName("Agile Master")
-                .roleKey("AGILE_MASTER")
+                .roleName(founderRole[0])
+                .roleKey(founderRole[1])
                 .jiraAccountId(creator.getJiraAccountId())
                 .displayName(creator.getName())
                 .email(creator.getEmail())
                 .userId(creator.getId())
-                .isLeadership(true)
+                .isLeadership(isTeamManagerRow(ProjectMemberRole.builder().roleKey(founderRole[1]).build()))
                 .build();
         projectMemberRoleRepository.save(founder);
 

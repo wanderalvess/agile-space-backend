@@ -68,8 +68,8 @@ public class ProjectController {
     }
 
     /**
-     * Cria um projeto do zero, sem depender do Jira. O usuário autenticado vira o Agile Master
-     * do projeto e é automaticamente movido pra ele (mesmo comportamento de /auth/switch-project).
+     * Cria um projeto do zero, sem depender do Jira. Só AM/PL/admin criam. O usuário entra com o papel que
+     * já tem (nenhum papel é concedido) e é automaticamente movido pra ele (mesmo comportamento de /auth/switch-project).
      */
     @PostMapping
     public ResponseEntity<AuthResponseDto> createProject(

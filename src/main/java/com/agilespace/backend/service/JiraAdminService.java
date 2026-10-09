@@ -598,11 +598,17 @@ public class JiraAdminService {
             return new RoleScore("People Lead", 96);
         }
 
-        // 3. Gestão Ágil / Facilitação (Agile Master / Scrum Master / Agilista / RTE) -> Score 95
-        if (name.contains("agile master") || name.contains("scrum master") || name.equals("am") || 
-            name.equals("sm") || name.contains("agilista") || name.contains("facilitador") || 
+        // 3. Agile Coach / Agile Coaching é cargo próprio (liderança transversal da tribo), não Agile Master.
+        // Vem antes do bloco do AM porque "agile coaching" não pode cair no "scrum"/"agile" mais abaixo.
+        if (name.contains("agile coach") || name.contains("coaching") || name.equals("coach") || name.equals("ac")) {
+            return new RoleScore("Agile Coach", 94);
+        }
+
+        // 4. Gestão Ágil / Facilitação (Agile Master / Scrum Master / Agilista / RTE) -> Score 95
+        if (name.contains("agile master") || name.contains("scrum master") || name.equals("am") ||
+            name.equals("sm") || name.contains("agilista") || name.contains("facilitador") ||
             name.contains("facilitadora") || name.contains("rte") || name.contains("release train") ||
-            name.contains("scrum") || name.contains("agile coach") || name.equals("ac")) {
+            name.contains("scrum")) {
             return new RoleScore("Agile Master", 95);
         }
 
