@@ -1,5 +1,9 @@
 package com.agilespace.backend.domain;
 
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.datatype.jsr310.deser.LocalDateTimeDeserializer;
+import com.fasterxml.jackson.datatype.jsr310.ser.LocalDateTimeSerializer;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDateTime;
@@ -32,6 +36,9 @@ public class UserKanbanCard {
     private String priority; // baixa, media, alta, critica
 
     @Column(name = "due_date")
+    // Horário digitado por pessoa (sem fuso): fica FORA da conversão para UTC com Z (ver JacksonUtcConfig).
+    @JsonSerialize(using = LocalDateTimeSerializer.class)
+    @JsonDeserialize(using = LocalDateTimeDeserializer.class)
     private LocalDateTime dueDate;
 
     private String tag;

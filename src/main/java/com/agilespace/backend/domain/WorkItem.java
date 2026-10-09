@@ -1,5 +1,9 @@
 package com.agilespace.backend.domain;
 
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.datatype.jsr310.deser.LocalDateTimeDeserializer;
+import com.fasterxml.jackson.datatype.jsr310.ser.LocalDateTimeSerializer;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDateTime;
@@ -97,9 +101,15 @@ public class WorkItem {
     private String parentTitle;
 
     @Column(name = "target_start")
+    // Horário digitado por pessoa (sem fuso): fica FORA da conversão para UTC com Z (ver JacksonUtcConfig).
+    @JsonSerialize(using = LocalDateTimeSerializer.class)
+    @JsonDeserialize(using = LocalDateTimeDeserializer.class)
     private LocalDateTime targetStart;
 
     @Column(name = "target_end")
+    // Horário digitado por pessoa (sem fuso): fica FORA da conversão para UTC com Z (ver JacksonUtcConfig).
+    @JsonSerialize(using = LocalDateTimeSerializer.class)
+    @JsonDeserialize(using = LocalDateTimeDeserializer.class)
     private LocalDateTime targetEnd;
 
     @Column(name = "decided_at")
