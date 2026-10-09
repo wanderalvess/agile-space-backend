@@ -120,11 +120,20 @@ public class RetroService {
     }
 
     /**
-     * Leitura / entrada na sala: membro, OU (para o fluxo de convite por link, em que a pessoa lê o
-     * board antes de virar participante) alguém com acesso à squad do board. Board sem squadId
-     * (legado, só "team") não tem como ser verificado e continua aberto a qualquer autenticado.
+     * Leitura / entrada na sala: quem recebe o link acessa (mesma regra da Review e do Poker). Qualquer pessoa
+     * autenticada pode abrir o quadro e virar participante; o que ela pode ALTERAR continua dependendo de ser
+     * participante, criador ou admin (ver requireMember). Quadro e squad continuam ligados para listagens por
+     * squad, que exigem acesso à squad.
      */
     boolean canRead(RetroBoard board, RetroCaller caller) {
+        return caller != null && caller.id() != null && !caller.id().isBlank();
+    }
+
+    /**
+     * Listagens (por sprint) NÃO seguem a regra do link: mostram só quadros de que a pessoa participa ou de squads
+     * a que ela tem acesso. Abrir um quadro com o link é uma coisa; descobrir quadros alheios por listagem é outra.
+     */
+    boolean canList(RetroBoard board, RetroCaller caller) {
         if (caller == null || caller.id() == null || caller.id().isBlank()) return false;
         if (isMember(board, caller)) return true;
         String squadId = board.getSquadId();
@@ -134,7 +143,7 @@ public class RetroService {
 
     private void requireRead(RetroBoard board, RetroCaller caller) {
         if (!canRead(board, caller)) {
-            throw forbidden("Acesso restrito a membros da squad deste board.");
+            throw forbidden("Faça login para abrir este quadro.");
         }
     }
 
@@ -164,7 +173,7 @@ public class RetroService {
     @Transactional(readOnly = true)
     public List<RetroBoard> listBoardsBySprintId(String sprintId, RetroCaller caller) {
         return boardRepository.findBySprintIdOrderByCreatedAtDesc(sprintId).stream()
-                .filter(b -> canRead(b, caller))
+                .filter(b -> canList(b, caller))
                 .toList();
     }
 

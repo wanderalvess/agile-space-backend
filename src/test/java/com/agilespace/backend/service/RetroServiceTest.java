@@ -508,14 +508,15 @@ class RetroServiceTest {
         @DisplayName("leitura do board: outsider de board com squad → 403; membro da squad lê")
         void readAccess() {
             board.setSquadId("SQ1");
-            when(squadAccessService.matchesSquad("SQ1", "intruso", "MEMBER")).thenReturn(false);
-            when(squadAccessService.matchesSquad("SQ1", "carla", "MEMBER")).thenReturn(true);
 
-            assertStatus(HttpStatus.FORBIDDEN, () -> service.getBoard(BOARD, INTRUSO));
+            // Quem recebe o link acessa (mesma regra da Review e do Poker), mesmo de outra squad.
+            assertTrue(service.getBoard(BOARD, INTRUSO).isPresent());
             assertTrue(service.getBoard(BOARD, new RetroCaller("carla", "MEMBER")).isPresent());
             assertTrue(service.getBoard(BOARD, ANA).isPresent());
-            assertStatus(HttpStatus.FORBIDDEN, () -> service.getCards(BOARD, INTRUSO));
-            assertStatus(HttpStatus.FORBIDDEN, () -> service.getParticipants(BOARD, INTRUSO));
+            assertNotNull(service.getCards(BOARD, INTRUSO));
+            assertNotNull(service.getParticipants(BOARD, INTRUSO));
+            // Sem identidade (sem login) nada abre.
+            assertStatus(HttpStatus.FORBIDDEN, () -> service.getBoard(BOARD, new RetroCaller("", "MEMBER")));
         }
 
         @Test
@@ -579,10 +580,10 @@ class RetroServiceTest {
             when(boardRepository.findById("nada")).thenReturn(Optional.empty());
             assertStatus(HttpStatus.NOT_FOUND, () -> service.addOrUpdateParticipant(p, ANA));
 
+            // Entrar pelo link: quem é de outra squad vira participante (sempre com o próprio id, nunca criador).
             board.setSquadId("SQ1");
-            when(squadAccessService.matchesSquad("SQ1", "intruso", "MEMBER")).thenReturn(false);
             RetroParticipant q = RetroParticipant.builder().boardId(BOARD).nickname("X").build();
-            assertStatus(HttpStatus.FORBIDDEN, () -> service.addOrUpdateParticipant(q, INTRUSO));
+            assertDoesNotThrow(() -> service.addOrUpdateParticipant(q, INTRUSO));
         }
 
         @Test
