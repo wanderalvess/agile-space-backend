@@ -35,6 +35,7 @@ class RetroChatServiceTest {
     @Mock private RetroCardRepository cardRepository;
     @Mock private RetroChatMessageRepository chatMessageRepository;
     @Mock private RetroWebSocketHandler webSocketHandler;
+    @Mock private SquadAccessService squadAccessService;
 
     @InjectMocks
     private RetroService service;
@@ -51,7 +52,8 @@ class RetroChatServiceTest {
         RetroParticipant bia = new RetroParticipant();
         bia.setId("bia");
         bia.setNickname("Bia");
-        lenient().when(participantRepository.findByBoardId(BOARD)).thenReturn(List.of(ana, bia));
+        lenient().when(participantRepository.findByBoardIdAndId(BOARD, "ana")).thenReturn(Optional.of(ana));
+        lenient().when(participantRepository.findByBoardIdAndId(BOARD, "bia")).thenReturn(Optional.of(bia));
     }
 
     private RetroChatMessage msg(String channel, String text) {
