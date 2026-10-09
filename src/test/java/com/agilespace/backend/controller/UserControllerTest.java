@@ -68,7 +68,7 @@ public class UserControllerTest {
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("u1");
         when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE)).thenReturn("MEMBER");
-        when(service.saveUser(user, false)).thenReturn(user);
+        when(service.saveUser(user, false, "u1")).thenReturn(user);
 
         ResponseEntity<?> response = controller.saveUser(user, request);
 

@@ -6,6 +6,8 @@ import com.agilespace.backend.domain.UserJiraConfig;
 import com.agilespace.backend.domain.UserRole;
 import com.agilespace.backend.domain.UserTdnConfig;
 import com.agilespace.backend.dto.UserProjectAccessDto;
+import com.agilespace.backend.domain.AuditLog;
+import com.agilespace.backend.repository.AuditLogRepository;
 import com.agilespace.backend.repository.SquadMemberRepository;
 import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.repository.UserJiraConfigRepository;
@@ -44,6 +46,9 @@ public class UserService {
     @Autowired(required = false)
     private UserSessionGuard sessionGuard;
 
+    @Autowired(required = false)
+    private AuditLogRepository auditLogRepository;
+
     @Transactional(readOnly = true)
     public List<User> getAllUsers() {
         return userRepository.findAll();
@@ -68,6 +73,17 @@ public class UserService {
      */
     @Transactional
     public User saveUser(User incoming, boolean isAdmin) {
+        return saveUser(incoming, isAdmin, null);
+    }
+
+    /**
+     * Mesma regra, com o id de quem está salvando ({@code actorId}) para as guardas do painel de gestão:
+     * ninguém tira o próprio acesso de admin nem desativa a si mesmo, e o último admin ativo não é rebaixado
+     * nem desativado. Papel e ativo só mudam quando o corpo os trouxe de fato (ver User.roleExplicit).
+     * Mudanças de papel, cargo e ativo por admin vão para a auditoria.
+     */
+    @Transactional
+    public User saveUser(User incoming, boolean isAdmin, String actorId) {
         User existing = userRepository.findById(incoming.getId()).orElse(null);
         if (existing == null) {
             return null;
@@ -97,15 +113,37 @@ public class UserService {
         }
 
         if (isAdmin) {
-            if (incoming.getJobTitle() != null) existing.setJobTitle(incoming.getJobTitle());
-            if (incoming.getRole() != null) {
+            if (incoming.getJobTitle() != null && !incoming.getJobTitle().equals(existing.getJobTitle())) {
+                audit(actorId, "USER_JOBTITLE_CHANGED", existing, "cargo: " + existing.getJobTitle() + " -> " + incoming.getJobTitle());
+                existing.setJobTitle(incoming.getJobTitle());
+            }
+            if (incoming.isRoleExplicit() && incoming.getRole() != null) {
                 if (!UserRole.isValid(incoming.getRole())) {
                     throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                             "role inválida: use ADMIN, LEAD ou MEMBER");
                 }
-                existing.setRole(incoming.getRole().toUpperCase());
+                String newRole = incoming.getRole().toUpperCase();
+                String oldRole = existing.getRole() == null ? "MEMBER" : existing.getRole().toUpperCase();
+                if (!newRole.equals(oldRole)) {
+                    if ("ADMIN".equals(oldRole)) {
+                        requireCanLoseAdmin(existing, actorId, "rebaixar");
+                    }
+                    audit(actorId, "USER_ROLE_CHANGED", existing, "papel: " + oldRole + " -> " + newRole);
+                    existing.setRole(newRole);
+                }
             }
-            existing.setActive(incoming.isActive());
+            if (incoming.isActiveExplicit() && incoming.isActive() != existing.isActive()) {
+                if (!incoming.isActive()) {
+                    if (existing.getId().equals(actorId)) {
+                        throw new ResponseStatusException(HttpStatus.CONFLICT, "Você não pode desativar a sua própria conta.");
+                    }
+                    if ("ADMIN".equalsIgnoreCase(existing.getRole())) {
+                        requireCanLoseAdmin(existing, actorId, "desativar");
+                    }
+                }
+                audit(actorId, incoming.isActive() ? "USER_ACTIVATED" : "USER_DEACTIVATED", existing, null);
+                existing.setActive(incoming.isActive());
+            }
             if (incoming.getDefaultProjectId() != null) existing.setDefaultProjectId(incoming.getDefaultProjectId());
         }
 
@@ -115,6 +153,32 @@ public class UserService {
             sessionGuard.evict(saved.getId());
         }
         return saved;
+    }
+
+    private void requireCanLoseAdmin(User target, String actorId, String verb) {
+        if (target.getId().equals(actorId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Você não pode " + verb + " o seu próprio acesso de administrador. Peça a outro administrador.");
+        }
+        if (target.isActive() && userRepository.countByRoleIgnoreCaseAndActiveTrue("ADMIN") <= 1) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Não é possível " + verb + " o último administrador ativo. Promova outra pessoa antes.");
+        }
+    }
+
+    private void audit(String actorId, String action, User target, String detail) {
+        if (auditLogRepository == null) return;
+        String actor = actorId;
+        if (actorId != null) {
+            actor = userRepository.findById(actorId).map(User::getEmail).orElse(actorId);
+        }
+        auditLogRepository.save(AuditLog.builder()
+                .id(java.util.UUID.randomUUID().toString())
+                .action(action)
+                .performedBy(actor != null ? actor : "ADMIN")
+                .details("Conta " + target.getEmail() + (detail != null ? " (" + detail + ")" : ""))
+                .createdAt(LocalDateTime.now())
+                .build());
     }
 
     private void requireProjectAccess(User user, String projectId) {

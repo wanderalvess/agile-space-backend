@@ -48,7 +48,15 @@ public class ProductionSecretsValidator {
             problems.add("APP_ENCRYPTION_SECRET ausente ou com valor de dev (gere com: openssl rand -base64 32)");
         }
         if (isBlank(allowedEmailDomain)) {
-            problems.add("ALLOWED_EMAIL_DOMAIN vazio: o cadastro ficaria aberto a qualquer e-mail (use totvs.com.br)");
+            problems.add("ALLOWED_EMAIL_DOMAIN vazio: o cadastro ficaria aberto a qualquer e-mail (use totvs.com.br,ext.totvs.com.br)");
+        } else {
+            for (String domain : allowedEmailDomain.split(",", -1)) {
+                String d = domain.trim();
+                if (d.isEmpty() || d.contains("@") || d.contains(" ") || !d.contains(".")) {
+                    problems.add("ALLOWED_EMAIL_DOMAIN inválido (\"" + d + "\"): use domínios separados por vírgula, sem @ (ex.: totvs.com.br,ext.totvs.com.br)");
+                    break;
+                }
+            }
         }
 
         if (!problems.isEmpty()) {

@@ -12,6 +12,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import com.agilespace.backend.domain.User;
+import com.agilespace.backend.repository.UserRepository;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
+
 import java.util.List;
 import java.util.Map;
 
@@ -24,6 +29,9 @@ public class AdminController {
 
     @Autowired
     private PasswordResetService passwordResetService;
+
+    @Autowired
+    private UserRepository userRepository;
 
     @GetMapping("/stats")
     public ResponseEntity<Map<String, Object>> getStats() {
@@ -99,5 +107,19 @@ public class AdminController {
             HttpServletRequest request) {
         String approvedBy = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_EMAIL);
         return ResponseEntity.ok(passwordResetService.approveReset(id, approvedBy));
+    }
+
+    /**
+     * Redefinição de senha iniciada pelo admin, para a pessoa que não consegue (ou não quer) usar o
+     * "Esqueci a senha": gera e aprova o pedido de uma vez e devolve a senha temporária, que o admin repassa
+     * fora do sistema. Passa pelo mesmo caminho do fluxo normal (auditoria, senha temporária apagada após 1 h).
+     */
+    @PostMapping("/users/{id}/reset-password")
+    public ResponseEntity<PasswordResetRequest> resetUserPassword(@PathVariable String id, HttpServletRequest request) {
+        User target = userRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado"));
+        String approvedBy = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_EMAIL);
+        PasswordResetRequest pending = passwordResetService.requestReset(target.getEmail());
+        return ResponseEntity.ok(passwordResetService.approveReset(pending.getId(), approvedBy));
     }
 }

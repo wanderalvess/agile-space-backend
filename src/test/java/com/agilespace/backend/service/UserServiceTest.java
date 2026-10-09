@@ -113,8 +113,8 @@ class UserServiceTest {
             User incoming = User.builder()
                     .id("user-123")
                     .name("Wanderson Alves")
-                    .role("ADMIN")
                     .build();
+            incoming.setRole("ADMIN"); // como o Jackson faz: marca que o corpo trouxe o papel
 
             when(userRepository.findById("user-123")).thenReturn(Optional.of(sampleUser));
             when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
@@ -201,7 +201,8 @@ class UserServiceTest {
         @Test
         @DisplayName("Deve rejeitar papel inválido quando fornecido por ADMIN")
         void shouldRejectInvalidRoleFromAdmin() {
-            User incoming = User.builder().id("user-123").name("Wanderson").role("SUPER_GOD").build();
+            User incoming = User.builder().id("user-123").name("Wanderson").build();
+            incoming.setRole("SUPER_GOD");
             when(userRepository.findById("user-123")).thenReturn(Optional.of(sampleUser));
 
             assertThrows(ResponseStatusException.class, () -> service.saveUser(incoming, true));

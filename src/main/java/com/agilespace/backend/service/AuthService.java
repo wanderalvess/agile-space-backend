@@ -60,6 +60,42 @@ public class AuthService {
     @Value("${app.security.registration-enabled:true}")
     private boolean registrationEnabled = true;
 
+    /** Domínios permitidos no autocadastro (lista separada por vírgula, sem "@"). Vazio = qualquer e-mail (dev/teste). */
+    List<String> allowedDomains() {
+        if (allowedEmailDomain == null || allowedEmailDomain.isBlank()) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(allowedEmailDomain.split(","))
+                .map(d -> d.trim().toLowerCase())
+                .map(d -> d.startsWith("@") ? d.substring(1) : d)
+                .filter(d -> !d.isEmpty())
+                .toList();
+    }
+
+    /**
+     * Casamento exato do domínio: exatamente um "@" e o que vem depois dele igual a um domínio da lista.
+     * Evita "evil-totvs.com.br" (endsWith frouxo) e "a@x.com@totvs.com.br".
+     */
+    boolean isEmailDomainAllowed(String email) {
+        List<String> domains = allowedDomains();
+        if (domains.isEmpty()) {
+            return true;
+        }
+        if (email == null) {
+            return false;
+        }
+        String clean = email.trim().toLowerCase();
+        int at = clean.indexOf('@');
+        if (at <= 0 || at != clean.lastIndexOf('@')) {
+            return false;
+        }
+        return domains.contains(clean.substring(at + 1));
+    }
+
+    private String describeAllowedDomains() {
+        return String.join(", ", allowedDomains().stream().map(d -> "@" + d).toList());
+    }
+
     /**
      * Realiza o login do usuário, valida a senha com PBKDF2 e resolve seus projetos/cargos.
      */
@@ -81,6 +117,9 @@ public class AuthService {
         if (!user.isActive()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Usuário inativo no sistema");
         }
+
+        user.setLastLoginAt(java.time.LocalDateTime.now());
+        userRepository.save(user);
 
         // Resolve projetos e lideranças
         UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(user);
@@ -144,10 +183,9 @@ public class AuthService {
                     "O cadastro está fechado. Peça acesso a um administrador.");
         }
 
-        if (allowedEmailDomain != null && !allowedEmailDomain.isBlank()
-                && !cleanEmail.endsWith("@" + allowedEmailDomain.toLowerCase())) {
+        if (!isEmailDomainAllowed(cleanEmail)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Cadastro restrito a e-mails corporativos @" + allowedEmailDomain);
+                    "Cadastro restrito a e-mails corporativos: " + describeAllowedDomains());
         }
 
         Optional<User> existingUser = userRepository.findByEmail(cleanEmail);

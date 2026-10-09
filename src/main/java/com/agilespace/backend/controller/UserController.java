@@ -98,7 +98,7 @@ public class UserController {
         if (user.getId() == null || user.getId().isBlank()) {
             user.setId(authUserId);
         }
-        User saved = service.saveUser(user, isAdmin);
+        User saved = service.saveUser(user, isAdmin, authUserId);
         if (saved == null) {
             return ResponseEntity.notFound().build();
         }

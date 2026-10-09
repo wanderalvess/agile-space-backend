@@ -90,6 +90,33 @@ public class User {
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
+    /** Último login por senha (preenchido pelo AuthService.login). Null = nunca entrou desde que o campo existe. */
+    @Column(name = "last_login_at")
+    private LocalDateTime lastLoginAt;
+
+    /**
+     * Marcam se o corpo da requisição trouxe "role"/"active" de verdade. O getter de role devolve "MEMBER" e
+     * active nasce true quando omitidos; sem este rastro um admin salvando só o nome rebaixaria e reativaria
+     * a conta. Só o Jackson (setters) liga; entidade carregada do banco e builder não ligam.
+     */
+    @Transient
+    @JsonIgnore
+    private boolean roleExplicit;
+
+    @Transient
+    @JsonIgnore
+    private boolean activeExplicit;
+
+    public void setRole(String role) {
+        this.role = role;
+        this.roleExplicit = true;
+    }
+
+    public void setActive(boolean active) {
+        this.active = active;
+        this.activeExplicit = true;
+    }
+
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 

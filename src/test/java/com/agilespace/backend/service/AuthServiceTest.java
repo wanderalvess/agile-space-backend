@@ -205,7 +205,7 @@ public class AuthServiceTest {
 
         assertEquals("DDWMISSI", user.getDefaultProjectId());
         assertEquals("DDWMISSI", response.getActiveProjectId());
-        verify(userRepository).save(user);
+        verify(userRepository, atLeastOnce()).save(user);
     }
 
     @Test
@@ -218,7 +218,8 @@ public class AuthServiceTest {
                 LoginRequestDto.builder().email("joao.silva@empresa.com.br").password(RAW_PASSWORD).build());
 
         assertNull(response.getActiveProjectId());
-        verify(userRepository, never()).save(any());
+        assertNull(user.getDefaultProjectId());
+        assertNotNull(user.getLastLoginAt(), "login registra o último acesso");
     }
 
     // ---------- register ----------
@@ -267,6 +268,28 @@ public class AuthServiceTest {
 
         assertDoesNotThrow(() -> service.register(RegisterRequestDto.builder()
                 .email("novo@totvs.com.br").name("Novo").password(RAW_PASSWORD).build()));
+    }
+
+    @Test
+    public void testRegisterAcceptsBothCorporateDomainsAndRejectsLookalikes() {
+        ReflectionTestUtils.setField(service, "allowedEmailDomain", "totvs.com.br, ext.totvs.com.br");
+        when(userRepository.findByEmail(anyString())).thenReturn(Optional.empty());
+        when(projectMemberRoleRepository.findByEmailIgnoreCase(anyString())).thenReturn(List.of());
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(userProjectResolverService.resolveUserAccess(any(User.class))).thenReturn(accessWith());
+
+        assertDoesNotThrow(() -> service.register(RegisterRequestDto.builder()
+                .email("novo@totvs.com.br").name("Novo").password(RAW_PASSWORD).build()));
+        assertDoesNotThrow(() -> service.register(RegisterRequestDto.builder()
+                .email("Terceiro@EXT.Totvs.com.br").name("Ext").password(RAW_PASSWORD).build()));
+
+        for (String bad : new String[] {"alguem@gmail.com", "a@evil-totvs.com.br", "a@totvs.com.br.evil.com",
+                "a@sub.totvs.com.br", "a.b@x.com@totvs.com.br", "@totvs.com.br", "semarroba", "a@ext.totvs.com"}) {
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> service.register(
+                    RegisterRequestDto.builder().email(bad).name("X").password(RAW_PASSWORD).build()), bad);
+            assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode(), bad);
+            assertTrue(ex.getReason().contains("@totvs.com.br") && ex.getReason().contains("@ext.totvs.com.br"));
+        }
     }
 
     @Test
