@@ -1,7 +1,10 @@
 package com.agilespace.backend.config;
 
+import com.agilespace.backend.security.BoardExistsHandshakeInterceptor;
 import com.agilespace.backend.security.JwtHandshakeInterceptor;
 import com.agilespace.backend.security.RetroBoardHandshakeInterceptor;
+import com.agilespace.backend.service.BrainstormingService;
+import com.agilespace.backend.service.HealthCheckService;
 import com.agilespace.backend.websocket.BrainstormingWebSocketHandler;
 import com.agilespace.backend.websocket.HealthCheckWebSocketHandler;
 import com.agilespace.backend.websocket.PokerWebSocketHandler;
@@ -28,6 +31,8 @@ public class WebSocketConfig implements WebSocketConfigurer {
     private final ShowcaseWebSocketHandler showcaseWebSocketHandler;
     private final JwtHandshakeInterceptor jwtHandshakeInterceptor;
     private final RetroBoardHandshakeInterceptor retroBoardHandshakeInterceptor;
+    private final HealthCheckService healthCheckService;
+    private final BrainstormingService brainstormingService;
 
     @Value("${app.cors.allowed-origins}")
     private List<String> allowedOrigins;
@@ -45,10 +50,10 @@ public class WebSocketConfig implements WebSocketConfigurer {
                 .addInterceptors(jwtHandshakeInterceptor)
                 .setAllowedOrigins(origins);
         registry.addHandler(healthCheckWebSocketHandler, "/ws/health-check/*")
-                .addInterceptors(jwtHandshakeInterceptor)
+                .addInterceptors(jwtHandshakeInterceptor, new BoardExistsHandshakeInterceptor(healthCheckService::boardExists))
                 .setAllowedOrigins(origins);
         registry.addHandler(brainstormingWebSocketHandler, "/ws/brainstorming/*")
-                .addInterceptors(jwtHandshakeInterceptor)
+                .addInterceptors(jwtHandshakeInterceptor, new BoardExistsHandshakeInterceptor(brainstormingService::boardExists))
                 .setAllowedOrigins(origins);
         registry.addHandler(showcaseWebSocketHandler, "/ws/showcase/*")
                 .addInterceptors(jwtHandshakeInterceptor)

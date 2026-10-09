@@ -154,4 +154,73 @@ public class ActionPlanControllerTest {
         assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
         verify(service, never()).addParticipant(any(), any());
     }
+
+    @Test
+    public void testCreateTask_authorComesFromTokenAndBoardFromPath() {
+        UUID id = UUID.randomUUID();
+        when(service.getBoardById(id)).thenReturn(new ActionPlan());
+        ActionPlanTask task = new ActionPlanTask();
+        when(service.createTask(id, task, "u1")).thenReturn(task);
+
+        ResponseEntity<ActionPlanTask> response = controller.createTask(id, task, mockRequest("u1", "MEMBER"));
+
+        assertEquals(HttpStatus.CREATED, response.getStatusCode());
+        verify(service).createTask(id, task, "u1");
+    }
+
+    @Test
+    public void testUpdateTask_privateBoardOfTaskRejectsOutsider() {
+        UUID taskId = UUID.randomUUID();
+        UUID boardId = UUID.randomUUID();
+        ActionPlan board = new ActionPlan();
+        board.setIsPublic(false);
+        board.setCreatorId("dono");
+        when(service.getTaskBoardId(taskId)).thenReturn(boardId);
+        when(service.getBoardById(boardId)).thenReturn(board);
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> controller.updateTask(taskId, new ActionPlanTask(), mockRequest("intruso", "MEMBER")));
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+        verify(service, never()).updateTask(any(), any());
+    }
+
+    @Test
+    public void testUpdateAndDeleteTask_unknownTaskIs404() {
+        UUID taskId = UUID.randomUUID();
+        when(service.getTaskBoardId(taskId)).thenThrow(new IllegalArgumentException("nope"));
+
+        assertEquals(HttpStatus.NOT_FOUND, assertThrows(ResponseStatusException.class,
+                () -> controller.updateTask(taskId, new ActionPlanTask(), mockRequest("u1", "MEMBER"))).getStatusCode());
+        assertEquals(HttpStatus.NOT_FOUND, assertThrows(ResponseStatusException.class,
+                () -> controller.deleteTask(taskId, mockRequest("u1", "MEMBER"))).getStatusCode());
+    }
+
+    @Test
+    public void testAddParticipant_onlySelfUnlessCreatorOrAdmin() {
+        UUID id = UUID.randomUUID();
+        ActionPlan board = new ActionPlan();
+        board.setCreatorId("dono");
+        when(service.getBoardById(id)).thenReturn(board);
+        when(service.addParticipant(any(), any())).thenReturn(board);
+
+        // sem parâmetro: entra quem chama
+        controller.addParticipant(id, null, mockRequest("u1", "MEMBER"));
+        verify(service).addParticipant(id, "u1");
+
+        // tentar adicionar outra pessoa é proibido
+        assertEquals(HttpStatus.FORBIDDEN, assertThrows(ResponseStatusException.class,
+                () -> controller.addParticipant(id, "u2", mockRequest("u1", "MEMBER"))).getStatusCode());
+
+        // o criador pode
+        controller.addParticipant(id, "u2", mockRequest("dono", "MEMBER"));
+        verify(service).addParticipant(id, "u2");
+    }
+
+    @Test
+    public void testErrorHandler_keepsPortugueseMessage() {
+        ResponseEntity<java.util.Map<String, String>> response = controller.handleStatus(
+                new ResponseStatusException(HttpStatus.BAD_REQUEST, "O título é obrigatório."));
+
+        assertEquals("O título é obrigatório.", response.getBody().get("message"));
+    }
 }

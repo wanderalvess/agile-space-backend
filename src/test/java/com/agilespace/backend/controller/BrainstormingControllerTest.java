@@ -1,12 +1,15 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.BrainstormingBoard;
+import com.agilespace.backend.domain.BrainstormingIdea;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.BrainstormingService;
+import com.agilespace.backend.service.CeremonyCaller;
 import com.agilespace.backend.service.SquadAccessService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
@@ -16,10 +19,12 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 public class BrainstormingControllerTest {
@@ -36,6 +41,13 @@ public class BrainstormingControllerTest {
     @BeforeEach
     public void setup() {
         MockitoAnnotations.openMocks(this);
+    }
+
+    private HttpServletRequest request(String userId, String role) {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        lenient().when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn(userId);
+        lenient().when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE)).thenReturn(role);
+        return request;
     }
 
     @Test
@@ -61,43 +73,65 @@ public class BrainstormingControllerTest {
     }
 
     @Test
-    public void testGetBoardFound() {
-        BrainstormingBoard board = new BrainstormingBoard();
-        when(service.getBoard("123")).thenReturn(Optional.of(board));
-        
-        ResponseEntity<BrainstormingBoard> response = controller.getBoard("123");
-        
-        assertEquals(HttpStatus.OK, response.getStatusCode());
+    public void testGetBoardFoundAndNotFound() {
+        when(service.getBoard("123")).thenReturn(Optional.of(new BrainstormingBoard()));
+        when(service.getBoard("999")).thenReturn(Optional.empty());
+
+        assertEquals(HttpStatus.OK, controller.getBoard("123").getStatusCode());
+        assertEquals(HttpStatus.NOT_FOUND, controller.getBoard("999").getStatusCode());
     }
 
     @Test
-    public void testGetBoardNotFound() {
-        when(service.getBoard("123")).thenReturn(Optional.empty());
-        
-        ResponseEntity<BrainstormingBoard> response = controller.getBoard("123");
-        
-        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
-    }
-
-    @Test
-    public void testSaveOrUpdateBoard() {
+    public void testSaveBoard_passesCallerFromTokenAndReturns201OnCreate() {
         BrainstormingBoard board = new BrainstormingBoard();
-        when(service.saveOrUpdateBoard(board)).thenReturn(board);
-        
-        ResponseEntity<BrainstormingBoard> response = controller.saveOrUpdateBoard(board);
-        
+        when(service.saveOrUpdateBoard(eq(board), any(CeremonyCaller.class)))
+                .thenReturn(new BrainstormingService.Saved<>(board, true));
+
+        ResponseEntity<BrainstormingBoard> response = controller.saveOrUpdateBoard(board, request("u1", "MEMBER"));
+
         assertEquals(HttpStatus.CREATED, response.getStatusCode());
+        ArgumentCaptor<CeremonyCaller> caller = ArgumentCaptor.forClass(CeremonyCaller.class);
+        verify(service).saveOrUpdateBoard(eq(board), caller.capture());
+        assertEquals("u1", caller.getValue().id());
+        assertEquals("MEMBER", caller.getValue().role());
     }
 
     @Test
-    public void testDeleteBoard() {
-        HttpServletRequest request = mock(HttpServletRequest.class);
-        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE)).thenReturn("ADMIN");
-        doNothing().when(service).deleteBoard("123");
+    public void testSaveIdea_updateReturns200() {
+        BrainstormingIdea idea = new BrainstormingIdea();
+        when(service.saveOrUpdateIdea(eq("b1"), eq(idea), any(CeremonyCaller.class)))
+                .thenReturn(new BrainstormingService.Saved<>(idea, false));
 
-        ResponseEntity<Void> response = controller.deleteBoard("123", request);
+        assertEquals(HttpStatus.OK, controller.saveOrUpdateIdea("b1", idea, request("u1", "MEMBER")).getStatusCode());
+    }
+
+    @Test
+    public void testToggleVote_usesIdentityFromToken() {
+        BrainstormingIdea idea = new BrainstormingIdea();
+        when(service.toggleVote(eq("b1"), eq("i1"), any(CeremonyCaller.class))).thenReturn(idea);
+
+        ResponseEntity<BrainstormingIdea> response = controller.toggleVote("b1", "i1", request("u7", "MEMBER"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        ArgumentCaptor<CeremonyCaller> caller = ArgumentCaptor.forClass(CeremonyCaller.class);
+        verify(service).toggleVote(eq("b1"), eq("i1"), caller.capture());
+        assertEquals("u7", caller.getValue().id());
+    }
+
+    @Test
+    public void testDeleteBoard_delegatesAuthorizationToService() {
+        ResponseEntity<Void> response = controller.deleteBoard("123", request("u1", "MEMBER"));
 
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
-        verify(service, times(1)).deleteBoard("123");
+        verify(service).deleteBoard(eq("123"), any(CeremonyCaller.class));
+    }
+
+    @Test
+    public void testErrorHandler_keepsPortugueseMessage() {
+        ResponseEntity<Map<String, String>> response = controller.handleStatus(
+                new ResponseStatusException(HttpStatus.FORBIDDEN, "Apenas o facilitador pode alterar a sessão."));
+
+        assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
+        assertEquals("Apenas o facilitador pode alterar a sessão.", response.getBody().get("message"));
     }
 }

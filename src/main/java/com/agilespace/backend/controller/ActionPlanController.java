@@ -4,8 +4,8 @@ import com.agilespace.backend.domain.ActionPlan;
 import com.agilespace.backend.domain.ActionPlanTask;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.ActionPlanService;
+import com.agilespace.backend.service.CeremonyCaller;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -23,39 +24,41 @@ public class ActionPlanController {
 
     private final ActionPlanService actionPlanService;
 
+    private static CeremonyCaller caller(HttpServletRequest request) {
+        return new CeremonyCaller(
+                (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID),
+                (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE));
+    }
+
     /**
-     * Board público (padrão): qualquer autenticado edita. Board privado: só criador,
+     * Board público (padrão): qualquer autenticado com o link lê e edita. Board privado: só criador,
      * participante já adicionado ou ADMIN. Antes disso qualquer usuário autenticado
      * editava/apagava tarefa de qualquer board trocando o taskId.
      */
-    private void requireBoardAccess(UUID boardId, HttpServletRequest request) {
-        String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
-        if ("ADMIN".equalsIgnoreCase(role)) {
-            return;
-        }
+    private ActionPlan requireBoardAccess(UUID boardId, HttpServletRequest request) {
         ActionPlan board;
         try {
             board = actionPlanService.getBoardById(boardId);
         } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Action Plan not found with id: " + boardId);
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Plano de ação não encontrado.");
         }
-        if (Boolean.TRUE.equals(board.getIsPublic())) {
-            return;
+        CeremonyCaller caller = caller(request);
+        if (caller.isAdmin() || Boolean.TRUE.equals(board.getIsPublic())) {
+            return board;
         }
-        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
-        boolean isCreator = callerId != null && callerId.equals(board.getCreatorId());
-        boolean isParticipant = callerId != null && board.getParticipantIds().contains(callerId);
+        boolean isCreator = caller.is(board.getCreatorId());
+        boolean isParticipant = caller.isAuthenticated() && board.getParticipantIds().contains(caller.id());
         if (!isCreator && !isParticipant) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a participantes deste board.");
         }
+        return board;
     }
 
     @PostMapping
-    public ResponseEntity<ActionPlan> createBoard(@Valid @RequestBody ActionPlan board, HttpServletRequest request) {
+    public ResponseEntity<ActionPlan> createBoard(@RequestBody ActionPlan board, HttpServletRequest request) {
         // creatorId vem sempre do token validado, nunca do corpo — senão qualquer
         // chamador autenticado poderia criar um board se passando por outra pessoa.
-        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
-        board.setCreatorId(callerId);
+        board.setCreatorId(caller(request).id());
         return ResponseEntity.status(HttpStatus.CREATED).body(actionPlanService.createBoard(board));
     }
 
@@ -76,28 +79,25 @@ public class ActionPlanController {
 
     @GetMapping("/{id}")
     public ResponseEntity<ActionPlan> getBoardById(@PathVariable("id") UUID id, HttpServletRequest request) {
-        try {
-            requireBoardAccess(id, request);
-            return ResponseEntity.ok(actionPlanService.getBoardById(id));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
+        return ResponseEntity.ok(requireBoardAccess(id, request));
     }
 
+    /**
+     * Entrar no plano: o participante adicionado é sempre quem chama. ADMIN e o criador podem informar outro
+     * {@code participantId}. Em board privado exige acesso prévio (senão seria a porta dos fundos do check).
+     */
     @PostMapping("/{id}/participants")
     public ResponseEntity<ActionPlan> addParticipant(
             @PathVariable("id") UUID id,
-            @RequestParam("participantId") String participantId,
+            @RequestParam(value = "participantId", required = false) String participantId,
             HttpServletRequest request) {
-        try {
-            // Sem essa checagem, addParticipant era a porta dos fundos de requireBoardAccess:
-            // qualquer autenticado se auto-adicionava a um board privado e virava "participante"
-            // legítimo pros checks de updateTask/deleteTask.
-            requireBoardAccess(id, request);
-            return ResponseEntity.ok(actionPlanService.addParticipant(id, participantId));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
+        ActionPlan board = requireBoardAccess(id, request);
+        CeremonyCaller caller = caller(request);
+        String target = participantId == null || participantId.isBlank() ? caller.id() : participantId;
+        if (!caller.is(target) && !caller.isAdmin() && !caller.is(board.getCreatorId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só é possível adicionar a si mesmo.");
         }
+        return ResponseEntity.ok(actionPlanService.addParticipant(id, target));
     }
 
     // Task Mappings
@@ -110,37 +110,42 @@ public class ActionPlanController {
     @PostMapping("/{id}/tasks")
     public ResponseEntity<ActionPlanTask> createTask(
             @PathVariable("id") UUID id,
-            @Valid @RequestBody ActionPlanTask task,
+            @RequestBody ActionPlanTask task,
             HttpServletRequest request) {
-        try {
-            requireBoardAccess(id, request);
-            return ResponseEntity.status(HttpStatus.CREATED).body(actionPlanService.createTask(id, task));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
+        requireBoardAccess(id, request);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(actionPlanService.createTask(id, task, caller(request).id()));
     }
 
     @PutMapping("/tasks/{taskId}")
     public ResponseEntity<ActionPlanTask> updateTask(
             @PathVariable("taskId") UUID taskId,
-            @Valid @RequestBody ActionPlanTask task,
+            @RequestBody ActionPlanTask task,
             HttpServletRequest request) {
-        try {
-            requireBoardAccess(actionPlanService.getTaskBoardId(taskId), request);
-            return ResponseEntity.ok(actionPlanService.updateTask(taskId, task));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
+        requireBoardAccess(taskBoardId(taskId), request);
+        return ResponseEntity.ok(actionPlanService.updateTask(taskId, task));
     }
 
     @DeleteMapping("/tasks/{taskId}")
     public ResponseEntity<Void> deleteTask(@PathVariable("taskId") UUID taskId, HttpServletRequest request) {
+        requireBoardAccess(taskBoardId(taskId), request);
+        actionPlanService.deleteTask(taskId);
+        return ResponseEntity.noContent().build();
+    }
+
+    private UUID taskBoardId(UUID taskId) {
         try {
-            requireBoardAccess(actionPlanService.getTaskBoardId(taskId), request);
-            actionPlanService.deleteTask(taskId);
-            return ResponseEntity.noContent().build();
+            return actionPlanService.getTaskBoardId(taskId);
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tarefa não encontrada.");
         }
+    }
+
+    /** Em produção o Spring omite a mensagem das respostas de erro; as dos fluxos (em português) precisam chegar à tela. */
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<Map<String, String>> handleStatus(ResponseStatusException ex) {
+        return ResponseEntity.status(ex.getStatusCode()).body(Map.of(
+                "error", ex.getStatusCode().toString(),
+                "message", ex.getReason() == null ? "Não foi possível concluir a operação." : ex.getReason()));
     }
 }
