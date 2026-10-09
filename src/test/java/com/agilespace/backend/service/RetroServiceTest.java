@@ -499,6 +499,37 @@ class RetroServiceTest {
         }
 
         @Test
+        @DisplayName("transfer-control com o facilitador conectado → 409 e nada muda (participante comum)")
+        void transferControlBlockedWhileFacilitatorPresent() {
+            when(webSocketHandler.isUserPresent(BOARD, "boss")).thenReturn(true);
+
+            assertStatus(HttpStatus.CONFLICT, () -> service.transferControl(BOARD, ANA));
+            assertEquals("boss", board.getCreatorId());
+            verify(boardRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("POST legado de 'assumir controle' também respeita a presença do facilitador")
+        void legacyClaimBlockedWhileFacilitatorPresent() {
+            when(webSocketHandler.isUserPresent(BOARD, "boss")).thenReturn(true);
+
+            assertStatus(HttpStatus.CONFLICT,
+                    () -> service.saveOrUpdateBoard(RetroBoard.builder().id(BOARD).title("x").creatorId("ana").build(), ANA));
+            assertEquals("boss", board.getCreatorId());
+        }
+
+        @Test
+        @DisplayName("ADMIN assume mesmo com o facilitador conectado; facilitador reassumir não falha")
+        void adminAndCurrentFacilitatorAlwaysAllowed() {
+            lenient().when(webSocketHandler.isUserPresent(BOARD, "boss")).thenReturn(true);
+            when(participantRepository.findByBoardId(BOARD)).thenReturn(List.of());
+
+            assertEquals("root", service.transferControl(BOARD, ADMIN).getCreatorId());
+            board.setCreatorId("boss");
+            assertEquals("boss", service.transferControl(BOARD, CREATOR).getCreatorId());
+        }
+
+        @Test
         @DisplayName("transfer-control por quem não é do board → 403")
         void transferControlOutsiderForbidden() {
             assertStatus(HttpStatus.FORBIDDEN, () -> service.transferControl(BOARD, INTRUSO));

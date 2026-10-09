@@ -245,6 +245,7 @@ public class RetroService {
 
         requireMember(existing, caller);
         if (caller.id().equals(incoming.getCreatorId()) && !caller.id().equals(existing.getCreatorId())) {
+            requireFacilitatorAbsent(existing, caller);
             return new Saved<>(doTransferControl(existing, caller), false);
         }
         return new Saved<>(existing, false);
@@ -458,13 +459,23 @@ public class RetroService {
 
     /**
      * "Assumir controle": o chamador (participante) vira o criador e a flag isCreator dos demais
-     * é limpa — uma única flag no board. Mantém o comportamento do produto: qualquer participante pode assumir.
+     * é limpa — uma única flag no board. Participante comum só assume com o facilitador ausente
+     * (sem WebSocket aberto no board, com tolerância para reconexão); ADMIN sempre pode e quem já
+     * é o facilitador não muda nada.
      */
     @Transactional
     public RetroBoard transferControl(String boardId, RetroCaller caller) {
         RetroBoard board = requireBoardForUpdate(boardId);
         requireMember(board, caller);
+        requireFacilitatorAbsent(board, caller);
         return doTransferControl(board, caller);
+    }
+
+    private void requireFacilitatorAbsent(RetroBoard board, RetroCaller caller) {
+        if (caller.isAdmin() || isCreator(board, caller)) return;
+        if (board.getCreatorId() != null && webSocketHandler.isUserPresent(board.getId(), board.getCreatorId())) {
+            throw conflict("O facilitador está conectado. Só é possível assumir o controle quando ele estiver ausente.");
+        }
     }
 
     private RetroBoard doTransferControl(RetroBoard board, RetroCaller caller) {

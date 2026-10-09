@@ -21,6 +21,10 @@ public class RetroWebSocketHandler extends TextWebSocketHandler {
 
     private static final int SEND_TIME_LIMIT_MS = 10_000;
     private static final int BUFFER_SIZE_LIMIT = 512 * 1024;
+    // Tolerância para reconexão (o cliente reconecta em 5s) antes de considerar alguém ausente.
+    private static final long ABSENCE_GRACE_MS = 45_000;
+    // "boardId|userId" -> instante da última desconexão (limpa ao reconectar e por varredura lazy)
+    private static final Map<String, Long> lastDisconnect = new ConcurrentHashMap<>();
     private static final Map<String, Set<WebSocketSession>> boardSessions = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper;
 
@@ -35,6 +39,8 @@ public class RetroWebSocketHandler extends TextWebSocketHandler {
             // sendMessage concorrente na mesma sessão (broadcasts de threads de requisição diferentes)
             // corrompe o frame; o decorator serializa os envios e limita o buffer de um cliente lento.
             WebSocketSession safe = new ConcurrentWebSocketSessionDecorator(session, SEND_TIME_LIMIT_MS, BUFFER_SIZE_LIMIT);
+            Object uid = session.getAttributes().get("userId");
+            if (uid != null) lastDisconnect.remove(boardId + "|" + uid);
             boardSessions.computeIfAbsent(boardId, k -> new CopyOnWriteArraySet<>()).add(safe);
             log.debug("Retro WebSocket connected. BoardId: {}, SessionId: {}", boardId, session.getId());
         }
@@ -49,6 +55,12 @@ public class RetroWebSocketHandler extends TextWebSocketHandler {
                 sessions.removeIf(s -> s.getId().equals(session.getId()));
                 return sessions.isEmpty() ? null : sessions;
             });
+            Object uid = session.getAttributes().get("userId");
+            if (uid != null) {
+                long now = System.currentTimeMillis();
+                lastDisconnect.values().removeIf(t -> now - t > ABSENCE_GRACE_MS);
+                lastDisconnect.put(boardId + "|" + uid, now);
+            }
             log.debug("Retro WebSocket closed. BoardId: {}, SessionId: {}", boardId, session.getId());
         }
     }
@@ -92,6 +104,21 @@ public class RetroWebSocketHandler extends TextWebSocketHandler {
                 log.error("Failed to serialize or broadcast event '{}' for board {}", eventType, boardId, e);
             }
         }
+    }
+
+    /**
+     * O usuário está presente no board: tem sessão aberta ou desconectou há menos que a tolerância
+     * de reconexão. Usado para decidir se o facilitador está ausente ("assumir controle").
+     */
+    public boolean isUserPresent(String boardId, String userId) {
+        if (boardId == null || userId == null) return false;
+        Set<WebSocketSession> sessions = boardSessions.get(boardId);
+        if (sessions != null && sessions.stream().anyMatch(s -> s.isOpen()
+                && userId.equals(String.valueOf(s.getAttributes().get("userId"))))) {
+            return true;
+        }
+        Long left = lastDisconnect.get(boardId + "|" + userId);
+        return left != null && System.currentTimeMillis() - left <= ABSENCE_GRACE_MS;
     }
 
     public void broadcastRefresh(String boardId) {
