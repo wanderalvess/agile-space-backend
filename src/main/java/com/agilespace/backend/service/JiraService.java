@@ -48,7 +48,15 @@ public class JiraService {
     private final ObjectMapper objectMapper;
 
     public JiraService() {
-        SimpleClientHttpRequestFactory strictFactory = new SimpleClientHttpRequestFactory();
+        // Redirecionamento NUNCA é seguido pelo HttpURLConnection: o Bearer iria junto para onde o Location
+        // mandar. followSameHostRedirects segue só redirecionamento https para o MESMO host, revalidando cada salto.
+        SimpleClientHttpRequestFactory strictFactory = new SimpleClientHttpRequestFactory() {
+            @Override
+            protected void prepareConnection(HttpURLConnection connection, String httpMethod) throws IOException {
+                super.prepareConnection(connection, httpMethod);
+                connection.setInstanceFollowRedirects(false);
+            }
+        };
         strictFactory.setConnectTimeout(15000);
         strictFactory.setReadTimeout(45000);
         this.strictRestTemplate = new RestTemplate(strictFactory);
@@ -73,6 +81,7 @@ public class JiraService {
                     }
                 }
                 super.prepareConnection(connection, httpMethod);
+                connection.setInstanceFollowRedirects(false);
             }
         };
         trustAllFactory.setConnectTimeout(15000);
@@ -101,31 +110,91 @@ public class JiraService {
     }
 
     /**
-     * Bloqueia alvos claramente sensíveis (loopback, link-local — inclui
-     * 169.254.169.254, o endpoint de metadata de cloud) antes de proxyar
-     * qualquer request. `domain` é texto livre salvo por usuário (squad pode
-     * apontar pra qualquer instância Jira), então não dá pra travar num host
-     * fixo — mas ninguém tem Jira de verdade rodando em loopback/link-local,
-     * então bloquear só esses reduz a superfície de SSRF sem arriscar quebrar
-     * um Jira corporativo legítimo em rede interna (10.x/172.16.x/192.168.x
-     * continuam permitidos — sem visibilidade de onde o Jira real está
-     * hospedado pra saber se travar essas faixas quebraria produção).
+     * `app.jira.allow-private-hosts`: libera redes privadas (10.x, 172.16-31.x, 192.168.x, 100.64/10, fc00::/7).
+     * Padrão false: o backend roda numa VM na nuvem e o Jira corporativo é alcançado pela internet; liberar redes
+     * privadas deixaria `domain` (texto livre do usuário) apontar para serviços internos (banco, actuator, outros
+     * containers) e ler a resposta. Quem tiver Jira em rede interna liga explicitamente.
+     */
+    @org.springframework.beans.factory.annotation.Value("${app.jira.allow-private-hosts:false}")
+    private boolean allowPrivateHosts = false;
+
+    /**
+     * Normaliza o domínio digitado: remove esquema e barras finais e exige SÓ host[:porta]. Caminho, credencial
+     * (user@host), consulta e fragmento são recusados (400) — `domain` é concatenado em "https://" + domain + path.
+     */
+    static String cleanDomain(String domain) {
+        String d = domain == null ? "" : domain.trim().replaceFirst("(?i)^https?://", "");
+        while (d.endsWith("/")) d = d.substring(0, d.length() - 1);
+        if (!d.matches("[A-Za-z0-9.-]+(:[0-9]{1,5})?")) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Domínio do Jira inválido: informe só o endereço (ex.: jira.empresa.com.br), sem caminho, usuário ou parâmetros.");
+        }
+        return d;
+    }
+
+    /** Sempre bloqueado: loopback, link-local (inclui 169.254.169.254, metadata de nuvem), 0.0.0.0 e multicast. */
+    static boolean isAlwaysBlocked(InetAddress addr) {
+        return addr.isLoopbackAddress() || addr.isLinkLocalAddress() || addr.isAnyLocalAddress() || addr.isMulticastAddress();
+    }
+
+    /** Redes privadas: 10/8, 172.16/12, 192.168/16, CGNAT 100.64/10 e IPv6 ULA fc00::/7. */
+    static boolean isPrivateNetwork(InetAddress addr) {
+        if (addr.isSiteLocalAddress()) return true;
+        byte[] b = addr.getAddress();
+        if (b.length == 4) {
+            int first = b[0] & 0xFF, second = b[1] & 0xFF;
+            return first == 100 && second >= 64 && second <= 127;
+        }
+        return b.length == 16 && (b[0] & 0xFE) == 0xFC;
+    }
+
+    /**
+     * Bloqueia alvos sensíveis antes de proxyar qualquer request: loopback, link-local, 0.0.0.0, multicast e,
+     * por padrão, redes privadas (ver allowPrivateHosts). `domain` é texto livre salvo por usuário, então não dá
+     * pra travar num host fixo. Confere TODOS os endereços que o nome resolve. Limitação conhecida: a checagem é
+     * feita antes da conexão (DNS rebinding — resposta diferente entre a checagem e a conexão — não é coberto).
      */
     public void assertNotBlockedHost(URI uri) {
         String host = uri.getHost();
         if (host == null) throw new IllegalArgumentException("Domain inválido.");
         assertAllowedDomain(host);
         try {
-            InetAddress addr = InetAddress.getByName(host);
-            if (addr.isLoopbackAddress() || addr.isLinkLocalAddress() || addr.isAnyLocalAddress()
-                    || addr.isMulticastAddress()) {
-                throw new IllegalArgumentException("Domain não permitido: " + host);
+            for (InetAddress addr : InetAddress.getAllByName(host)) {
+                if (isAlwaysBlocked(addr) || (!allowPrivateHosts && isPrivateNetwork(addr))) {
+                    throw new IllegalArgumentException("Domain não permitido: " + host);
+                }
             }
         } catch (java.net.UnknownHostException e) {
             // Não resolveu: deixa a própria chamada HTTP falhar adiante com o
             // erro de conexão de sempre, em vez de travar aqui — evita
             // bloquear falso-positivo por falha transitória de DNS.
         }
+    }
+
+    /** Corpo de erro JSON válido (aspas e quebras de linha escapadas). */
+    static String jsonError(String message) {
+        try {
+            return new ObjectMapper().writeValueAsString(java.util.Map.of("error", message));
+        } catch (Exception e) {
+            return "{\"error\": \"Erro ao falar com o Jira.\"}";
+        }
+    }
+
+    /** Motivo curto e seguro para o cliente: não vaza URL, consulta nem detalhes de rede interna. */
+    static String describe(Exception e) {
+        Throwable cur = e;
+        while (cur != null) {
+            if (cur instanceof java.net.SocketTimeoutException) return "tempo esgotado ao esperar o Jira";
+            if (cur instanceof java.net.UnknownHostException) return "domínio do Jira não encontrado";
+            if (cur instanceof java.net.ConnectException) return "não foi possível conectar ao Jira";
+            if (cur instanceof javax.net.ssl.SSLException) return "falha no certificado TLS do Jira";
+            cur = cur.getCause();
+        }
+        if (e instanceof IllegalArgumentException && e.getMessage() != null && e.getMessage().startsWith("Domain")) {
+            return "domínio do Jira não permitido";
+        }
+        if (e instanceof org.springframework.web.client.RestClientException) return "falha de conexão com o Jira";
+        return "erro inesperado (veja os logs do servidor)";
     }
 
     /**
@@ -135,6 +204,11 @@ public class JiraService {
      * certificado válido, e preserva compatibilidade com o Jira corporativo
      * que motivou o trust-all original.
      */
+    /** GET autenticado com as mesmas proteções do proxy (host bloqueado, TLS estrito primeiro, redirecionamento controlado, 429). */
+    public ResponseEntity<String> exchangeGet(URI uri, HttpEntity<Void> entity) {
+        return exchangeSecure(uri, entity, String.class);
+    }
+
     private <T> ResponseEntity<T> exchangeSecure(URI uri, HttpEntity<Void> entity, Class<T> responseType) {
         assertNotBlockedHost(uri);
         try {
@@ -169,17 +243,42 @@ public class JiraService {
         int attempt = 0;
         while (true) {
             try {
-                return restTemplate.exchange(uri, HttpMethod.GET, entity, responseType);
+                return followSameHostRedirects(restTemplate, uri, entity, responseType);
             } catch (org.springframework.web.client.HttpStatusCodeException e) {
                 if (e.getStatusCode().value() == 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
                     long waitMs = retryAfterMillis(e, attempt);
-                    log.warn("Jira rate limited (429) on {}, retry {}/{} after {}ms", uri, attempt + 1, MAX_RATE_LIMIT_RETRIES, waitMs);
+                    log.warn("Jira rate limited (429) on {}, retry {}/{} after {}ms", uri.getHost(), attempt + 1, MAX_RATE_LIMIT_RETRIES, waitMs);
                     sleepUninterruptibly(waitMs);
                     attempt++;
                     continue;
                 }
                 throw e;
             }
+        }
+    }
+
+    private static final int MAX_REDIRECTS = 3;
+
+    /**
+     * Segue redirecionamento (301/302/303/307/308) só para https no MESMO host e porta — por exemplo barra final
+     * ou login do Jira. Qualquer outro destino é recusado: o Bearer não sai do host configurado.
+     */
+    private <T> ResponseEntity<T> followSameHostRedirects(RestTemplate restTemplate, URI uri, HttpEntity<Void> entity, Class<T> responseType) {
+        URI current = uri;
+        for (int hop = 0; ; hop++) {
+            ResponseEntity<T> response = restTemplate.exchange(current, HttpMethod.GET, entity, responseType);
+            int status = response.getStatusCode().value();
+            URI location = response.getHeaders().getLocation();
+            if (status < 300 || status >= 400 || location == null) return response;
+            URI next = current.resolve(location);
+            boolean sameHost = "https".equalsIgnoreCase(next.getScheme()) && next.getHost() != null
+                    && next.getHost().equalsIgnoreCase(uri.getHost()) && next.getPort() == uri.getPort();
+            if (!sameHost || hop >= MAX_REDIRECTS) {
+                log.warn("Redirecionamento do Jira recusado (host {} -> {}).", uri.getHost(), next.getHost());
+                throw new org.springframework.web.client.RestClientException("Redirecionamento do Jira recusado.");
+            }
+            assertNotBlockedHost(next);
+            current = next;
         }
     }
 
@@ -247,7 +346,7 @@ public class JiraService {
     }
 
     public ResponseEntity<String> searchIssues(JiraSearchRequest request) {
-        String cleanDomain = request.getDomain().trim().replace("https://", "").replace("http://", "");
+        String cleanDomain = cleanDomain(request.getDomain());
         
         int maxResults = request.getMaxResults() != null ? Math.min(100, Math.max(1, request.getMaxResults())) : 50;
         int startAt = request.getStartAt() != null ? Math.max(0, request.getStartAt()) : 0;
@@ -279,7 +378,7 @@ public class JiraService {
         } catch (Exception e) {
             log.error("Failed to construct encoded Jira URI", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao construir URL de busca do Jira: " + e.getMessage() + "\"}");
+                    .body(jsonError("Erro ao construir URL de busca do Jira: " + describe(e)));
         }
 
         HttpHeaders headers = new HttpHeaders();
@@ -292,7 +391,7 @@ public class JiraService {
         HttpEntity<Void> entity = new HttpEntity<>(headers);
 
         try {
-            log.info("Proxying JQL search to Jira URI: {}", jiraUri);
+            log.debug("Proxying JQL search to Jira host {}", jiraUri.getHost());
             ResponseEntity<String> response = exchangeSecure(jiraUri, entity, String.class);
             String body = response.getBody();
             
@@ -331,7 +430,7 @@ public class JiraService {
         } catch (Exception e) {
             log.error("Jira search failed", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao conectar ao Jira: " + e.getMessage() + "\"}");
+                    .body(jsonError("Erro ao conectar ao Jira: " + describe(e)));
         }
     }
 
@@ -342,14 +441,14 @@ public class JiraService {
      * manualmente por squad, que varia entre instâncias/projetos Jira.
      */
     public ResponseEntity<String> getFields(String domain, String token) {
-        String cleanDomain = domain.trim().replace("https://", "").replace("http://", "");
+        String cleanDomain = cleanDomain(domain);
         URI jiraUri;
         try {
             jiraUri = new URI("https://" + cleanDomain + "/rest/api/2/field");
         } catch (Exception e) {
             log.error("Failed to construct Jira field URI", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao construir URL do Jira: " + e.getMessage() + "\"}");
+                    .body(jsonError("Erro ao construir URL do Jira: " + describe(e)));
         }
 
         HttpHeaders headers = new HttpHeaders();
@@ -361,7 +460,7 @@ public class JiraService {
         HttpEntity<Void> entity = new HttpEntity<>(headers);
 
         try {
-            log.info("Fetching Jira field metadata from URI: {}", jiraUri);
+            log.debug("Fetching Jira field metadata from host {}", jiraUri.getHost());
             ResponseEntity<String> response = exchangeSecure(jiraUri, entity, String.class);
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
@@ -370,7 +469,7 @@ public class JiraService {
         } catch (Exception e) {
             log.error("Jira field metadata failed", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao buscar campos do Jira: " + e.getMessage() + "\"}");
+                    .body(jsonError("Erro ao buscar campos do Jira: " + describe(e)));
         }
     }
 
@@ -380,7 +479,7 @@ public class JiraService {
      * Busca um caso de teste do Zephyr Scale/ATM (/rest/atm/1.0/testcase/{key}). Só leitura, com o token do próprio usuário.
      */
     public ResponseEntity<String> getTestCase(String domain, String token, String testCaseKey) {
-        String cleanDomain = domain.trim().replace("https://", "").replace("http://", "");
+        String cleanDomain = cleanDomain(domain);
         String key = testCaseKey.trim();
         if (!key.matches("[A-Za-z0-9_-]{1,60}")) {
             return ResponseEntity.badRequest().body("{\"error\": \"Código de caso de teste inválido.\"}");
@@ -390,7 +489,7 @@ public class JiraService {
             jiraUri = new URI("https://" + cleanDomain + "/rest/atm/1.0/testcase/" + key);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao construir URL do Jira: " + e.getMessage() + "\"}");
+                    .body(jsonError("Erro ao construir URL do Jira: " + describe(e)));
         }
         HttpHeaders headers = new HttpHeaders();
         headers.set("Authorization", "Bearer " + token.trim());
@@ -407,7 +506,7 @@ public class JiraService {
         } catch (Exception e) {
             log.warn("Jira testcase {} failed: {}", key, e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao buscar o caso de teste no Jira: " + e.getMessage() + "\"}");
+                    .body(jsonError("Erro ao buscar o caso de teste no Jira: " + describe(e)));
         }
     }
 
@@ -416,14 +515,14 @@ public class JiraService {
      * rapidViewId sem o usuário precisar digitar. Devolve o JSON do Jira ({values:[{id,name,type}]}).
      */
     public ResponseEntity<String> listScrumBoards(String domain, String token, String projectKey) {
-        String cleanDomain = domain.trim().replace("https://", "").replace("http://", "");
+        String cleanDomain = cleanDomain(domain);
         URI jiraUri;
         try {
             jiraUri = new URI("https://" + cleanDomain + "/rest/agile/1.0/board?type=scrum&maxResults=50&projectKeyOrId="
                     + java.net.URLEncoder.encode(projectKey.trim(), java.nio.charset.StandardCharsets.UTF_8));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao construir URL do Jira: " + e.getMessage() + "\"}");
+                    .body(jsonError("Erro ao construir URL do Jira: " + describe(e)));
         }
         HttpHeaders headers = new HttpHeaders();
         headers.set("Authorization", "Bearer " + token.trim());
@@ -439,7 +538,7 @@ public class JiraService {
         } catch (Exception e) {
             log.warn("Jira boards failed: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao buscar quadros no Jira: " + e.getMessage() + "\"}");
+                    .body(jsonError("Erro ao buscar quadros no Jira: " + describe(e)));
         }
     }
 
@@ -451,14 +550,14 @@ public class JiraService {
      * melhor caso é só uma cópia do que a API oficial já devolve limpo).
      */
     public ResponseEntity<String> getSprint(String domain, String token, String sprintId) {
-        String cleanDomain = domain.trim().replace("https://", "").replace("http://", "");
+        String cleanDomain = cleanDomain(domain);
         URI jiraUri;
         try {
             jiraUri = new URI("https://" + cleanDomain + "/rest/agile/1.0/sprint/" + java.net.URLEncoder.encode(sprintId.trim(), java.nio.charset.StandardCharsets.UTF_8));
         } catch (Exception e) {
             log.error("Failed to construct Jira sprint URI", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao construir URL do Jira: " + e.getMessage() + "\"}");
+                    .body(jsonError("Erro ao construir URL do Jira: " + describe(e)));
         }
 
         HttpHeaders headers = new HttpHeaders();
@@ -470,7 +569,7 @@ public class JiraService {
         HttpEntity<Void> entity = new HttpEntity<>(headers);
 
         try {
-            log.info("Fetching Jira sprint metadata from URI: {}", jiraUri);
+            log.debug("Fetching Jira sprint metadata from host {}", jiraUri.getHost());
             ResponseEntity<String> response = exchangeSecure(jiraUri, entity, String.class);
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
@@ -479,7 +578,7 @@ public class JiraService {
         } catch (Exception e) {
             log.error("Jira sprint metadata failed", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao buscar sprint no Jira: " + e.getMessage() + "\"}");
+                    .body(jsonError("Erro ao buscar sprint no Jira: " + describe(e)));
         }
     }
 
@@ -491,7 +590,7 @@ public class JiraService {
      * sessão/cookie que o navegador não envia num request de terceiro).
      */
     public ResponseEntity<?> getAttachment(String domain, String token, String attachmentUrl) {
-        String cleanDomain = domain.trim().replace("https://", "").replace("http://", "");
+        String cleanDomain = cleanDomain(domain);
 
         URI parsedUrl;
         try {
@@ -513,7 +612,7 @@ public class JiraService {
         HttpEntity<Void> entity = new HttpEntity<>(headers);
 
         try {
-            log.info("Fetching Jira attachment from URI: {}", parsedUrl);
+            log.debug("Fetching Jira attachment from host {}", parsedUrl.getHost());
             ResponseEntity<byte[]> response = exchangeSecure(parsedUrl, entity, byte[].class);
             MediaType contentType = response.getHeaders().getContentType();
             if (contentType == null || !"image".equals(contentType.getType())) {
@@ -531,19 +630,19 @@ public class JiraService {
             return ResponseEntity.status(e.getStatusCode()).body("{\"error\": \"Erro do Jira: " + e.getStatusCode().value() + "\"}");
         } catch (Exception e) {
             log.error("Jira attachment fetch failed", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("{\"error\": \"Erro ao buscar anexo do Jira: " + e.getMessage() + "\"}");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(jsonError("Erro ao buscar anexo do Jira: " + describe(e)));
         }
     }
 
     public ResponseEntity<String> getMyself(String domain, String token) {
-        String cleanDomain = domain.trim().replace("https://", "").replace("http://", "");
+        String cleanDomain = cleanDomain(domain);
         URI jiraUri;
         try {
             jiraUri = new URI("https://" + cleanDomain + "/rest/api/2/myself");
         } catch (Exception e) {
             log.error("Failed to construct Jira myself URI", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao construir URL do Jira: " + e.getMessage() + "\"}");
+                    .body(jsonError("Erro ao construir URL do Jira: " + describe(e)));
         }
 
         HttpHeaders headers = new HttpHeaders();
@@ -555,7 +654,7 @@ public class JiraService {
         HttpEntity<Void> entity = new HttpEntity<>(headers);
 
         try {
-            log.info("Fetching authenticated user info from Jira URI: {}", jiraUri);
+            log.debug("Fetching authenticated user info from host {}", jiraUri.getHost());
             ResponseEntity<String> response = exchangeSecure(jiraUri, entity, String.class);
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
@@ -564,7 +663,7 @@ public class JiraService {
         } catch (Exception e) {
             log.error("Jira myself failed", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao buscar dados do usuário no Jira: " + e.getMessage() + "\"}");
+                    .body(jsonError("Erro ao buscar dados do usuário no Jira: " + describe(e)));
         }
     }
 
@@ -572,7 +671,7 @@ public class JiraService {
         if (rapidViewId == null) {
             return ResponseEntity.badRequest().body("{\"error\": \"rapidViewId é obrigatório.\"}");
         }
-        String cleanDomain = domain.trim().replace("https://", "").replace("http://", "");
+        String cleanDomain = cleanDomain(domain);
         URI jiraUri;
         try {
             String urlStr = "https://" + cleanDomain + "/rest/greenhopper/1.0/xboard/work/allData.json?rapidViewId=" + rapidViewId;
@@ -583,7 +682,7 @@ public class JiraService {
         } catch (Exception e) {
             log.error("Failed to construct Greenhopper URI", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao construir URL do Greenhopper: " + e.getMessage() + "\"}");
+                    .body(jsonError("Erro ao construir URL do Greenhopper: " + describe(e)));
         }
 
         HttpHeaders headers = new HttpHeaders();
@@ -596,7 +695,7 @@ public class JiraService {
         HttpEntity<Void> entity = new HttpEntity<>(headers);
 
         try {
-            log.info("Fetching Greenhopper work data from URI: {}", jiraUri);
+            log.debug("Fetching Greenhopper work data from host {}", jiraUri.getHost());
             ResponseEntity<String> response = exchangeSecure(jiraUri, entity, String.class);
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
@@ -605,7 +704,7 @@ public class JiraService {
         } catch (Exception e) {
             log.error("Greenhopper work data failed", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao buscar dados do quadro Greenhopper: " + e.getMessage() + "\"}");
+                    .body(jsonError("Erro ao buscar dados do quadro Greenhopper: " + describe(e)));
         }
     }
 }

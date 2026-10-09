@@ -14,19 +14,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.*;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.RestTemplate;
 
-import javax.net.ssl.HttpsURLConnection;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
-import java.io.IOException;
-import java.net.HttpURLConnection;
-import java.security.SecureRandom;
-import java.security.cert.X509Certificate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -44,32 +34,9 @@ public class JiraProfieldsService {
     private final org.springframework.transaction.PlatformTransactionManager transactionManager;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    private RestTemplate createSslLenientRestTemplate() {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory() {
-            @Override
-            protected void prepareConnection(HttpURLConnection connection, String httpMethod) throws IOException {
-                if (connection instanceof HttpsURLConnection) {
-                    try {
-                        SSLContext sslContext = SSLContext.getInstance("TLS");
-                        sslContext.init(null, new TrustManager[]{
-                            new X509TrustManager() {
-                                public X509Certificate[] getAcceptedIssuers() { return null; }
-                                public void checkClientTrusted(X509Certificate[] certs, String authType) {}
-                                public void checkServerTrusted(X509Certificate[] certs, String authType) {}
-                            }
-                        }, new SecureRandom());
-                        ((HttpsURLConnection) connection).setSSLSocketFactory(sslContext.getSocketFactory());
-                        ((HttpsURLConnection) connection).setHostnameVerifier((hostname, session) -> true);
-                    } catch (Exception e) {
-                        log.error("Erro ao configurar SSL leniente para Profields", e);
-                    }
-                }
-                super.prepareConnection(connection, httpMethod);
-            }
-        };
-        factory.setConnectTimeout(15000);
-        factory.setReadTimeout(45000);
-        return new RestTemplate(factory);
+    /** GET no Jira pelo JiraService: TLS estrito primeiro, host bloqueado, redirecionamento só no mesmo host, 429 com retry. */
+    private ResponseEntity<String> jiraGet(String url, HttpEntity<Void> entity) {
+        return jiraService.exchangeGet(java.net.URI.create(url), entity);
     }
 
     /**
@@ -93,20 +60,59 @@ public class JiraProfieldsService {
         if (creator != null && !canImportTeam(creator, snapshot.members())) {
             throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN, TEAM_MANAGER_ONLY_MESSAGE);
         }
-        return persistImport(snapshot.project(), snapshot.members());
+        return persistImport(snapshot.project(), snapshot.members(), snapshot.members());
     }
 
-    /** Grava projeto + time numa transação curta (troca o time inteiro). */
-    private ProjectDetailDto persistImport(ProjectConfig project, List<ProjectMemberRole> members) {
+    /**
+     * Grava projeto + time numa transação curta (troca o time inteiro). `jiraMembers` é tudo o que o Jira devolveu
+     * (inclusive quem a pessoa desmarcou na prévia): serve só para não apagar quem entrou por outro caminho.
+     */
+    private ProjectDetailDto persistImport(ProjectConfig project, List<ProjectMemberRole> members, List<ProjectMemberRole> jiraMembers) {
         return new org.springframework.transaction.support.TransactionTemplate(transactionManager).execute(status -> {
             String cleanKey = project.getId();
             ProjectConfig saved = projectConfigRepository.save(project);
+            List<ProjectMemberRole> existing = projectMemberRoleRepository.findByProjectId(cleanKey);
+            List<ProjectMemberRole> toSave = mergeWithExistingTeam(existing == null ? List.of() : existing, members, jiraMembers);
             projectMemberRoleRepository.deleteByProjectId(cleanKey);
             projectMemberRoleRepository.flush(); // Garante que a exclusão ocorreu antes do insert
-            List<ProjectMemberRole> savedMembers = projectMemberRoleRepository.saveAll(members);
+            List<ProjectMemberRole> savedMembers = projectMemberRoleRepository.saveAll(toSave);
             projectMemberRoleRepository.flush();
             return toDetailDto(saved, savedMembers);
         });
+    }
+
+    /**
+     * Reimportar troca o time pelo que o Jira devolveu, mas não pode apagar duas coisas que o Jira não sabe:
+     * (1) o vínculo conta -> linha (userId) de quem já entrou/foi reconhecido: copia para a linha nova da mesma pessoa
+     * (conta do Jira ou e-mail); (2) quem entrou por "Sou eu"/"join" e nem aparece no Jira (linha sem liderança com
+     * userId): continua no time. Quem o Jira devolveu e a pessoa desmarcou na prévia continua fora.
+     */
+    static List<ProjectMemberRole> mergeWithExistingTeam(List<ProjectMemberRole> existing, List<ProjectMemberRole> incoming,
+                                                         List<ProjectMemberRole> jiraMembers) {
+        List<ProjectMemberRole> result = new ArrayList<>(incoming);
+        for (ProjectMemberRole row : result) {
+            if (row.getUserId() != null) continue;
+            for (ProjectMemberRole old : existing) {
+                if (old.getUserId() != null && sameIdentity(old, row)) { row.setUserId(old.getUserId()); break; }
+            }
+        }
+        for (ProjectMemberRole old : existing) {
+            if (old.getUserId() == null || old.isLeadership()) continue;
+            boolean inIncoming = result.stream().anyMatch(r -> old.getUserId().equals(r.getUserId()) || sameIdentity(old, r));
+            boolean inJira = jiraMembers.stream().anyMatch(r -> sameIdentity(old, r));
+            if (inIncoming || inJira) continue;
+            result.add(ProjectMemberRole.builder()
+                    .projectId(old.getProjectId()).roleName(old.getRoleName()).roleKey(old.getRoleKey())
+                    .jiraAccountId(old.getJiraAccountId()).displayName(old.getDisplayName()).email(old.getEmail())
+                    .avatarUrl(old.getAvatarUrl()).userId(old.getUserId()).isLeadership(false).build());
+        }
+        return result;
+    }
+
+    /** Mesma pessoa por conta do Jira ou e-mail (sem caixa). Nome não conta: homônimos são pessoas diferentes. */
+    private static boolean sameIdentity(ProjectMemberRole a, ProjectMemberRole b) {
+        if (!isBlank(a.getJiraAccountId()) && a.getJiraAccountId().equals(b.getJiraAccountId())) return true;
+        return !isBlank(a.getEmail()) && !isBlank(b.getEmail()) && a.getEmail().trim().equalsIgnoreCase(b.getEmail().trim());
     }
 
     /**
@@ -211,7 +217,7 @@ public class JiraProfieldsService {
             throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN, TEAM_MANAGER_ONLY_MESSAGE);
         }
         ProfieldsSnapshot applied = applyConfirmation(base, request, creator);
-        return persistImport(applied.project(), applied.members());
+        return persistImport(applied.project(), applied.members(), base.members());
     }
 
 
@@ -324,13 +330,12 @@ public class JiraProfieldsService {
         }
 
         String cleanDomain = (domain != null && !domain.isBlank())
-                ? domain.trim().replace("https://", "").replace("http://", "")
+                ? JiraService.cleanDomain(domain)
                 : "jira.empresa.com.br";
-        String cleanKey = projectKey.trim().toUpperCase();
-        // `domain` vem do cliente: precisa ser só um host[:porta] (nada de caminho, credencial ou query) e passar
-        // pelo mesmo bloqueio de alvos sensíveis/allowlist usado nas demais chamadas ao Jira.
-        if (!cleanDomain.matches("[A-Za-z0-9.-]+(:[0-9]{1,5})?")) {
-            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, "Domínio do Jira inválido");
+        String cleanKey = projectKey == null ? "" : projectKey.trim().toUpperCase();
+        // Chave vai para o caminho da URL do Jira: só letras, números e "_" (nada de "/", "?", ".." etc.).
+        if (!cleanKey.matches("[A-Z0-9_]{1,50}")) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, "Chave de projeto inválida");
         }
         try {
             jiraService.assertNotBlockedHost(java.net.URI.create("https://" + cleanDomain));
@@ -343,7 +348,6 @@ public class JiraProfieldsService {
         JsonNode rootNode;
         String jiraProjectName = null;
         try {
-            RestTemplate restTemplate = createSslLenientRestTemplate();
             HttpHeaders headers = new HttpHeaders();
             headers.set("Authorization", "Bearer " + token.trim());
             headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
@@ -351,14 +355,14 @@ public class JiraProfieldsService {
             HttpEntity<Void> entity = new HttpEntity<>(headers);
 
             String url = "https://" + cleanDomain + "/rest/profields/api/2.0/layouts/projects/" + cleanKey + "?expand=predefined";
-            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            ResponseEntity<String> response = jiraGet(url, entity);
             if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
                 throw new org.springframework.web.server.ResponseStatusException(
                         HttpStatus.BAD_GATEWAY, "Jira Profields retornou resposta inválida para o projeto " + cleanKey);
             }
             rootNode = objectMapper.readTree(response.getBody());
-            jiraProjectName = fetchJiraProjectName(restTemplate, entity, cleanDomain, cleanKey);
-            JsonNode valuesNode = fetchProfieldsValues(restTemplate, entity, cleanDomain, cleanKey);
+            jiraProjectName = fetchJiraProjectName(entity, cleanDomain, cleanKey);
+            JsonNode valuesNode = fetchProfieldsValues(entity, cleanDomain, cleanKey);
             if (valuesNode != null) {
                 log.debug("Profields {}: forma da resposta de valores: {}", cleanKey, describeShapeWithTypes(valuesNode));
                 rootNode = toSyntheticFields(rootNode, valuesNode);
@@ -366,9 +370,9 @@ public class JiraProfieldsService {
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
         } catch (Exception e) {
-            log.warn("Falha ao consultar projeto {} no Profields: {}", cleanKey, e.getMessage());
+            log.warn("Falha ao consultar projeto {} no Profields: {}", cleanKey, e.getClass().getSimpleName());
             throw new org.springframework.web.server.ResponseStatusException(
-                    HttpStatus.BAD_GATEWAY, "Não foi possível obter dados do Profields para o projeto " + cleanKey + ": " + e.getMessage(), e);
+                    HttpStatus.BAD_GATEWAY, "Não foi possível obter dados do Profields para o projeto " + cleanKey + ": " + jiraFailureReason(e), e);
         }
 
         ProjectConfig project = parseProfieldsJson(cleanKey, rootNode);
@@ -423,6 +427,18 @@ public class JiraProfieldsService {
         return new ProfieldsSnapshot(project, members);
     }
 
+    /** Motivo curto para o usuário (sem URL nem detalhe de rede). */
+    static String jiraFailureReason(Exception e) {
+        if (e instanceof org.springframework.web.client.HttpStatusCodeException h) {
+            int code = h.getStatusCode().value();
+            if (code == 401 || code == 403) return "o Jira recusou o token (HTTP " + code + "). Gere um novo token e tente de novo.";
+            if (code == 404) return "projeto não encontrado no Jira (HTTP 404). Confira a chave.";
+            if (code == 429) return "o Jira limitou as requisições (HTTP 429). Aguarde um minuto.";
+            return "o Jira respondeu HTTP " + code + ".";
+        }
+        return JiraService.describe(e);
+    }
+
     /**
      * Retorna os detalhes de um projeto cadastrado.
      */
@@ -441,11 +457,10 @@ public class JiraProfieldsService {
      */
     @Transactional(readOnly = true)
     public List<ProjectDetailDto> getAllProjects() {
+        Map<String, List<ProjectMemberRole>> byProject = projectMemberRoleRepository.findAll().stream()
+                .collect(Collectors.groupingBy(ProjectMemberRole::getProjectId));
         return projectConfigRepository.findAllByOrderBySegmentNameAscNameAsc().stream()
-                .map(project -> {
-                    List<ProjectMemberRole> members = projectMemberRoleRepository.findByProjectId(project.getId());
-                    return toDetailDto(project, members);
-                })
+                .map(project -> toDetailDto(project, byProject.getOrDefault(project.getId(), List.of())))
                 .collect(Collectors.toList());
     }
 
@@ -455,6 +470,9 @@ public class JiraProfieldsService {
     @Transactional(readOnly = true)
     public List<SegmentHierarchyDto> getSegmentHierarchy() {
         List<ProjectConfig> all = projectConfigRepository.findAllByOrderBySegmentNameAscNameAsc();
+        Map<String, Long> leadersByProject = projectMemberRoleRepository.findAll().stream()
+                .filter(ProjectMemberRole::isLeadership)
+                .collect(Collectors.groupingBy(ProjectMemberRole::getProjectId, Collectors.counting()));
 
         // Agrupa por Segmento
         Map<String, List<ProjectConfig>> bySegment = all.stream()
@@ -483,9 +501,7 @@ public class JiraProfieldsService {
                 String tribeName = tribeEntry.getKey();
                 List<SegmentHierarchyDto.ProjectSummaryDto> projectSummaries = tribeEntry.getValue().stream()
                         .map(p -> {
-                            int totalLeaders = (int) projectMemberRoleRepository.findByProjectId(p.getId()).stream()
-                                    .filter(ProjectMemberRole::isLeadership)
-                                    .count();
+                            int totalLeaders = leadersByProject.getOrDefault(p.getId(), 0L).intValue();
                             return SegmentHierarchyDto.ProjectSummaryDto.builder()
                                     .id(p.getId())
                                     .name(p.getName())
@@ -717,9 +733,9 @@ public class JiraProfieldsService {
     }
 
     /** Nome do projeto no Jira (campo "name" de /rest/api/2/project/{key}); null se não for possível ler. */
-    private String fetchJiraProjectName(RestTemplate rt, HttpEntity<Void> entity, String domain, String key) {
+    private String fetchJiraProjectName(HttpEntity<Void> entity, String domain, String key) {
         try {
-            ResponseEntity<String> r = rt.exchange("https://" + domain + "/rest/api/2/project/" + key, HttpMethod.GET, entity, String.class);
+            ResponseEntity<String> r = jiraGet("https://" + domain + "/rest/api/2/project/" + key, entity);
             JsonNode n = objectMapper.readTree(r.getBody());
             return n.hasNonNull("name") ? n.get("name").asText() : null;
         } catch (Exception e) {
@@ -763,6 +779,7 @@ public class JiraProfieldsService {
     }
 
     private static int rank(ProjectMemberRole m) {
+        if (isTeamManagerRow(m)) return 4; // AM/PL não podem sumir porque a pessoa também é PO/Team Lead
         if (m.isLeadership()) return 3;
         return "DEVELOPER".equalsIgnoreCase(m.getRoleKey()) ? 1 : 2;
     }
@@ -772,10 +789,10 @@ public class JiraProfieldsService {
     }
 
     /** Endpoint de valores do Profields: GET /rest/profields/api/2.0/values/projects/{key} (lista de valores por campo). */
-    private JsonNode fetchProfieldsValues(RestTemplate rt, HttpEntity<Void> entity, String domain, String key) {
+    private JsonNode fetchProfieldsValues(HttpEntity<Void> entity, String domain, String key) {
         try {
             String url = "https://" + domain + "/rest/profields/api/2.0/values/projects/" + key;
-            ResponseEntity<String> r = rt.exchange(url, HttpMethod.GET, entity, String.class);
+            ResponseEntity<String> r = jiraGet(url, entity);
             if (!r.getStatusCode().is2xxSuccessful() || r.getBody() == null) return null;
             return objectMapper.readTree(r.getBody());
         } catch (Exception e) {

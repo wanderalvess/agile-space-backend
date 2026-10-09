@@ -242,7 +242,10 @@ class JiraAdminServiceTest {
 
         @BeforeEach
         void bindMockServer() {
-            RestTemplate restTemplate = (RestTemplate) ReflectionTestUtils.getField(service, "restTemplate");
+            // As chamadas ao Jira passam pelo JiraService (TLS estrito, host bloqueado, redirecionamento controlado).
+            JiraService jiraService = new JiraService();
+            ReflectionTestUtils.setField(service, "jiraService", jiraService);
+            RestTemplate restTemplate = (RestTemplate) ReflectionTestUtils.getField(jiraService, "strictRestTemplate");
             mockServer = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
         }
 
@@ -311,6 +314,112 @@ class JiraAdminServiceTest {
 
             assertEquals(0, preview.getTotalCandidates());
             mockServer.verify();
+        }
+    }
+
+    @Nested
+    @DisplayName("Segurança do preview e cargos sugeridos")
+    class PreviewSecurityTests {
+
+        private static final String DOMAIN = "empresa.atlassian.net";
+
+        private MockRestServiceServer bind() {
+            JiraService jiraService = new JiraService();
+            ReflectionTestUtils.setField(service, "jiraService", jiraService);
+            RestTemplate restTemplate = (RestTemplate) ReflectionTestUtils.getField(jiraService, "strictRestTemplate");
+            return MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
+        }
+
+        private JiraSyncRequest req(String domain, String key) {
+            return JiraSyncRequest.builder().jiraDomain(domain).projectKey(key).token("fake-token").build();
+        }
+
+        private void expectComponentsAndSearch(MockRestServiceServer server) {
+            server.expect(requestTo("https://" + DOMAIN + "/rest/api/2/project/P/components"))
+                    .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+            server.expect(org.springframework.test.web.client.ExpectedCount.manyTimes(),
+                            requestTo(org.hamcrest.Matchers.containsString("/rest/api/2/search")))
+                    .andRespond(withSuccess("{\"issues\":[]}", MediaType.APPLICATION_JSON));
+        }
+
+        @Test
+        @DisplayName("Link de Project Role para outro host é ignorado: o token não sai do domínio configurado")
+        void roleUrlForAnotherHostIsNeverCalled() {
+            MockRestServiceServer server = bind();
+            String projectJson = "{\"name\":\"P\",\"roles\":{\"Developers\":\"https://evil.example.com/rest/api/2/project/P/role/1\","
+                    + "\"Interno\":\"https://" + DOMAIN + "/rest/api/2/project/P/role/2\"}}";
+            server.expect(requestTo("https://" + DOMAIN + "/rest/api/2/project/P"))
+                    .andRespond(withSuccess(projectJson, MediaType.APPLICATION_JSON));
+            server.expect(requestTo("https://" + DOMAIN + "/rest/api/2/project/P/role/2"))
+                    .andRespond(withSuccess("{\"actors\":[]}", MediaType.APPLICATION_JSON));
+            expectComponentsAndSearch(server);
+
+            JiraProjectPreviewDto preview = service.previewProject(req(DOMAIN, "P"));
+
+            assertEquals(0, preview.getTotalCandidates());
+            // Nenhuma chamada a evil.example.com estava esperada: se tivesse sido feita, o mock teria falhado.
+            server.verify();
+        }
+
+        @Test
+        @DisplayName("Domínio com caminho, credencial ou parâmetros é recusado (400)")
+        void rejectsDomainWithPathOrCredentials() {
+            for (String bad : new String[] {"jira.empresa.com/x", "user@jira.empresa.com", "jira.empresa.com?a=b", "jira.empresa.com#x", ""}) {
+                var ex = assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                        () -> service.previewProject(req(bad, "P")), bad);
+                assertEquals(400, ex.getStatusCode().value());
+            }
+        }
+
+        @Test
+        @DisplayName("Chave de projeto com caracteres de URL é recusada (400)")
+        void rejectsProjectKeyThatBreaksTheUrl() {
+            var ex = assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                    () -> service.previewProject(req(DOMAIN, "P/../../x")));
+            assertEquals(400, ex.getStatusCode().value());
+        }
+
+        @Test
+        @DisplayName("Grupo com espaço no nome é consultado com o nome codificado (antes era descartado em silêncio)")
+        void groupNameIsUrlEncoded() {
+            MockRestServiceServer server = bind();
+            server.expect(requestTo("https://" + DOMAIN + "/rest/api/2/project/P"))
+                    .andRespond(withSuccess("{\"name\":\"P\",\"roles\":{\"Developers\":\"https://" + DOMAIN + "/rest/api/2/project/P/role/1\"}}", MediaType.APPLICATION_JSON));
+            server.expect(requestTo("https://" + DOMAIN + "/rest/api/2/project/P/role/1"))
+                    .andRespond(withSuccess("{\"actors\":[{\"name\":\"time dev\",\"type\":\"atlassian-group-role-actor\",\"actorGroup\":{\"name\":\"time dev\"}}]}", MediaType.APPLICATION_JSON));
+            server.expect(requestTo("https://" + DOMAIN + "/rest/api/2/group/member?groupname=time+dev"))
+                    .andRespond(withSuccess("{\"values\":[{\"accountId\":\"u1\",\"displayName\":\"Pessoa Um\",\"emailAddress\":\"u1@empresa.com\"}]}", MediaType.APPLICATION_JSON));
+            expectComponentsAndSearch(server);
+
+            JiraProjectPreviewDto preview = service.previewProject(req(DOMAIN, "P"));
+
+            assertEquals(1, preview.getTotalCandidates());
+            assertEquals("u1", preview.getMembers().get(0).getJiraAccountId());
+        }
+
+        @Test
+        @DisplayName("'Suporte', 'Parte', 'Equipe' e 'Overhead' não viram Agile Master, UX ou People Lead")
+        void ambiguousSubstringsDoNotPromote() {
+            assertNotEquals("Agile Master", JiraAdminService.evaluateRole("Analista de Suporte").canonicalRole);
+            assertNotEquals("Agile Master", JiraAdminService.evaluateRole("Responsável Suporte").canonicalRole);
+            assertNotEquals("Agile Master", JiraAdminService.evaluateRole("Parte interessada").canonicalRole);
+            assertNotEquals("UX/Designer", JiraAdminService.evaluateRole("Equipe").canonicalRole);
+            assertNotEquals("People Lead", JiraAdminService.evaluateRole("Overhead").canonicalRole);
+        }
+
+        @Test
+        @DisplayName("Siglas continuam reconhecidas quando são a palavra inteira")
+        void acronymsStillRecognised() {
+            assertEquals("Agile Master", JiraAdminService.evaluateRole("RTE").canonicalRole);
+            assertEquals("Agile Master", JiraAdminService.evaluateRole("Release Train Engineer (RTE)").canonicalRole);
+            assertEquals("UX/Designer", JiraAdminService.evaluateRole("UX").canonicalRole);
+            assertEquals("UX/Designer", JiraAdminService.evaluateRole("Time de UI").canonicalRole);
+            assertEquals("QA", JiraAdminService.evaluateRole("QA").canonicalRole);
+            assertEquals("SME", JiraAdminService.evaluateRole("SME").canonicalRole);
+            assertEquals("Developer", JiraAdminService.evaluateRole("Dev").canonicalRole);
+            assertEquals("Product Owner", JiraAdminService.evaluateRole("GPM").canonicalRole);
+            assertEquals("Agile Master", JiraAdminService.evaluateRole("Scrum Master").canonicalRole);
+            assertEquals("Agile Coach", JiraAdminService.evaluateRole("Agile Coaching").canonicalRole);
         }
     }
 
