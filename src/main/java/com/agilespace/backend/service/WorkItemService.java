@@ -77,6 +77,9 @@ public class WorkItemService {
 
     @Transactional
     public void showcaseDecision(String squadId, String jiraKey, String status, String feedback) {
+        if (status == null || !java.util.Set.of("committed", "delivered", "rejected", "carried_over").contains(status)) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "Status de decisão inválido.");
+        }
         SquadIssueSnapshot item = findOrCreate(squadId, jiraKey);
         item.setCeremonyStatus(status);
         item.setDecisionFeedback(feedback);

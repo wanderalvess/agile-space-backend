@@ -199,7 +199,7 @@ class ShowcaseSessionServiceTest {
                     .createdAt(originalCreatedAt)
                     .build();
 
-            when(repository.findById("session-456")).thenReturn(Optional.of(existing));
+            when(repository.findByIdForUpdate("session-456")).thenReturn(Optional.of(existing));
             when(repository.save(any(ShowcaseSession.class))).thenAnswer(i -> i.getArgument(0));
 
             ShowcaseSession updatePayload = ShowcaseSession.builder()
@@ -243,6 +243,64 @@ class ShowcaseSessionServiceTest {
                     ts.size() == 1 && "session-456".equals(ts.get(0).getSessionId()) && ts.get(0).getOrder() == 0));
             verify(memberRepository).saveAll(argThat((List<ShowcaseMember> ms) ->
                     ms.size() == 1 && "session-456".equals(ms.get(0).getSessionId()) && ms.get(0).getOrder() == 0));
+        }
+    }
+
+    @Nested
+    @DisplayName("Integridade e autoria")
+    class IntegrityTests {
+
+        @Test
+        @DisplayName("Deve recusar card cujo id já pertence a outra Review")
+        void shouldRejectTaskOfAnotherSession() {
+            ShowcaseTask foreign = ShowcaseTask.builder().id("t-alheio").sessionId("outra-review").title("X").build();
+            ShowcaseTask incoming = ShowcaseTask.builder().id("t-alheio").title("Sequestro").build();
+            sampleSession.setTasks(new ArrayList<>(List.of(incoming)));
+            when(repository.save(any(ShowcaseSession.class))).thenAnswer(i -> i.getArgument(0));
+            when(taskRepository.findAllById(any())).thenReturn(List.of(foreign));
+
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> service.saveSession(sampleSession, "user-sm"));
+
+            assertEquals(409, ex.getStatusCode().value());
+            verify(taskRepository, never()).saveAll(any());
+        }
+
+        @Test
+        @DisplayName("Decisão nova leva o autor do token, não o que o cliente escreveu; decisão mantida preserva o autor original")
+        void shouldStampDecisionAuthorFromCaller() {
+            ShowcaseTask stored = ShowcaseTask.builder().id("t1").sessionId("session-456").decision("approved")
+                    .decidedBy("po-original").decidedByName("PO Original").decidedAt("2026-01-01T10:00").build();
+            ShowcaseTask kept = ShowcaseTask.builder().id("t1").decision("approved").decidedBy("forjado").decidedByName("Forjado").build();
+            ShowcaseTask fresh = ShowcaseTask.builder().id("t2").decision("rejected").decidedBy("forjado").decidedByName("Forjado").build();
+            ShowcaseTask open = ShowcaseTask.builder().id("t3").decision("open").decidedBy("forjado").build();
+            sampleSession.setTasks(new ArrayList<>(List.of(kept, fresh, open)));
+            when(repository.save(any(ShowcaseSession.class))).thenAnswer(i -> i.getArgument(0));
+            when(taskRepository.findBySessionIdOrderByOrderAsc("session-456")).thenReturn(List.of(stored));
+
+            service.saveSession(sampleSession, "caller-1");
+
+            assertEquals("po-original", kept.getDecidedBy());
+            assertEquals("PO Original", kept.getDecidedByName());
+            assertEquals("caller-1", fresh.getDecidedBy());
+            assertNotNull(fresh.getDecidedAt());
+            assertNull(open.getDecidedBy());
+        }
+
+        @Test
+        @DisplayName("Deve descartar links com esquema executável")
+        void shouldDropScriptSchemes() {
+            ShowcaseTask task = ShowcaseTask.builder().id("t1").url("javascript:alert(1)")
+                    .evidence(com.agilespace.backend.domain.ShowcaseEvidence.builder()
+                            .video(" JaVa\tScript:alert(1)").screenshot("https://ok.example/a.png").build())
+                    .build();
+            sampleSession.setTasks(new ArrayList<>(List.of(task)));
+            when(repository.save(any(ShowcaseSession.class))).thenAnswer(i -> i.getArgument(0));
+
+            service.saveSession(sampleSession, "user-sm");
+
+            assertNull(task.getUrl());
+            assertNull(task.getEvidence().getVideo());
+            assertEquals("https://ok.example/a.png", task.getEvidence().getScreenshot());
         }
     }
 

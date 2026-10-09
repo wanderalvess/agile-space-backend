@@ -50,7 +50,7 @@ public class ShowcaseWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) {
-        log.info("Received client Showcase WebSocket message from session {}: {}", session.getId(), message.getPayload());
+        log.debug("Received client Showcase WebSocket message from session {} ({} chars)", session.getId(), message.getPayloadLength());
     }
 
     public void broadcastEvent(String sessionId, String eventType, Object payload) {

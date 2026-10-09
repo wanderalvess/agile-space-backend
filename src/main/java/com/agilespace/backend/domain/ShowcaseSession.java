@@ -39,7 +39,7 @@ public class ShowcaseSession {
     @Column(name = "created_by")
     private String createdBy;
 
-    @Column(name = "cover_image")
+    @Column(name = "cover_image", columnDefinition = "TEXT")
     private String coverImage;
 
     @Column(name = "squad_name")

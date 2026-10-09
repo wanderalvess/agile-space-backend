@@ -15,7 +15,6 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 
 /**
  * Anexos dos cards da Review. Mesmo nível de acesso do restante da Review (usuário autenticado
@@ -50,7 +49,7 @@ public class ShowcaseFileController {
                         ContentDisposition.inline().filename(file.getName(), StandardCharsets.UTF_8).build().toString())
                 .header("X-Content-Type-Options", "nosniff")
                 .header("Content-Security-Policy", "default-src 'none'; sandbox")
-                .cacheControl(CacheControl.maxAge(Duration.ofHours(12)).cachePrivate())
+                .cacheControl(CacheControl.noCache().cachePrivate())
                 .body(content.resource());
     }
 
