@@ -32,6 +32,7 @@ public class JiraProfieldsService {
     private final JiraAdminService jiraAdminService;
     private final JiraService jiraService;
     private final org.springframework.transaction.PlatformTransactionManager transactionManager;
+    private final SquadMemberExclusions squadMemberExclusions;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /** GET no Jira pelo JiraService: TLS estrito primeiro, host bloqueado, redirecionamento só no mesmo host, 429 com retry. */
@@ -73,6 +74,12 @@ public class JiraProfieldsService {
             ProjectConfig saved = projectConfigRepository.save(project);
             List<ProjectMemberRole> existing = projectMemberRoleRepository.findByProjectId(cleanKey);
             List<ProjectMemberRole> toSave = mergeWithExistingTeam(existing == null ? List.of() : existing, members, jiraMembers);
+            // Quem a liderança removeu à mão do time não volta só porque o Jira ainda lista a pessoa.
+            SquadMemberExclusions.Removed removedByHand = SquadMemberExclusions.of(squadMemberExclusions, cleanKey);
+            if (!removedByHand.isEmpty()) {
+                toSave = new ArrayList<>(toSave);
+                toSave.removeIf(r -> removedByHand.matches(r.getJiraAccountId(), r.getEmail()));
+            }
             projectMemberRoleRepository.deleteByProjectId(cleanKey);
             projectMemberRoleRepository.flush(); // Garante que a exclusão ocorreu antes do insert
             List<ProjectMemberRole> savedMembers = projectMemberRoleRepository.saveAll(toSave);
@@ -1180,6 +1187,10 @@ public class JiraProfieldsService {
                     org.springframework.http.HttpStatus.NOT_FOUND, "Projeto não encontrado");
         }
 
+        if (SquadMemberExclusions.of(squadMemberExclusions, key).matches(user.getJiraAccountId(), user.getEmail())) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Você foi removido(a) deste time. Peça ao Agile Master ou People Lead para adicionar você de novo.");
+        }
         boolean alreadyMember = projectMemberRoleRepository.findByProjectId(key).stream()
                 .anyMatch(m -> user.getId().equals(m.getUserId()));
         if (alreadyMember) {

@@ -217,6 +217,7 @@ public class SquadService {
             if (member.getClaimedByUid() == null) member.setClaimedByUid(e.getClaimedByUid());
         }
         SquadMember saved = memberRepository.save(member);
+        clearExclusion(squadId, jiraAccountId); // adicionar/editar à mão (ou aceitar convite) desfaz a exclusão
 
         // Sincroniza tabela central de usuários. NUNCA grava em user.role a partir daqui:
         // SquadMember.role é texto livre vindo do corpo da requisição (cargo no board),
@@ -275,7 +276,14 @@ public class SquadService {
             }
             toSave.add(m);
         }
-        return memberRepository.saveAll(toSave);
+        List<SquadMember> savedAll = memberRepository.saveAll(toSave);
+        for (SquadMember m : toSave) clearExclusion(squadId, m.getJiraAccountId());
+        return savedAll;
+    }
+
+    private void clearExclusion(String squadId, String jiraAccountId) {
+        if (exclusionRepository == null || jiraAccountId == null) return;
+        exclusionRepository.deleteById(squadId + "_" + jiraAccountId);
     }
 
     /**

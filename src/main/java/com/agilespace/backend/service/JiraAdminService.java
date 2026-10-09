@@ -32,6 +32,9 @@ public class JiraAdminService {
     @Autowired
     private SquadMemberRepository squadMemberRepository;
 
+    @Autowired(required = false)
+    private SquadMemberExclusions squadMemberExclusions;
+
     @Autowired
     private UserRepository userRepository;
 
@@ -264,8 +267,17 @@ public class JiraAdminService {
         rollup.setComputedAt(Instant.now().toString());
         squadMetricsRollupRepository.save(rollup);
 
+        // Quem a liderança removeu à mão do time não volta por esta importação.
+        SquadMemberExclusions.Removed removedByHand = SquadMemberExclusions.of(squadMemberExclusions, projectKey);
         List<JiraMemberCandidateDto> approvedMembers = request.getMembers() != null
-                ? request.getMembers().stream().filter(JiraMemberCandidateDto::isSelected).collect(Collectors.toList())
+                ? request.getMembers().stream()
+                        .filter(JiraMemberCandidateDto::isSelected)
+                        .filter(m -> {
+                            boolean skip = removedByHand.matches(m.getJiraAccountId(), m.getEmail());
+                            if (skip) log.info("Importação da Squad {}: {} foi removido(a) à mão do time e não será recolocado(a).", projectKey, m.getDisplayName());
+                            return !skip;
+                        })
+                        .collect(Collectors.toList())
                 : Collections.emptyList();
 
         Set<String> approvedAccountIds = approvedMembers.stream()
