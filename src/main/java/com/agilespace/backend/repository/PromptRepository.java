@@ -4,6 +4,7 @@ import com.agilespace.backend.domain.Prompt;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -19,6 +20,15 @@ public interface PromptRepository extends JpaRepository<Prompt, UUID> {
     Page<Prompt> findByAuthorId(String authorId, Pageable pageable);
 
     Page<Prompt> findByAuthorIdAndVisibility(String authorId, String visibility, Pageable pageable);
+
+    /** Incremento atômico: não perde contagem concorrente nem mexe em updatedAt (usar um item não o torna "recente"). */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE Prompt p SET p.useCount = COALESCE(p.useCount, 0) + 1 WHERE p.id = :id")
+    int incrementUseCount(@Param("id") UUID id);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE Prompt p SET p.forkCount = COALESCE(p.forkCount, 0) + 1 WHERE p.id = :id")
+    int incrementForkCount(@Param("id") UUID id);
 
     Optional<Prompt> findFirstByAuthorIdAndTitleAndType(String authorId, String title, String type);
 

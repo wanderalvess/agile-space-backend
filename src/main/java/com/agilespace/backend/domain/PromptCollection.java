@@ -1,6 +1,8 @@
 package com.agilespace.backend.domain;
 
 import jakarta.persistence.*;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 
@@ -22,9 +24,12 @@ public class PromptCollection {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    @NotBlank(message = "O nome da coleção é obrigatório")
+    @Size(max = 255, message = "O nome aceita até 255 caracteres")
     @Column(nullable = false)
     private String name;
 
+    @Size(max = 5000, message = "A descrição aceita até 5.000 caracteres")
     @Column(columnDefinition = "TEXT")
     private String description;
 
@@ -34,6 +39,7 @@ public class PromptCollection {
     @Column(nullable = false)
     private String ownerId;
     
+    @Size(max = 255)
     private String ownerName;
 
     @ManyToMany

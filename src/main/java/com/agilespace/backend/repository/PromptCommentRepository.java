@@ -10,4 +10,6 @@ import java.util.UUID;
 @Repository
 public interface PromptCommentRepository extends JpaRepository<PromptComment, UUID> {
     List<PromptComment> findByPromptIdOrderByCreatedAtAsc(UUID promptId);
+
+    List<PromptComment> findByPromptId(UUID promptId);
 }
