@@ -32,9 +32,14 @@ RUN echo "${OTEL_AGENT_SHA256}  /app/otel-agent.jar" | sha256sum -c - \
 RUN mkdir -p /data/uploads && chown -R spring:spring /data
 ENV UPLOADS_DIR=/data/uploads
 
+# Fuso fixo em UTC: createdAt/updatedAt/lastLoginAt são LocalDateTime gravados com now() e a API os envia com "Z"
+# (JacksonUtcConfig). Se a JVM rodasse em outro fuso, o navegador mostraria a hora errada. Fixar aqui (variável do
+# sistema e propriedade da JVM) tira a dependência do fuso padrão da máquina.
+ENV TZ=UTC
+
 USER spring
 
 COPY --from=build /app/target/*.jar app.jar
 
 EXPOSE 8002
-ENTRYPOINT ["java", "-javaagent:/app/otel-agent.jar", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-Duser.timezone=UTC", "-javaagent:/app/otel-agent.jar", "-jar", "app.jar"]
