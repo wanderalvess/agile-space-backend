@@ -3,6 +3,8 @@ package com.agilespace.backend.websocket;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import com.agilespace.backend.domain.RetroCard;
+import com.agilespace.backend.service.RetroCardRedactor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.*;
 import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
@@ -10,6 +12,7 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -119,6 +122,44 @@ public class RetroWebSocketHandler extends TextWebSocketHandler {
         }
         Long left = lastDisconnect.get(boardId + "|" + userId);
         return left != null && System.currentTimeMillis() - left <= ABSENCE_GRACE_MS;
+    }
+
+    /**
+     * Eventos que carregam card(s) ({@link RetroCard} ou lista): o payload é montado POR SESSÃO, pela
+     * redação do anonimato (quem não é autor não recebe o texto de card oculto; ver
+     * {@link RetroCardRedactor}). O userId e o papel de cada sessão vêm do JWT do handshake.
+     */
+    public void broadcastCards(String boardId, String eventType, Object cardOrCards, RetroCardRedactor.Context ctx) {
+        Set<WebSocketSession> sessions = boardSessions.get(boardId);
+        if (sessions == null || sessions.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        for (WebSocketSession session : sessions) {
+            if (!session.isOpen()) continue;
+            try {
+                Object uid = session.getAttributes().get("userId");
+                Object role = session.getAttributes().get("role");
+                String viewerId = uid == null ? null : uid.toString();
+                boolean admin = role != null && "ADMIN".equalsIgnoreCase(role.toString());
+                Object payload;
+                if (cardOrCards instanceof RetroCard card) {
+                    payload = RetroCardRedactor.view(card, ctx, viewerId, admin);
+                } else if (cardOrCards instanceof List<?> list) {
+                    List<RetroCard> cards = new java.util.ArrayList<>();
+                    for (Object o : list) cards.add((RetroCard) o);
+                    payload = RetroCardRedactor.view(cards, ctx, viewerId, admin);
+                } else {
+                    continue;
+                }
+                Map<String, Object> messageMap = new HashMap<>();
+                messageMap.put("type", eventType);
+                messageMap.put("boardId", boardId);
+                messageMap.put("payload", payload);
+                messageMap.put("timestamp", now);
+                session.sendMessage(new TextMessage(objectMapper.writeValueAsString(messageMap)));
+            } catch (Exception e) {
+                log.error("Failed to send card event '{}' to session {} on board {}", eventType, session.getId(), boardId, e);
+            }
+        }
     }
 
     public void broadcastRefresh(String boardId) {

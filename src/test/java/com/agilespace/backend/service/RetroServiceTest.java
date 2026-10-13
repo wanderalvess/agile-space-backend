@@ -139,7 +139,7 @@ class RetroServiceTest {
 
             RetroCard afterRemove = service.toggleVote(BOARD, "c1", ANA);
             assertTrue(afterRemove.getVotes().isEmpty());
-            verify(webSocketHandler, times(2)).broadcastEvent(eq(BOARD), eq("CARD_SAVED"), any());
+            verify(webSocketHandler, times(2)).broadcastCards(eq(BOARD), eq("CARD_SAVED"), any(), any());
         }
 
         @Test
@@ -294,7 +294,7 @@ class RetroServiceTest {
             assertEquals("disabled", result.getVotingStatus());
             assertTrue(c1.getVotes().isEmpty());
             assertTrue(c3.getVotes().isEmpty());
-            verify(webSocketHandler, times(2)).broadcastEvent(eq(BOARD), eq("CARD_SAVED"), any());
+            verify(webSocketHandler, times(2)).broadcastCards(eq(BOARD), eq("CARD_SAVED"), any(), any());
             verify(webSocketHandler).broadcastEvent(eq(BOARD), eq("BOARD_UPDATED"), eq(board));
         }
 
@@ -648,7 +648,7 @@ class RetroServiceTest {
             assertEquals("ana", saved.value().getAuthorId());
             assertTrue(saved.value().getVotes().isEmpty());
             assertNotNull(saved.value().getId());
-            verify(webSocketHandler).broadcastEvent(eq(BOARD), eq("CARD_SAVED"), eq(saved.value()));
+            verify(webSocketHandler).broadcastCards(eq(BOARD), eq("CARD_SAVED"), any(), any());
         }
 
         @Test
@@ -793,7 +793,7 @@ class RetroServiceTest {
 
             assertNull(k1.getParentId());
             assertNull(k2.getParentId());
-            verify(webSocketHandler, times(2)).broadcastEvent(eq(BOARD), eq("CARD_SAVED"), any());
+            verify(webSocketHandler, times(2)).broadcastCards(eq(BOARD), eq("CARD_SAVED"), any(), any());
             verify(cardRepository).deleteById("p");
         }
 
@@ -815,7 +815,7 @@ class RetroServiceTest {
             assertTrue(fresh.getVotes().isEmpty());
             assertEquals("texto c1", stored.getContent());
             verify(cardRepository, times(1)).save(any(RetroCard.class));
-            verify(webSocketHandler).broadcastEvent(eq(BOARD), eq("CARDS_IMPORTED"), eq(result));
+            verify(webSocketHandler).broadcastCards(eq(BOARD), eq("CARDS_IMPORTED"), any(), any());
         }
 
         @Test
@@ -871,7 +871,7 @@ class RetroServiceTest {
             assertEquals("t", child.getParentId());
             verify(cardRepository).deleteById("s");
             verify(webSocketHandler).broadcastEvent(eq(BOARD), eq("CARD_DELETED"), any());
-            verify(webSocketHandler).broadcastEvent(eq(BOARD), eq("CARD_SAVED"), eq(merged));
+            verify(webSocketHandler, times(2)).broadcastCards(eq(BOARD), eq("CARD_SAVED"), any(), any());
         }
 
         @Test
@@ -905,6 +905,161 @@ class RetroServiceTest {
         }
     }
 
+    // ------------------------------------------------------- anonimato
+
+    @Nested
+    @DisplayName("Anonimato no servidor (redação por destinatário)")
+    class AnonymityTests {
+
+        @BeforeEach
+        void hiddenPhase() {
+            board.setIsCardsRevealed(false);
+            board.setIsAuthorsRevealed(false);
+        }
+
+        @Test
+        @DisplayName("GET cards: quem não é autor recebe o card oculto; o autor vê o próprio completo")
+        void getCardsRedactsPerViewer() {
+            RetroCard mine = card("m", "good", "ana");
+            RetroCard theirs = card("t", "good", "bia");
+            theirs.setReactions(json("{\"up\":[\"bia\"]}"));
+            when(cardRepository.findByBoardId(BOARD)).thenReturn(List.of(mine, theirs));
+
+            List<RetroCard> forAna = service.getCards(BOARD, ANA);
+            RetroCard m = forAna.stream().filter(c -> c.getId().equals("m")).findFirst().orElseThrow();
+            RetroCard t = forAna.stream().filter(c -> c.getId().equals("t")).findFirst().orElseThrow();
+
+            assertEquals("texto m", m.getContent());
+            assertEquals("ana", m.getAuthorId());
+            assertFalse(m.isHidden());
+            assertTrue(t.isHidden());
+            assertEquals("", t.getContent());
+            assertNull(t.getAuthorId());
+            assertTrue(t.getVotes().isEmpty());
+            assertTrue(t.getOriginalTexts().isEmpty());
+            assertEquals(0, t.getReactions().size());
+            // entidade gerenciada intacta
+            assertEquals("texto t", theirs.getContent());
+            assertEquals("bia", theirs.getAuthorId());
+        }
+
+        @Test
+        @DisplayName("facilitador e ADMIN veem o texto antes de revelar, mas não o autor")
+        void facilitatorSeesContentNotAuthor() {
+            RetroCard theirs = card("t", "good", "bia");
+            when(cardRepository.findByBoardId(BOARD)).thenReturn(List.of(theirs));
+
+            for (RetroCaller viewer : List.of(CREATOR, ADMIN)) {
+                RetroCard v = service.getCards(BOARD, viewer).get(0);
+                assertFalse(v.isHidden());
+                assertEquals("texto t", v.getContent());
+                assertNull(v.getAuthorId());
+            }
+        }
+
+        @Test
+        @DisplayName("coluna de ação nunca é redigida")
+        void actionColumnNeverRedacted() {
+            RetroCard action = card("a", "actions", "bia");
+            when(cardRepository.findByBoardId(BOARD)).thenReturn(List.of(action));
+
+            RetroCard v = service.getCards(BOARD, ANA).get(0);
+
+            assertFalse(v.isHidden());
+            assertEquals("texto a", v.getContent());
+            assertEquals("bia", v.getAuthorId());
+        }
+
+        @Test
+        @DisplayName("revelado mas autores ocultos: todos veem o texto, só o autor vê a própria autoria")
+        void revealedCardsHiddenAuthors() {
+            board.setIsCardsRevealed(true);
+            RetroCard mine = card("m", "good", "ana", "bia");
+            RetroCard theirs = card("t", "good", "bia");
+            when(cardRepository.findByBoardId(BOARD)).thenReturn(List.of(mine, theirs));
+
+            List<RetroCard> forAna = service.getCards(BOARD, ANA);
+
+            assertEquals("ana", forAna.get(0).getAuthorId());
+            assertEquals(Set.of("bia"), forAna.get(0).getVotes());
+            assertNull(forAna.get(1).getAuthorId());
+            assertEquals("texto t", forAna.get(1).getContent());
+            assertFalse(forAna.get(1).isHidden());
+        }
+
+        @Test
+        @DisplayName("autores revelados: autoria visível a todos")
+        void authorsRevealed() {
+            board.setIsCardsRevealed(true);
+            board.setIsAuthorsRevealed(true);
+            when(cardRepository.findByBoardId(BOARD)).thenReturn(List.of(card("t", "good", "bia")));
+
+            assertEquals("bia", service.getCards(BOARD, ANA).get(0).getAuthorId());
+        }
+
+        @Test
+        @DisplayName("criar card devolve o card completo ao autor e publica com contexto de redação")
+        void createReturnsFullToAuthorAndPublishesWithContext() {
+            RetroCard incoming = RetroCard.builder().boardId(BOARD).columnKey("good").content("segredo").build();
+
+            RetroService.Saved<RetroCard> saved = service.saveOrUpdateCard(incoming, ANA);
+
+            assertEquals("segredo", saved.value().getContent());
+            assertEquals("ana", saved.value().getAuthorId());
+            org.mockito.ArgumentCaptor<RetroCardRedactor.Context> ctx = org.mockito.ArgumentCaptor.forClass(RetroCardRedactor.Context.class);
+            verify(webSocketHandler).broadcastCards(eq(BOARD), eq("CARD_SAVED"), any(), ctx.capture());
+            assertFalse(ctx.getValue().cardsRevealed());
+            assertEquals("boss", ctx.getValue().creatorId());
+            assertTrue(ctx.getValue().actionColumnIds().contains("actions"));
+        }
+
+        @Test
+        @DisplayName("mover card alheio devolve a resposta redigida para quem moveu")
+        void moveReturnsRedactedToNonAuthor() {
+            RetroCard stored = card("c1", "good", "ana");
+            when(cardRepository.findById("c1")).thenReturn(Optional.of(stored));
+            RetroCard incoming = RetroCard.builder().id("c1").boardId(BOARD).columnKey("bad").content("").order(7L).build();
+
+            RetroCard out = service.saveOrUpdateCard(incoming, BIA).value();
+
+            assertTrue(out.isHidden());
+            assertEquals("", out.getContent());
+            assertNull(out.getAuthorId());
+            assertEquals("bad", out.getColumnKey());
+            assertEquals("texto c1", stored.getContent());
+        }
+
+        @Test
+        @DisplayName("revelar cards/autores (PATCH) publica REFRESH_BOARD; outras mudanças não")
+        void revealPublishesRefresh() {
+            service.patchBoard(BOARD, json("{\"votingStatus\":\"finished\"}"), CREATOR);
+            verify(webSocketHandler, never()).broadcastEvent(eq(BOARD), eq("REFRESH_BOARD"), any());
+
+            service.patchBoard(BOARD, json("{\"isCardsRevealed\":true}"), CREATOR);
+            service.patchBoard(BOARD, json("{\"isAuthorsRevealed\":true}"), CREATOR);
+            verify(webSocketHandler, times(2)).broadcastEvent(eq(BOARD), eq("REFRESH_BOARD"), any());
+        }
+
+        @Test
+        @DisplayName("POST legado do criador que revela também publica REFRESH_BOARD")
+        void legacyPostReveal() {
+            service.saveOrUpdateBoard(RetroBoard.builder().id(BOARD).title("x").isCardsRevealed(true).build(), CREATOR);
+            verify(webSocketHandler).broadcastEvent(eq(BOARD), eq("REFRESH_BOARD"), any());
+        }
+
+        @Test
+        @DisplayName("importar publica CARDS_IMPORTED pelo canal com redação")
+        void importUsesRedactedChannel() {
+            RetroCard fresh = RetroCard.builder().id("n1").columnKey("actions").content("Ação").build();
+            when(cardRepository.findById("n1")).thenReturn(Optional.empty());
+
+            service.importActions(BOARD, List.of(fresh), ANA);
+
+            verify(webSocketHandler).broadcastCards(eq(BOARD), eq("CARDS_IMPORTED"), any(), any());
+            verify(webSocketHandler, never()).broadcastEvent(eq(BOARD), eq("CARDS_IMPORTED"), any());
+        }
+    }
+
     // ------------------------------------------------------- eventos / commit
 
     @Nested
@@ -925,7 +1080,7 @@ class RetroServiceTest {
             for (TransactionSynchronization s : TransactionSynchronizationManager.getSynchronizations()) {
                 s.afterCommit();
             }
-            verify(webSocketHandler).broadcastEvent(eq(BOARD), eq("CARD_SAVED"), any());
+            verify(webSocketHandler).broadcastCards(eq(BOARD), eq("CARD_SAVED"), any(), any());
         }
 
         @Test

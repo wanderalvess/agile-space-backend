@@ -84,6 +84,35 @@ public class RetroService {
         }
     }
 
+    /** Eventos com card(s): cada sessão recebe a visão redigida dela (anonimato no servidor). */
+    private void publishCards(RetroBoard board, String eventType, Object cardOrCards) {
+        String boardId = board.getId();
+        RetroCardRedactor.Context ctx = RetroCardRedactor.Context.of(board);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    webSocketHandler.broadcastCards(boardId, eventType, cardOrCards, ctx);
+                }
+            });
+        } else {
+            webSocketHandler.broadcastCards(boardId, eventType, cardOrCards, ctx);
+        }
+    }
+
+    private static RetroCard viewFor(RetroBoard board, RetroCard card, RetroCaller caller) {
+        return RetroCardRedactor.view(card, RetroCardRedactor.Context.of(board),
+                caller == null ? null : caller.id(), caller != null && caller.isAdmin());
+    }
+
+    /** Virar a revelação de cards/autores muda o que cada cliente pode ver: manda todos recarregarem os cards. */
+    private void publishRefreshIfRevealChanged(String boardId, Boolean cardsBefore, Boolean authorsBefore, RetroBoard after) {
+        if (!java.util.Objects.equals(Boolean.TRUE.equals(cardsBefore), Boolean.TRUE.equals(after.getIsCardsRevealed()))
+                || !java.util.Objects.equals(Boolean.TRUE.equals(authorsBefore), Boolean.TRUE.equals(after.getIsAuthorsRevealed()))) {
+            publish(boardId, "REFRESH_BOARD", null);
+        }
+    }
+
     // --- Autorização ---
 
     private static ResponseStatusException forbidden(String msg) {
@@ -237,9 +266,12 @@ public class RetroService {
         RetroBoard existing = existingOpt.get();
         if (isCreatorOrAdmin(existing, caller)) {
             validateBoardFields(incoming);
+            Boolean cardsBefore = existing.getIsCardsRevealed();
+            Boolean authorsBefore = existing.getIsAuthorsRevealed();
             applyBoardFields(existing, incoming);
             RetroBoard saved = boardRepository.save(existing);
             publish(saved.getId(), "BOARD_UPDATED", saved);
+            publishRefreshIfRevealChanged(saved.getId(), cardsBefore, authorsBefore, saved);
             return new Saved<>(saved, false);
         }
 
@@ -332,6 +364,8 @@ public class RetroService {
         if (patch == null || !patch.isObject()) throw badRequest("Corpo inválido.");
         RetroBoard board = requireBoardForUpdate(boardId);
         requireMember(board, caller);
+        Boolean cardsBefore = board.getIsCardsRevealed();
+        Boolean authorsBefore = board.getIsAuthorsRevealed();
 
         RetroBoard delta = new RetroBoard();
         // o construtor vazio aplica os @Builder.Default; aqui "ausente" tem de ser null
@@ -446,6 +480,7 @@ public class RetroService {
         }
         RetroBoard saved = boardRepository.save(board);
         publish(boardId, "BOARD_UPDATED", saved);
+        publishRefreshIfRevealChanged(boardId, cardsBefore, authorsBefore, saved);
         return saved;
     }
 
@@ -492,6 +527,8 @@ public class RetroService {
             }
         }
         publish(board.getId(), "BOARD_UPDATED", saved);
+        // quem conduz vê o conteúdo antes da revelação: trocar o facilitador muda a visão de todos
+        if (!Boolean.TRUE.equals(saved.getIsCardsRevealed())) publish(board.getId(), "REFRESH_BOARD", null);
         return saved;
     }
 
@@ -619,7 +656,8 @@ public class RetroService {
     public List<RetroCard> getCards(String boardId, RetroCaller caller) {
         RetroBoard board = requireBoard(boardId);
         requireRead(board, caller);
-        return getCards(boardId);
+        return RetroCardRedactor.view(getCards(boardId), RetroCardRedactor.Context.of(board),
+                caller.id(), caller.isAdmin());
     }
 
     private static boolean isActionColumn(RetroBoard board, String columnKey) {
@@ -690,8 +728,8 @@ public class RetroService {
             card.setReactions(mergeReactions(null, card.getReactions(), caller.id()));
             if (card.getOrder() == null) card.setOrder(0L);
             RetroCard saved = cardRepository.save(card);
-            publish(card.getBoardId(), "CARD_SAVED", saved);
-            return new Saved<>(saved, true);
+            publishCards(board, "CARD_SAVED", saved);
+            return new Saved<>(viewFor(board, saved, caller), true);
         }
 
         boolean fullEdit = caller.id().equals(existing.getAuthorId()) || isCreatorOrAdmin(board, caller);
@@ -717,8 +755,8 @@ public class RetroService {
             }
         }
         RetroCard saved = cardRepository.save(existing);
-        publish(card.getBoardId(), "CARD_SAVED", saved);
-        return new Saved<>(saved, false);
+        publishCards(board, "CARD_SAVED", saved);
+        return new Saved<>(viewFor(board, saved, caller), false);
     }
 
     /**
@@ -756,18 +794,18 @@ public class RetroService {
         if (!caller.id().equals(card.getAuthorId()) && !isCreatorOrAdmin(board, caller)) {
             throw forbidden("Só o autor ou o facilitador podem excluir este card.");
         }
-        orphanChildren(boardId, cardId);
+        orphanChildren(board, cardId);
         cardRepository.deleteById(cardId);
         publish(boardId, "CARD_DELETED", Map.of("cardId", cardId));
     }
 
     /** Filhos de um grupo cujo pai sai ficam soltos (parentId null) em vez de órfãos. */
-    private void orphanChildren(String boardId, String parentId) {
-        List<RetroCard> children = cardRepository.findByBoardIdAndParentId(boardId, parentId);
+    private void orphanChildren(RetroBoard board, String parentId) {
+        List<RetroCard> children = cardRepository.findByBoardIdAndParentId(board.getId(), parentId);
         if (children == null) return;
         for (RetroCard child : children) {
             child.setParentId(null);
-            publish(boardId, "CARD_SAVED", cardRepository.save(child));
+            publishCards(board, "CARD_SAVED", cardRepository.save(child));
         }
     }
 
@@ -799,7 +837,7 @@ public class RetroService {
             if (card.getOrder() == null) card.setOrder(0L);
             result.add(cardRepository.save(card));
         }
-        publish(boardId, "CARDS_IMPORTED", result);
+        publishCards(board, "CARDS_IMPORTED", result);
         return result;
     }
 
@@ -835,8 +873,8 @@ public class RetroService {
             card.getVotes().add(uid);
         }
         RetroCard saved = cardRepository.save(card);
-        publish(boardId, "CARD_SAVED", saved);
-        return saved;
+        publishCards(board, "CARD_SAVED", saved);
+        return viewFor(board, saved, caller);
     }
 
     /** Zera os votos de todos os cards e desativa a votação (criador/ADMIN). */
@@ -849,7 +887,7 @@ public class RetroService {
         for (RetroCard card : cardRepository.findByBoardId(boardId)) {
             if (!card.getVotes().isEmpty()) {
                 card.getVotes().clear();
-                publish(boardId, "CARD_SAVED", cardRepository.save(card));
+                publishCards(board, "CARD_SAVED", cardRepository.save(card));
             }
         }
         board.setVotingStatus("disabled");
@@ -890,14 +928,14 @@ public class RetroService {
             for (RetroCard child : children) {
                 if (child.getId().equals(targetId)) continue;
                 child.setParentId(targetId);
-                publish(boardId, "CARD_SAVED", cardRepository.save(child));
+                publishCards(board, "CARD_SAVED", cardRepository.save(child));
             }
         }
         cardRepository.deleteById(sourceId);
         RetroCard saved = cardRepository.save(target);
         publish(boardId, "CARD_DELETED", Map.of("cardId", sourceId));
-        publish(boardId, "CARD_SAVED", saved);
-        return saved;
+        publishCards(board, "CARD_SAVED", saved);
+        return viewFor(board, saved, caller);
     }
 
     // --- Chat do time ---

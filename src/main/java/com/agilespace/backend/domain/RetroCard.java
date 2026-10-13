@@ -65,6 +65,10 @@ public class RetroCard {
     // Quantas vezes esta ação foi reimportada sem ser concluída (sinal de tema recorrente)
     private Integer carryCount;
 
+    // Não persistido: true quando o servidor entregou este card redigido (anonimato até revelar).
+    @Transient
+    private boolean hidden;
+
     // --- Votes collection ---
     // Set: o banco tem UNIQUE (card_id, user_id) e o Hibernate grava só o delta (insert/delete
     // por linha) em vez de apagar e reinserir a coleção inteira, como fazia com List (bag).
