@@ -34,6 +34,18 @@ class KnowledgeServiceTest {
     @Mock
     private KnowledgeRepository repository;
 
+    @Mock
+    private com.agilespace.backend.repository.KnowledgeDocumentVersionRepository versionRepository;
+
+    @Mock
+    private com.agilespace.backend.repository.UserRepository userRepository;
+
+    @Mock
+    private SquadAccessService squadAccessService;
+
+    @org.mockito.Spy
+    private com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+
     @InjectMocks
     private KnowledgeService service;
 

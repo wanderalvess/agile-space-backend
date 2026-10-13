@@ -43,12 +43,16 @@ class KnowledgeServiceHardeningTest {
     @Mock private KnowledgeConversationRepository conversationRepository;
     @Mock private KnowledgeUserAiSettingsRepository settingsRepository;
     @Mock private KnowledgeTokenUsageRepository tokenRepository;
+    @Mock private com.agilespace.backend.repository.KnowledgeDocumentVersionRepository versionRepository;
+    @Mock private SquadAccessService squadAccessService;
+    @Mock private com.agilespace.backend.repository.UserRepository userRepository;
 
     private KnowledgeService service;
 
     @BeforeEach
     void setUp() {
-        service = new KnowledgeService(repository, conversationRepository, settingsRepository, tokenRepository, new ObjectMapper());
+        service = new KnowledgeService(repository, conversationRepository, settingsRepository, tokenRepository, new ObjectMapper(),
+                versionRepository, squadAccessService, userRepository);
     }
 
     private static HttpStatus statusOf(Supplier<?> call) {
@@ -118,7 +122,7 @@ class KnowledgeServiceHardeningTest {
         when(repository.findById(id)).thenReturn(Optional.of(existing(id, "autor", "published")));
         when(repository.save(any(KnowledgeDocument.class))).thenAnswer(i -> i.getArgument(0));
 
-        KnowledgeDocument saved = service.updateDocument(id, KnowledgeDocument.builder().title("Guia 2").build(), "outro", false);
+        KnowledgeDocument saved = service.updateDocument(id, KnowledgeDocument.builder().title("Guia 2").build(), "autor", false);
 
         assertEquals("published", saved.getStatus());
         assertEquals("Guia 2", saved.getTitle());
@@ -134,7 +138,7 @@ class KnowledgeServiceHardeningTest {
         when(repository.findById(id)).thenReturn(Optional.of(trashed));
         when(repository.save(any(KnowledgeDocument.class))).thenAnswer(i -> i.getArgument(0));
 
-        KnowledgeDocument saved = service.updateDocument(id, KnowledgeDocument.builder().title("Guia").status("published").build(), "qualquer", false);
+        KnowledgeDocument saved = service.updateDocument(id, KnowledgeDocument.builder().title("Guia").status("published").build(), "autor", false);
 
         assertEquals("published", saved.getStatus());
         assertNull(saved.getDeletedAt());

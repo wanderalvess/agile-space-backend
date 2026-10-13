@@ -20,6 +20,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import com.agilespace.backend.dto.KnowledgeVersionDto;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -38,13 +39,16 @@ public class KnowledgeController {
             @RequestParam(value = "query", required = false) String query,
             @RequestParam(value = "tags", required = false) Set<String> tags,
             @RequestParam(value = "status", required = false) String status,
-            @PageableDefault(size = 20) Pageable pageable) {
-        return ResponseEntity.ok(knowledgeService.listDocuments(query, tags, status, pageable));
+            @PageableDefault(size = 20) Pageable pageable,
+            HttpServletRequest request) {
+        Page<KnowledgeDocument> page = knowledgeService.listDocuments(query, tags, status, pageable);
+        knowledgeService.markEditable(page.getContent(), resolveUserId(request), isAdmin(request));
+        return ResponseEntity.ok(page);
     }
 
     // Overload preservado para compatibilidade de origem com chamadas existentes sem filtro de status.
     public ResponseEntity<Page<KnowledgeDocument>> listDocuments(String query, Set<String> tags, Pageable pageable) {
-        return listDocuments(query, tags, null, pageable);
+        return listDocuments(query, tags, null, pageable, null);
     }
 
     @PostMapping("/search/semantic")
@@ -67,9 +71,11 @@ public class KnowledgeController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<KnowledgeDocument> getDocumentById(@PathVariable("id") UUID id) {
+    public ResponseEntity<KnowledgeDocument> getDocumentById(@PathVariable("id") UUID id, HttpServletRequest request) {
         try {
-            return ResponseEntity.ok(knowledgeService.getDocumentById(id));
+            KnowledgeDocument doc = knowledgeService.getDocumentById(id);
+            knowledgeService.markEditable(List.of(doc), resolveUserId(request), isAdmin(request));
+            return ResponseEntity.ok(doc);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }
@@ -80,8 +86,11 @@ public class KnowledgeController {
     // pra não dar pra um autor forjar a autoria de outra pessoa.
     @PostMapping
     public ResponseEntity<KnowledgeDocument> saveOrUpdateDocument(@Valid @RequestBody KnowledgeDocument doc, HttpServletRequest request) {
-        doc.setAuthorId(resolveUserId(request));
-        return ResponseEntity.status(HttpStatus.CREATED).body(knowledgeService.saveOrUpdateDocument(doc));
+        String callerId = resolveUserId(request);
+        doc.setAuthorId(callerId);
+        KnowledgeDocument saved = knowledgeService.saveOrUpdateDocument(doc, isAdmin(request));
+        knowledgeService.markEditable(List.of(saved), callerId, isAdmin(request));
+        return ResponseEntity.status(HttpStatus.CREATED).body(saved);
     }
 
     @PutMapping("/{id}")
@@ -90,10 +99,11 @@ public class KnowledgeController {
             @Valid @RequestBody KnowledgeDocument doc,
             HttpServletRequest request) {
         String callerId = resolveUserId(request);
-        String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
         doc.setUpdatedBy(callerId);
         try {
-            return ResponseEntity.ok(knowledgeService.updateDocument(id, doc, callerId, "ADMIN".equalsIgnoreCase(role)));
+            KnowledgeDocument saved = knowledgeService.updateDocument(id, doc, callerId, isAdmin(request));
+            knowledgeService.markEditable(List.of(saved), callerId, isAdmin(request));
+            return ResponseEntity.ok(saved);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }
@@ -104,10 +114,40 @@ public class KnowledgeController {
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteDocument(@PathVariable("id") UUID id, HttpServletRequest request) {
         String callerId = resolveUserId(request);
-        String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
         try {
-            knowledgeService.deleteDocument(id, callerId, "ADMIN".equalsIgnoreCase(role));
+            knowledgeService.deleteDocument(id, callerId, isAdmin(request));
             return ResponseEntity.noContent().build();
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @GetMapping("/{id}/versions")
+    public ResponseEntity<List<KnowledgeVersionDto>> listVersions(@PathVariable("id") UUID id) {
+        try {
+            return ResponseEntity.ok(knowledgeService.listVersions(id));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @GetMapping("/{id}/versions/{number}")
+    public ResponseEntity<KnowledgeVersionDto> getVersion(@PathVariable("id") UUID id, @PathVariable("number") int number) {
+        try {
+            return ResponseEntity.ok(knowledgeService.getVersion(id, number));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /** Restaura uma versão (cria uma nova versão). Mesma permissão de edição. */
+    @PostMapping("/{id}/versions/{number}/restore")
+    public ResponseEntity<KnowledgeDocument> restoreVersion(@PathVariable("id") UUID id, @PathVariable("number") int number, HttpServletRequest request) {
+        String callerId = resolveUserId(request);
+        try {
+            KnowledgeDocument saved = knowledgeService.restoreVersion(id, number, callerId, isAdmin(request));
+            knowledgeService.markEditable(List.of(saved), callerId, isAdmin(request));
+            return ResponseEntity.ok(saved);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }
@@ -209,7 +249,12 @@ public class KnowledgeController {
         return ResponseEntity.ok(knowledgeService.getTopTokenUsage());
     }
 
+    private boolean isAdmin(HttpServletRequest request) {
+        return request != null && "ADMIN".equalsIgnoreCase((String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE));
+    }
+
     private String resolveUserId(HttpServletRequest request) {
+        if (request == null) return null;
         return (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
     }
 }

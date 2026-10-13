@@ -39,7 +39,7 @@ public class KnowledgeControllerTest {
     @Test
     public void testListDocuments() {
         Page<KnowledgeDocument> page = new PageImpl<>(Arrays.asList(new KnowledgeDocument()));
-        when(service.listDocuments(eq("query"), any(), any(PageRequest.class))).thenReturn(page);
+        when(service.listDocuments(eq("query"), any(), any(), any(PageRequest.class))).thenReturn(page);
         
         ResponseEntity<Page<KnowledgeDocument>> response = controller.listDocuments("query", null, PageRequest.of(0, 20));
         
@@ -51,7 +51,7 @@ public class KnowledgeControllerTest {
         UUID id = UUID.randomUUID();
         when(service.getDocumentById(id)).thenReturn(new KnowledgeDocument());
         
-        ResponseEntity<KnowledgeDocument> response = controller.getDocumentById(id);
+        ResponseEntity<KnowledgeDocument> response = controller.getDocumentById(id, mockRequest("u1", "MEMBER"));
         
         assertEquals(HttpStatus.OK, response.getStatusCode());
     }
@@ -67,7 +67,7 @@ public class KnowledgeControllerTest {
     public void testSaveOrUpdateDocumentSetsAuthorFromTokenForAnyAuthenticated() {
         // Criar/editar é aberto a qualquer autenticado — não precisa ser ADMIN.
         KnowledgeDocument doc = new KnowledgeDocument();
-        when(service.saveOrUpdateDocument(doc)).thenReturn(doc);
+        when(service.saveOrUpdateDocument(doc, false)).thenReturn(doc);
 
         ResponseEntity<KnowledgeDocument> response = controller.saveOrUpdateDocument(doc, mockRequest("u1", "MEMBER"));
 

@@ -2,6 +2,11 @@ package com.agilespace.backend.service;
 
 import com.agilespace.backend.domain.KnowledgeConversation;
 import com.agilespace.backend.domain.KnowledgeDocument;
+import com.agilespace.backend.domain.KnowledgeDocumentVersion;
+import com.agilespace.backend.domain.User;
+import com.agilespace.backend.dto.KnowledgeVersionDto;
+import com.agilespace.backend.repository.KnowledgeDocumentVersionRepository;
+import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.domain.KnowledgeTokenUsage;
 import com.agilespace.backend.domain.KnowledgeUserAiSettings;
 import com.agilespace.backend.repository.KnowledgeConversationRepository;
@@ -23,6 +28,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.TreeSet;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -39,6 +49,9 @@ public class KnowledgeService {
     private final KnowledgeUserAiSettingsRepository knowledgeUserAiSettingsRepository;
     private final KnowledgeTokenUsageRepository knowledgeTokenUsageRepository;
     private final ObjectMapper objectMapper;
+    private final KnowledgeDocumentVersionRepository versionRepository;
+    private final SquadAccessService squadAccessService;
+    private final UserRepository userRepository;
 
     private static final Set<String> STOP_WORDS = Set.of(
             "a", "o", "as", "os", "um", "uma", "uns", "umas",
@@ -56,6 +69,8 @@ public class KnowledgeService {
     // se a base de conhecimento real mostrar muito falso positivo/negativo em produção.
     private static final float MIN_SIMILARITY = 0.2f;
 
+    static final int MAX_VERSIONS = 50;
+    static final String NO_PERMISSION = "Só o autor ou a liderança editam este documento.";
     static final int MAX_TITLE = 255;
     static final int MAX_META = 255;
     static final int MAX_CONTENT = 2_000_000;
@@ -166,13 +181,20 @@ public class KnowledgeService {
 
     @Transactional
     public KnowledgeDocument saveOrUpdateDocument(KnowledgeDocument doc) {
+        return saveOrUpdateDocument(doc, false);
+    }
+
+    @Transactional
+    public KnowledgeDocument saveOrUpdateDocument(KnowledgeDocument doc, boolean isAdmin) {
         validateDocument(doc);
-        // Documento novo nunca herda id/contadores/lixeira vindos do corpo: um POST com o id de um
+        // Documento novo nunca herda id/contadores/lixeira/squad vindos do corpo: um POST com o id de um
         // documento existente virava "merge" e sobrescrevia (inclusive a autoria) o de outra pessoa.
         doc.setId(null);
         doc.setViews(0);
         doc.setDeletedAt(null);
         doc.setDeletedBy(null);
+        doc.setSquadId(null);
+        doc.setCanEdit(null);
         if ("deleted".equals(doc.getStatus())) {
             throw badRequest("Para apagar um documento use a exclusão (lixeira).");
         }
@@ -181,6 +203,12 @@ public class KnowledgeService {
             Optional<KnowledgeDocument> existingOpt = knowledgeRepository.findByTdnId(doc.getTdnId());
             if (existingOpt.isPresent()) {
                 KnowledgeDocument existing = existingOpt.get();
+                // Reimportar sobrescreve o documento: vale a mesma regra de edição.
+                requireCanEdit(existing, doc.getAuthorId(), isAdmin);
+                boolean changed = contentChanged(existing, doc);
+                if (changed) {
+                    ensureBaseline(existing);
+                }
                 existing.setTitle(doc.getTitle());
                 existing.setContent(doc.getContent());
                 existing.setCategory(doc.getCategory());
@@ -195,8 +223,14 @@ public class KnowledgeService {
                 existing.setUpdatedBy(doc.getAuthorId());
                 if (doc.getEmbedding() != null) {
                     existing.setEmbedding(doc.getEmbedding());
+                } else if (changed) {
+                    existing.setEmbedding(null);
                 }
-                return knowledgeRepository.save(existing);
+                KnowledgeDocument saved = knowledgeRepository.save(existing);
+                if (changed) {
+                    recordVersion(saved, doc.getAuthorId(), LocalDateTime.now(ZoneOffset.UTC));
+                }
+                return saved;
             }
         }
 
@@ -204,24 +238,23 @@ public class KnowledgeService {
         if (doc.getStatus() == null) {
             doc.setStatus("published");
         }
-        return knowledgeRepository.save(doc);
-    }
-
-    /** Mantido para chamadas internas sem contexto de usuário: não permite apagar via status. */
-    @Transactional
-    public KnowledgeDocument updateDocument(UUID id, KnowledgeDocument updatedDoc) {
-        return updateDocument(id, updatedDoc, updatedDoc.getUpdatedBy(), false);
+        doc.setSquadId(squadOfUser(doc.getAuthorId()));
+        KnowledgeDocument saved = knowledgeRepository.save(doc);
+        recordVersion(saved, saved.getAuthorId(), LocalDateTime.now(ZoneOffset.UTC));
+        return saved;
     }
 
     @Transactional
     public KnowledgeDocument updateDocument(UUID id, KnowledgeDocument updatedDoc, String callerId, boolean isAdmin) {
         validateDocument(updatedDoc);
         KnowledgeDocument existing = getDocumentById(id);
+        // Editar, mover para a lixeira e restaurar: só autor, liderança da squad do documento ou ADMIN.
+        requireCanEdit(existing, callerId, isAdmin);
         String newStatus = updatedDoc.getStatus() != null ? updatedDoc.getStatus() : existing.getStatus();
         boolean deleting = "deleted".equals(newStatus) && !"deleted".equals(existing.getStatus());
-        if (deleting && !isAdmin && (callerId == null || !callerId.equals(existing.getAuthorId()))) {
-            // Mudar o status para "deleted" pelo PUT contornava a regra "só autor ou admin apaga".
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Apenas o autor ou um administrador pode apagar este documento.");
+        boolean changed = contentChanged(existing, updatedDoc);
+        if (changed) {
+            ensureBaseline(existing);
         }
         existing.setTitle(updatedDoc.getTitle());
         existing.setContent(updatedDoc.getContent());
@@ -242,11 +275,180 @@ public class KnowledgeService {
         }
         existing.setTags(updatedDoc.getTags() != null ? updatedDoc.getTags() : existing.getTags());
         existing.setByteSize(updatedDoc.getByteSize());
-        existing.setUpdatedBy(updatedDoc.getUpdatedBy());
+        existing.setUpdatedBy(callerId != null ? callerId : updatedDoc.getUpdatedBy());
         if (updatedDoc.getEmbedding() != null) {
             existing.setEmbedding(updatedDoc.getEmbedding());
+        } else if (changed) {
+            // O vetor antigo descreve o texto antigo; sem um novo, o documento sai da busca semântica
+            // até ser reindexado (melhor do que achar o documento pelo conteúdo que ele não tem mais).
+            existing.setEmbedding(null);
         }
-        return knowledgeRepository.save(existing);
+        KnowledgeDocument saved = knowledgeRepository.save(existing);
+        if (changed) {
+            recordVersion(saved, callerId, LocalDateTime.now(ZoneOffset.UTC));
+        }
+        return saved;
+    }
+
+    // ----- Permissão de edição
+
+    /** Autor, ADMIN ou liderança da squad do documento. Documento sem autor registrado: só ADMIN. */
+    public boolean canEdit(KnowledgeDocument doc, String callerId, boolean isAdmin) {
+        return canEdit(doc, callerId, isAdmin, new HashMap<>());
+    }
+
+    private boolean canEdit(KnowledgeDocument doc, String callerId, boolean isAdmin, Map<String, Boolean> leadershipBySquad) {
+        if (isAdmin) {
+            return true;
+        }
+        if (callerId == null || callerId.isBlank() || doc.getAuthorId() == null || doc.getAuthorId().isBlank()) {
+            return false;
+        }
+        if (callerId.equals(doc.getAuthorId())) {
+            return true;
+        }
+        String squad = doc.getSquadId();
+        if (squad == null || squad.isBlank() || squadAccessService == null) {
+            return false;
+        }
+        return leadershipBySquad.computeIfAbsent(squad, s -> squadAccessService.isSquadLeadership(s, callerId, null));
+    }
+
+    private void requireCanEdit(KnowledgeDocument doc, String callerId, boolean isAdmin) {
+        if (!canEdit(doc, callerId, isAdmin)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, NO_PERMISSION);
+        }
+    }
+
+    /** Preenche {@code canEdit} em cada documento (uma checagem de liderança por squad, não por documento). */
+    public void markEditable(Iterable<KnowledgeDocument> docs, String callerId, boolean isAdmin) {
+        Map<String, Boolean> cache = new HashMap<>();
+        for (KnowledgeDocument d : docs) {
+            d.setCanEdit(canEdit(d, callerId, isAdmin, cache));
+        }
+    }
+
+    private String squadOfUser(String userId) {
+        if (userId == null || userRepository == null) {
+            return null;
+        }
+        return userRepository.findById(userId).map(User::getSquadId).filter(sq -> !sq.isBlank()).orElse(null);
+    }
+
+    // ----- Histórico de versões
+
+    private static String nullToEmpty(String v) {
+        return v == null ? "" : v;
+    }
+
+    private boolean contentChanged(KnowledgeDocument existing, KnowledgeDocument incoming) {
+        if (!Objects.equals(existing.getTitle(), incoming.getTitle())) return true;
+        if (!nullToEmpty(existing.getContent()).equals(nullToEmpty(incoming.getContent()))) return true;
+        if (incoming.getTags() == null) return false;
+        return !new TreeSet<>(existing.getTags() == null ? Set.<String>of() : existing.getTags())
+                .equals(new TreeSet<>(incoming.getTags()));
+    }
+
+    private String tagsJson(Set<String> tags) {
+        try {
+            return objectMapper.writeValueAsString(new TreeSet<>(tags == null ? Set.<String>of() : tags));
+        } catch (JsonProcessingException e) {
+            return "[]";
+        }
+    }
+
+    private List<String> parseTags(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<List<String>>() {});
+        } catch (JsonProcessingException e) {
+            return List.of();
+        }
+    }
+
+    /** Guarda o estado atual como uma nova versão e descarta as mais antigas além do limite. */
+    private void recordVersion(KnowledgeDocument doc, String changedBy, LocalDateTime at) {
+        int next = versionRepository.findTopByDocumentIdOrderByVersionNumberDesc(doc.getId())
+                .map(v -> v.getVersionNumber() + 1).orElse(1);
+        versionRepository.save(KnowledgeDocumentVersion.builder()
+                .documentId(doc.getId())
+                .versionNumber(next)
+                .title(doc.getTitle())
+                .content(doc.getContent())
+                .tags(tagsJson(doc.getTags()))
+                .category(doc.getCategory())
+                .fullPath(doc.getFullPath())
+                .changedBy(changedBy)
+                .changedAt(at)
+                .build());
+        List<KnowledgeDocumentVersion> all = versionRepository.findByDocumentIdOrderByVersionNumberDesc(doc.getId());
+        if (all.size() > MAX_VERSIONS) {
+            versionRepository.deleteAll(all.subList(MAX_VERSIONS, all.size()));
+        }
+    }
+
+    /** Documento que ainda não tem histórico (criado antes desta função): registra o estado atual como versão inicial. */
+    private void ensureBaseline(KnowledgeDocument doc) {
+        if (versionRepository.countByDocumentId(doc.getId()) == 0) {
+            LocalDateTime at = doc.getUpdatedAt() != null ? doc.getUpdatedAt()
+                    : doc.getCreatedAt() != null ? doc.getCreatedAt() : LocalDateTime.now(ZoneOffset.UTC);
+            recordVersion(doc, doc.getUpdatedBy() != null ? doc.getUpdatedBy() : doc.getAuthorId(), at);
+        }
+    }
+
+    private KnowledgeVersionDto toDto(KnowledgeDocumentVersion v, int currentNumber, boolean full, Map<String, String> names) {
+        String name = v.getChangedBy() == null ? null : names.computeIfAbsent(v.getChangedBy(),
+                uid -> userRepository == null ? uid : userRepository.findById(uid).map(User::getName).orElse(uid));
+        return new KnowledgeVersionDto(v.getVersionNumber(), v.getTitle(), v.getChangedBy(), name, v.getChangedAt(),
+                v.getVersionNumber() == currentNumber,
+                full ? v.getContent() : null, full ? parseTags(v.getTags()) : null,
+                full ? v.getCategory() : null, full ? v.getFullPath() : null);
+    }
+
+    @Transactional
+    public List<KnowledgeVersionDto> listVersions(UUID id) {
+        KnowledgeDocument doc = getDocumentById(id);
+        ensureBaseline(doc);
+        List<KnowledgeDocumentVersion> versions = versionRepository.findByDocumentIdOrderByVersionNumberDesc(id);
+        int current = versions.isEmpty() ? 0 : versions.get(0).getVersionNumber();
+        Map<String, String> names = new HashMap<>();
+        return versions.stream().map(v -> toDto(v, current, false, names)).collect(Collectors.toList());
+    }
+
+    @Transactional
+    public KnowledgeVersionDto getVersion(UUID id, int number) {
+        KnowledgeDocument doc = getDocumentById(id);
+        ensureBaseline(doc);
+        KnowledgeDocumentVersion v = versionRepository.findByDocumentIdAndVersionNumber(id, number)
+                .orElseThrow(() -> new IllegalArgumentException("Version not found: " + number));
+        int current = versionRepository.findTopByDocumentIdOrderByVersionNumberDesc(id).map(KnowledgeDocumentVersion::getVersionNumber).orElse(0);
+        return toDto(v, current, true, new HashMap<>());
+    }
+
+    /**
+     * Restaurar uma versão cria uma NOVA versão com aquele conteúdo (o histórico só cresce). O vetor de busca
+     * é descartado: o chamador reindexa em seguida (a tela faz isso), então a busca semântica nunca usa texto antigo.
+     */
+    @Transactional
+    public KnowledgeDocument restoreVersion(UUID id, int number, String callerId, boolean isAdmin) {
+        KnowledgeDocument doc = getDocumentById(id);
+        requireCanEdit(doc, callerId, isAdmin);
+        ensureBaseline(doc);
+        KnowledgeDocumentVersion v = versionRepository.findByDocumentIdAndVersionNumber(id, number)
+                .orElseThrow(() -> new IllegalArgumentException("Version not found: " + number));
+        doc.setTitle(v.getTitle());
+        doc.setContent(v.getContent());
+        doc.setTags(new java.util.HashSet<>(parseTags(v.getTags())));
+        if (v.getCategory() != null) doc.setCategory(v.getCategory());
+        if (v.getFullPath() != null) doc.setFullPath(v.getFullPath());
+        doc.setByteSize(v.getContent() == null ? 0L : (long) v.getContent().getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
+        doc.setUpdatedBy(callerId);
+        doc.setEmbedding(null);
+        KnowledgeDocument saved = knowledgeRepository.save(doc);
+        recordVersion(saved, callerId, LocalDateTime.now(ZoneOffset.UTC));
+        return saved;
     }
 
     static ResponseStatusException badRequest(String message) {
@@ -291,9 +493,7 @@ public class KnowledgeService {
     @Transactional
     public KnowledgeDocument deleteDocument(UUID id, String callerId, boolean isAdmin) {
         KnowledgeDocument doc = getDocumentById(id);
-        if (!isAdmin && !callerId.equals(doc.getAuthorId())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Apenas o autor ou um administrador pode apagar este documento.");
-        }
+        requireCanEdit(doc, callerId, isAdmin);
         doc.setStatus("deleted");
         doc.setDeletedAt(LocalDateTime.now());
         doc.setDeletedBy(callerId);

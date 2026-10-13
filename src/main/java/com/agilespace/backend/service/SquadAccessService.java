@@ -156,6 +156,39 @@ public class SquadAccessService {
         return !hasRegisteredLeadership(squadId);
     }
 
+    /**
+     * Liderança ESTRITA da squad (sem a regra "squad sem liderança cadastrada: qualquer membro"):
+     * ADMIN, ou membro da squad com cargo de liderança, ou linha de liderança no roster. Usada onde a
+     * regra pede liderança de verdade (ex.: editar documentos da Base de Conhecimento).
+     */
+    public boolean isSquadLeadership(String squadId, String userId, String role) {
+        if (squadId == null || squadId.isBlank() || userId == null) {
+            return false;
+        }
+        if ("ADMIN".equalsIgnoreCase(role)) {
+            return true;
+        }
+        User caller = userRepository.findById(userId).orElse(null);
+        if (caller == null) {
+            return false;
+        }
+        if ("ADMIN".equalsIgnoreCase(caller.getRole())) {
+            return true;
+        }
+        if (!matchesSquad(squadId, userId, role)) {
+            return false;
+        }
+        if (SquadLeadership.isLeadershipJobTitle(caller.getJobTitle())) {
+            return true;
+        }
+        if (userProjectResolverService == null) {
+            return false;
+        }
+        UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(caller);
+        return access != null && access.getProjects() != null
+                && access.getProjects().stream().anyMatch(p -> p.isLeadership() && sameSquad(p.getProjectId(), squadId));
+    }
+
     /** True se o cadastro do projeto (ou o alias DDWMISSI/MISSI) já tem alguma pessoa de liderança. */
     private boolean hasRegisteredLeadership(String squadId) {
         if (userProjectResolverService.hasRegisteredLeadership(squadId)) {
