@@ -66,6 +66,19 @@ public class BrainstormingService {
         AfterCommit.run(() -> webSocketHandler.broadcastEvent(boardId, eventType, payload));
     }
 
+    /** Ideia publicada por destinatário: cada sessão recebe a versão que a pessoa pode ver (ver BrainstormingRedaction). */
+    private void publishIdea(String boardId, BrainstormingIdea idea) {
+        BrainstormingBoard board = boardRepository.findById(boardId).orElse(null);
+        AfterCommit.run(() -> webSocketHandler.broadcastEventPerUser(boardId, "IDEA_SAVED",
+                (userId, role) -> BrainstormingRedaction.redact(idea, board, new CeremonyCaller(userId, role))));
+    }
+
+    /** A ideia como {@code caller} pode vê-la (respostas REST). */
+    @Transactional(readOnly = true)
+    public BrainstormingIdea viewIdea(String boardId, BrainstormingIdea idea, CeremonyCaller caller) {
+        return BrainstormingRedaction.redact(idea, boardRepository.findById(boardId).orElse(null), caller);
+    }
+
     private static ResponseStatusException badRequest(String msg) {
         return new ResponseStatusException(HttpStatus.BAD_REQUEST, msg);
     }
@@ -340,8 +353,11 @@ public class BrainstormingService {
     // --- Ideias ---
 
     @Transactional(readOnly = true)
-    public List<BrainstormingIdea> getIdeas(String boardId) {
-        return ideaRepository.findByBoardId(boardId);
+    public List<BrainstormingIdea> getIdeas(String boardId, CeremonyCaller caller) {
+        BrainstormingBoard board = boardRepository.findById(boardId).orElse(null);
+        return ideaRepository.findByBoardId(boardId).stream()
+                .map(idea -> BrainstormingRedaction.redact(idea, board, caller))
+                .toList();
     }
 
     private BrainstormingIdea requireIdeaForUpdate(String boardId, String ideaId) {
@@ -387,7 +403,7 @@ public class BrainstormingService {
                     idea.setColor(cleanText(body.getColor(), MAX_SHORT, "A cor", false));
                 }
                 BrainstormingIdea saved = ideaRepository.save(idea);
-                publish(boardId, "IDEA_SAVED", saved);
+                publishIdea(boardId, saved);
                 return new Saved<>(saved, false);
             }
         }
@@ -405,7 +421,7 @@ public class BrainstormingService {
                 .color(cleanText(body.getColor(), MAX_SHORT, "A cor", false))
                 .build();
         BrainstormingIdea saved = ideaRepository.save(idea);
-        publish(boardId, "IDEA_SAVED", saved);
+        publishIdea(boardId, saved);
         return new Saved<>(saved, true);
     }
 
@@ -437,7 +453,7 @@ public class BrainstormingService {
             idea.setParentId(validParent(boardId, ideaId, patch.get("parentId").isNull() ? null : patch.get("parentId").asText(null)));
         }
         BrainstormingIdea saved = ideaRepository.save(idea);
-        publish(boardId, "IDEA_SAVED", saved);
+        publishIdea(boardId, saved);
         return saved;
     }
 
@@ -546,7 +562,7 @@ public class BrainstormingService {
         }
         idea.setVotes(votes);
         BrainstormingIdea saved = ideaRepository.save(idea);
-        publish(boardId, "IDEA_SAVED", saved);
+        publishIdea(boardId, saved);
         return saved;
     }
 
@@ -602,9 +618,9 @@ public class BrainstormingService {
         BrainstormingIdea saved = ideaRepository.save(target);
         ideaRepository.deleteById(sourceId);
 
-        publish(boardId, "IDEA_SAVED", saved);
+        publishIdea(boardId, saved);
         for (BrainstormingIdea child : reparented) {
-            publish(boardId, "IDEA_SAVED", child);
+            publishIdea(boardId, child);
         }
         publish(boardId, "IDEA_DELETED", Map.of("ideaId", sourceId));
         return saved;
@@ -626,7 +642,7 @@ public class BrainstormingService {
         }
         ideaRepository.deleteById(ideaId);
         for (BrainstormingIdea child : detached) {
-            publish(boardId, "IDEA_SAVED", child);
+            publishIdea(boardId, child);
         }
         publish(boardId, "IDEA_DELETED", Map.of("ideaId", ideaId));
     }
@@ -686,7 +702,7 @@ public class BrainstormingService {
         }
         groupRepository.deleteById(groupId);
         for (BrainstormingIdea idea : released) {
-            publish(boardId, "IDEA_SAVED", idea);
+            publishIdea(boardId, idea);
         }
         publish(boardId, "GROUP_DELETED", Map.of("groupId", groupId));
     }

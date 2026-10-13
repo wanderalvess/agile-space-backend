@@ -103,8 +103,8 @@ public class BrainstormingController {
 
     // --- Ideas ---
     @GetMapping("/{boardId}/ideas")
-    public ResponseEntity<List<BrainstormingIdea>> getIdeas(@PathVariable("boardId") String boardId) {
-        return ResponseEntity.ok(brainstormingService.getIdeas(boardId));
+    public ResponseEntity<List<BrainstormingIdea>> getIdeas(@PathVariable("boardId") String boardId, HttpServletRequest request) {
+        return ResponseEntity.ok(brainstormingService.getIdeas(boardId, caller(request)));
     }
 
     @PostMapping("/{boardId}/ideas")
@@ -112,7 +112,9 @@ public class BrainstormingController {
             @PathVariable("boardId") String boardId,
             @RequestBody BrainstormingIdea idea,
             HttpServletRequest request) {
-        return upsert(brainstormingService.saveOrUpdateIdea(boardId, idea, caller(request)));
+        CeremonyCaller caller = caller(request);
+        BrainstormingService.Saved<BrainstormingIdea> saved = brainstormingService.saveOrUpdateIdea(boardId, idea, caller);
+        return upsert(new BrainstormingService.Saved<>(brainstormingService.viewIdea(boardId, saved.value(), caller), saved.created()));
     }
 
     /** Edição parcial da ideia (texto, posição, grupo, ligação, qualificadores). Votos só pelo endpoint de voto. */
@@ -122,7 +124,8 @@ public class BrainstormingController {
             @PathVariable("ideaId") String ideaId,
             @RequestBody JsonNode patch,
             HttpServletRequest request) {
-        return ResponseEntity.ok(brainstormingService.patchIdea(boardId, ideaId, patch, caller(request)));
+        CeremonyCaller caller = caller(request);
+        return ResponseEntity.ok(brainstormingService.viewIdea(boardId, brainstormingService.patchIdea(boardId, ideaId, patch, caller), caller));
     }
 
     /** Liga/desliga o voto de quem chama (atômico no servidor). */
@@ -131,7 +134,8 @@ public class BrainstormingController {
             @PathVariable("boardId") String boardId,
             @PathVariable("ideaId") String ideaId,
             HttpServletRequest request) {
-        return ResponseEntity.ok(brainstormingService.toggleVote(boardId, ideaId, caller(request)));
+        CeremonyCaller caller = caller(request);
+        return ResponseEntity.ok(brainstormingService.viewIdea(boardId, brainstormingService.toggleVote(boardId, ideaId, caller), caller));
     }
 
     /** Funde a ideia de origem na de destino (texto, votos e ligações) numa só operação. */
@@ -141,7 +145,8 @@ public class BrainstormingController {
             @PathVariable("targetId") String targetId,
             @PathVariable("sourceId") String sourceId,
             HttpServletRequest request) {
-        return ResponseEntity.ok(brainstormingService.mergeIdeas(boardId, targetId, sourceId, caller(request)));
+        CeremonyCaller caller = caller(request);
+        return ResponseEntity.ok(brainstormingService.viewIdea(boardId, brainstormingService.mergeIdeas(boardId, targetId, sourceId, caller), caller));
     }
 
     @DeleteMapping("/{boardId}/ideas/{ideaId}")

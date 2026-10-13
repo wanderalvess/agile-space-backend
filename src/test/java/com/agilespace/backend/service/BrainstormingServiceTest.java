@@ -250,7 +250,7 @@ class BrainstormingServiceTest {
             assertEquals("b1", saved.value().getBoardId());
             assertEquals("Migrar", saved.value().getContent());
             assertEquals(0, saved.value().getVotes().size());
-            verify(webSocketHandler).broadcastEvent(eq("b1"), eq("IDEA_SAVED"), eq(saved.value()));
+            verify(webSocketHandler).broadcastEventPerUser(eq("b1"), eq("IDEA_SAVED"), any());
         }
 
         @Test
@@ -363,7 +363,7 @@ class BrainstormingServiceTest {
             BrainstormingIdea unvoted = service.toggleVote("b1", "i1", OTHER);
             assertEquals(List.of("a", "b"), texts(unvoted.getVotes()));
             verify(ideaRepository, times(2)).findByIdForUpdate("i1");
-            verify(webSocketHandler, times(2)).broadcastEvent(eq("b1"), eq("IDEA_SAVED"), any());
+            verify(webSocketHandler, times(2)).broadcastEventPerUser(eq("b1"), eq("IDEA_SAVED"), any());
         }
 
         @Test
@@ -478,7 +478,7 @@ class BrainstormingServiceTest {
             service.deleteIdea("b1", "i1", OTHER);
 
             assertNull(child.getParentId());
-            verify(webSocketHandler).broadcastEvent(eq("b1"), eq("IDEA_SAVED"), eq(child));
+            verify(webSocketHandler).broadcastEventPerUser(eq("b1"), eq("IDEA_SAVED"), any());
             verify(webSocketHandler).broadcastEvent(eq("b1"), eq("IDEA_DELETED"), any());
         }
 
@@ -496,7 +496,7 @@ class BrainstormingServiceTest {
 
             assertNull(inGroup.getGroupId());
             verify(groupRepository).deleteById("g1");
-            verify(webSocketHandler).broadcastEvent(eq("b1"), eq("IDEA_SAVED"), eq(inGroup));
+            verify(webSocketHandler).broadcastEventPerUser(eq("b1"), eq("IDEA_SAVED"), any());
             verify(webSocketHandler).broadcastEvent(eq("b1"), eq("GROUP_DELETED"), any());
         }
 
@@ -542,11 +542,74 @@ class BrainstormingServiceTest {
 
             service.toggleVote("b1", "i1", OTHER);
 
-            verify(webSocketHandler, never()).broadcastEvent(anyString(), anyString(), any());
+            verify(webSocketHandler, never()).broadcastEventPerUser(anyString(), anyString(), any());
             for (TransactionSynchronization sync : TransactionSynchronizationManager.getSynchronizations()) {
                 sync.afterCommit();
             }
-            verify(webSocketHandler).broadcastEvent(eq("b1"), eq("IDEA_SAVED"), any());
+            verify(webSocketHandler).broadcastEventPerUser(eq("b1"), eq("IDEA_SAVED"), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Ideias ocultas: saída por destinatário")
+    class HiddenIdeasTests {
+
+        private BrainstormingBoard hiddenBoard() {
+            BrainstormingBoard b = board();
+            b.setSettings(json("{\"isRevealed\":false,\"isAnonymous\":false}"));
+            return b;
+        }
+
+        @Test
+        @DisplayName("GET ideas: o texto dos outros vem vazio; o autor e o facilitador leem; a lista no banco não é alterada")
+        void getIdeasRedactsPerCaller() {
+            when(boardRepository.findById("b1")).thenReturn(Optional.of(hiddenBoard()));
+            BrainstormingIdea mine = idea("i1", "meu texto", "u2", "[\"a\"]");
+            BrainstormingIdea theirs = idea("i2", "texto alheio", "u9", "[\"b\"]");
+            when(ideaRepository.findByBoardId("b1")).thenReturn(List.of(mine, theirs));
+
+            List<BrainstormingIdea> forOther = service.getIdeas("b1", OTHER);
+            assertEquals("meu texto", forOther.get(0).getContent());
+            assertEquals("", forOther.get(1).getContent());
+            assertNull(forOther.get(1).getAuthorId());
+            assertTrue(forOther.get(1).getHidden());
+
+            List<BrainstormingIdea> forFacilitator = service.getIdeas("b1", FACILITATOR);
+            assertEquals("texto alheio", forFacilitator.get(1).getContent());
+            assertEquals("texto alheio", theirs.getContent());
+        }
+
+        @Test
+        @DisplayName("WebSocket: o evento IDEA_SAVED é montado por sessão (autor recebe o texto, o outro não)")
+        void websocketPayloadIsPerSession() {
+            when(boardRepository.findById("b1")).thenReturn(Optional.of(hiddenBoard()));
+            BrainstormingIdea stored = idea("i1", "segredo", "u2", "[]");
+            when(ideaRepository.findByIdForUpdate("i1")).thenReturn(Optional.of(stored));
+            when(ideaRepository.save(any(BrainstormingIdea.class))).thenAnswer(i -> i.getArgument(0));
+
+            service.toggleVote("b1", "i1", FACILITATOR);
+
+            @SuppressWarnings("unchecked")
+            org.mockito.ArgumentCaptor<java.util.function.BiFunction<String, String, Object>> captor =
+                    org.mockito.ArgumentCaptor.forClass(java.util.function.BiFunction.class);
+            verify(webSocketHandler).broadcastEventPerUser(eq("b1"), eq("IDEA_SAVED"), captor.capture());
+            BrainstormingIdea forAuthor = (BrainstormingIdea) captor.getValue().apply("u2", "MEMBER");
+            BrainstormingIdea forOther = (BrainstormingIdea) captor.getValue().apply("u7", "MEMBER");
+            assertEquals("segredo", forAuthor.getContent());
+            assertEquals("", forOther.getContent());
+            assertTrue(forOther.getHidden());
+            assertEquals("segredo", stored.getContent());
+            verify(webSocketHandler, never()).broadcastEvent(anyString(), eq("IDEA_SAVED"), any());
+        }
+
+        @Test
+        @DisplayName("Resposta REST (viewIdea) também sai redigida para quem não pode ler")
+        void viewIdeaRedacts() {
+            when(boardRepository.findById("b1")).thenReturn(Optional.of(hiddenBoard()));
+            BrainstormingIdea stored = idea("i1", "segredo", "u9", "[\"x\"]");
+
+            assertEquals("", service.viewIdea("b1", stored, OTHER).getContent());
+            assertEquals("segredo", service.viewIdea("b1", stored, FACILITATOR).getContent());
         }
     }
 }

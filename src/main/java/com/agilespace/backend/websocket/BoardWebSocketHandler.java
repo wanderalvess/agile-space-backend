@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiFunction;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.stream.Collectors;
@@ -101,6 +102,34 @@ public abstract class BoardWebSocketHandler extends TextWebSocketHandler {
             }
         } catch (Exception e) {
             log.error("Failed to serialize or broadcast event '{}' for board {}", eventType, boardId, e);
+        }
+    }
+
+    /**
+     * Um payload por sessão: {@code payloadFor(userId, role)} monta o que aquela pessoa pode ver (userId e role vêm
+     * do JWT, gravados no handshake). Usado quando o conteúdo depende de quem recebe (ideias ocultas).
+     */
+    public void broadcastEventPerUser(String boardId, String eventType, BiFunction<String, String, Object> payloadFor) {
+        Set<WebSocketSession> sessions = boardSessions.get(boardId);
+        if (sessions == null || sessions.isEmpty()) {
+            return;
+        }
+        for (WebSocketSession session : sessions) {
+            if (!session.isOpen()) {
+                continue;
+            }
+            try {
+                String userId = String.valueOf(session.getAttributes().get("userId"));
+                Object role = session.getAttributes().get("role");
+                Map<String, Object> messageMap = new HashMap<>();
+                messageMap.put("type", eventType);
+                messageMap.put("boardId", boardId);
+                messageMap.put("payload", payloadFor.apply(userId, role == null ? null : role.toString()));
+                messageMap.put("timestamp", System.currentTimeMillis());
+                session.sendMessage(new TextMessage(objectMapper.writeValueAsString(messageMap)));
+            } catch (Exception e) {
+                log.error("Failed to send per-user event '{}' for board {}", eventType, boardId, e);
+            }
         }
     }
 

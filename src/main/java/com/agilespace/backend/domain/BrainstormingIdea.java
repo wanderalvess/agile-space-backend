@@ -1,6 +1,7 @@
 package com.agilespace.backend.domain;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.JdbcTypeCode;
@@ -33,6 +34,11 @@ public class BrainstormingIdea {
     private String createdAt;
 
     private String color;
+
+    /** Só na saída: ideia redigida para quem ainda não pode ler o texto (não é gravada no banco). */
+    @Transient
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean hidden;
 
     // --- JSONB Fields mapping via Hibernate 6 JSON type ---
     @JdbcTypeCode(SqlTypes.JSON)
