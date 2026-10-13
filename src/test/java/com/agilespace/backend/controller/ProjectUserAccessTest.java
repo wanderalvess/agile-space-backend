@@ -1,14 +1,12 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.User;
-import com.agilespace.backend.dto.SaveJiraDashSnapshotRequest;
 import com.agilespace.backend.dto.UserProjectAccessDto;
 import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.AuthService;
 import com.agilespace.backend.service.JiraProfieldsService;
 import com.agilespace.backend.service.UserProjectResolverService;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-class ProjectAndDashAccessTest {
+class ProjectUserAccessTest {
 
     @Mock private JiraProfieldsService jiraProfieldsService;
     @Mock private UserProjectResolverService resolver;
@@ -74,26 +72,5 @@ class ProjectAndDashAccessTest {
         when(resolver.resolveUserAccess(any())).thenReturn(UserProjectAccessDto.builder().build());
 
         assertEquals(200, controller.getUserProjects("outra@x.com", http).getStatusCode().value());
-    }
-
-    // ---- snapshot do JiraDash ----
-
-    private SaveJiraDashSnapshotRequest snap(String jql, String json) throws Exception {
-        return new SaveJiraDashSnapshotRequest(jql, json == null ? null : new ObjectMapper().readTree(json));
-    }
-
-    @Test
-    void snapshotValidoPassa() throws Exception {
-        assertNull(JiraDashController.SnapshotValidation.check(snap("project = X", "{\"allIssues\":[],\"sprintDates\":null}")));
-    }
-
-    @Test
-    void snapshotSemJqlSemIssuesOuComFormatoErradoERecusado() throws Exception {
-        assertNotNull(JiraDashController.SnapshotValidation.check(snap(" ", "{\"allIssues\":[]}")));
-        assertNotNull(JiraDashController.SnapshotValidation.check(snap("project = X", null)));
-        assertNotNull(JiraDashController.SnapshotValidation.check(snap("project = X", "[]")));
-        assertNotNull(JiraDashController.SnapshotValidation.check(snap("project = X", "{\"allIssues\":\"x\"}")));
-        assertNotNull(JiraDashController.SnapshotValidation.check(snap("x".repeat(4001), "{\"allIssues\":[]}")));
-        assertNotNull(JiraDashController.SnapshotValidation.check(null));
     }
 }

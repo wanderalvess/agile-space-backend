@@ -29,7 +29,7 @@ import java.util.List;
 public class JiraService {
 
     private static final int MAX_RATE_LIMIT_RETRIES = 3;
-    // Mesmo valor usado no jiradash (jira-api.js) pra completar worklog
+    // Limite de paralelismo para completar worklog
     // truncado — busca sequencial (1 issue por vez, dentro da mesma request)
     // arriscava estourar o readTimeout (45s) numa página com várias issues de
     // worklog longo, já que cada fetch extra é bloqueante.

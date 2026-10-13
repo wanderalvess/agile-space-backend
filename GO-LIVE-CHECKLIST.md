@@ -64,7 +64,7 @@ Feito no navegador, com a sessão ADMIN, criando só dados de teste ("SMOKE TEST
 | ✅ | **Retro**: criar quadro, escrever card, revelar cards | funcionou |
 | ✅ | Persistência: recarregar a página da retro | card e estado mantidos |
 | ✅ | **Chat da retro**: enviar mensagem | enviada e exibida |
-| ✅ | Carga sem erro de API: `/painel`, `/admin`, `/retro`, `/room`, `/showcase`, `/health-check`, `/brainstorming`, `/action-plan`, `/workspace`, `/prompt-hub`, `/squad`, `/squad/roster`, `/squad/dashboards`, `/jiradash`, `/governance`, `/changelog`, `/sprint-planner` | todas renderizam |
+| ✅ | Carga sem erro de API: `/painel`, `/admin`, `/retro`, `/room`, `/showcase`, `/health-check`, `/brainstorming`, `/action-plan`, `/workspace`, `/prompt-hub`, `/squad`, `/squad/roster`, `/squad/dashboards`, `/governance`, `/changelog`, `/sprint-planner` | todas renderizam |
 
 ### Bugs e pontos encontrados
 
