@@ -79,12 +79,22 @@ public class ApiKey {
     private LocalDateTime revokedAt;
 
     /**
+     * Vencimento da chave. Null = sem expiração (só o ADMIN cria assim, de propósito). As chaves anteriores
+     * à migration V56 ganharam 90 dias a partir do deploy. Chave vencida é recusada com 401 até ser renovada.
+     */
+    private LocalDateTime expiresAt;
+
+    /**
      * Chave criada antes deste campo existir (ownerRole null) por alguém que
      * era ADMIN/LEAD na época — trata como acesso total, preservando o
      * comportamento anterior a este plano. Chave nova sempre tem ownerRole e
      * scopes explícitos; esta função só existe pra não quebrar as chaves já
      * emitidas em produção.
      */
+    public boolean isExpired(LocalDateTime now) {
+        return expiresAt != null && expiresAt.isBefore(now);
+    }
+
     public boolean hasFullAccessGrandfathered() {
         return ownerRole == null;
     }

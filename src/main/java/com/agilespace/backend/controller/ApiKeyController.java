@@ -6,6 +6,7 @@ import com.agilespace.backend.domain.User;
 import com.agilespace.backend.repository.ApiKeyRepository;
 import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.security.ApiKeyHashing;
+import com.agilespace.backend.security.ApiKeyLifecycle;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -37,6 +38,7 @@ public class ApiKeyController {
 
     private final ApiKeyRepository apiKeyRepository;
     private final UserRepository userRepository;
+    private final ApiKeyLifecycle apiKeyLifecycle;
 
     @GetMapping
     public ResponseEntity<List<ApiKey>> listMine(HttpServletRequest request) {
@@ -96,6 +98,10 @@ public class ApiKeyController {
             squadId = null;
         }
 
+        LocalDateTime expiresAt = ApiKeyLifecycle.resolveExpiry(
+                Boolean.TRUE.equals(body.get("neverExpires")) ? "never" : body.get("expiresInDays"),
+                "ADMIN".equalsIgnoreCase(role), LocalDateTime.now());
+
         String rawKey = ApiKeyHashing.generateRawKey();
         ApiKey saved = apiKeyRepository.save(ApiKey.builder()
                 .name(name)
@@ -104,6 +110,7 @@ public class ApiKeyController {
                 .ownerRole(role)
                 .scopes(normalizedScopes)
                 .squadId(squadId)
+                .expiresAt(expiresAt)
                 .build());
 
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
@@ -112,7 +119,8 @@ public class ApiKeyController {
                 "rawKey", rawKey,
                 "scopes", saved.getScopes(),
                 "squadId", saved.getSquadId() != null ? saved.getSquadId() : "",
-                "createdAt", saved.getCreatedAt()
+                "createdAt", saved.getCreatedAt(),
+                "expiresAt", saved.getExpiresAt() != null ? saved.getExpiresAt().toString() : ""
         ));
     }
 
@@ -129,6 +137,44 @@ public class ApiKeyController {
         key.setRevokedAt(LocalDateTime.now());
         apiKeyRepository.save(key);
         return ResponseEntity.ok().build();
+    }
+
+    /** Estende a validade (padrão 90 dias) e reavalia dono, papel e escopos com o papel atual. Só o dono. */
+    @PostMapping("/{id}/renew")
+    public ResponseEntity<ApiKey> renew(@PathVariable("id") UUID id,
+                                        @RequestBody(required = false) Map<String, Object> body,
+                                        HttpServletRequest request) {
+        ApiKey key = ownedKey(id, request);
+        Object days = body != null && Boolean.TRUE.equals(body.get("neverExpires")) ? "never" : body != null ? body.get("expiresInDays") : null;
+        return ResponseEntity.ok(apiKeyLifecycle.renew(key, days, "ADMIN".equalsIgnoreCase(callerRole(request))));
+    }
+
+    /** Cria uma chave nova igual à antiga e revoga a antiga; a chave crua nova só aparece nesta resposta. */
+    @PostMapping("/{id}/rotate")
+    public ResponseEntity<Map<String, Object>> rotate(@PathVariable("id") UUID id,
+                                                      @RequestBody(required = false) Map<String, Object> body,
+                                                      HttpServletRequest request) {
+        ApiKey key = ownedKey(id, request);
+        Object days = body != null && Boolean.TRUE.equals(body.get("neverExpires")) ? "never" : body != null ? body.get("expiresInDays") : null;
+        ApiKeyLifecycle.Rotated rotated = apiKeyLifecycle.rotate(key, days, "ADMIN".equalsIgnoreCase(callerRole(request)));
+        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
+                "id", rotated.key().getId(),
+                "name", rotated.key().getName(),
+                "rawKey", rotated.rawKey(),
+                "scopes", rotated.key().getScopes(),
+                "squadId", rotated.key().getSquadId() != null ? rotated.key().getSquadId() : "",
+                "createdAt", rotated.key().getCreatedAt(),
+                "expiresAt", rotated.key().getExpiresAt() != null ? rotated.key().getExpiresAt().toString() : ""
+        ));
+    }
+
+    private ApiKey ownedKey(UUID id, HttpServletRequest request) {
+        ApiKey key = apiKeyRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Chave não encontrada."));
+        if (!Objects.equals(callerId(request), key.getOwnerUserId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Você só pode alterar as próprias chaves.");
+        }
+        return key;
     }
 
     private static String callerId(HttpServletRequest request) {

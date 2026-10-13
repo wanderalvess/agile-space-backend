@@ -85,6 +85,12 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
         }
 
         ApiKey key = apiKey.get();
+        if (key.isExpired(LocalDateTime.now())) {
+            reject(response, "Chave de API expirada em "
+                    + key.getExpiresAt().format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+                    + ". Renove a chave no Portal (Configurações > Chaves de API) ou gere uma nova.");
+            return;
+        }
         // Chave de quem foi desativado deixa de valer sem precisar revogar uma a uma.
         if (key.getOwnerUserId() != null && userRepository != null
                 && userRepository.findById(key.getOwnerUserId()).map(u -> !u.isActive()).orElse(false)) {

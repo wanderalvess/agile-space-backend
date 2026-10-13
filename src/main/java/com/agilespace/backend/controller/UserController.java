@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/users")
@@ -43,6 +44,12 @@ public class UserController {
         if ("ADMIN".equalsIgnoreCase(authRole)) {
             return true;
         }
+        return authUserId != null && authUserId.equals(resourceUserId);
+    }
+
+    /** Dono do recurso (admin NÃO conta): quem pode ler/gravar o token em claro. */
+    private boolean isOwner(String resourceUserId, HttpServletRequest request) {
+        String authUserId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
         return authUserId != null && authUserId.equals(resourceUserId);
     }
 
@@ -115,7 +122,10 @@ public class UserController {
         return ResponseEntity.ok(squads);
     }
 
-    /** Retorna a config Jira do usuário — exige que o chamador autenticado seja o dono do recurso ou ADMIN. */
+    /**
+     * Config Jira. O dono recebe o necessário para a tela dele (inclui o token: o navegador chama o Jira com ele).
+     * ADMIN lendo OUTRA pessoa recebe só {configured, domain}: o token de terceiros nunca sai do servidor.
+     */
     @GetMapping("/{userId}/jira-config")
     public ResponseEntity<?> getJiraConfig(@PathVariable String userId, HttpServletRequest request) {
         if (!isOwnerOrAdmin(userId, request)) {
@@ -125,16 +135,19 @@ public class UserController {
         if (config == null) {
             return ResponseEntity.notFound().build();
         }
+        if (!isOwner(userId, request)) {
+            return ResponseEntity.ok(Map.of("configured", true, "domain", config.getDomain() == null ? "" : config.getDomain()));
+        }
         return ResponseEntity.ok(config);
     }
 
-    /** Salva a config Jira — exige que o chamador autenticado seja o dono do recurso ou ADMIN. */
+    /** Salva a config Jira — só o dono (o admin não grava token em nome de outra pessoa). */
     @PostMapping("/{userId}/jira-config")
     public ResponseEntity<?> saveJiraConfig(
             @PathVariable String userId,
             @RequestBody UserJiraConfig config,
             HttpServletRequest request) {
-        if (!isOwnerOrAdmin(userId, request)) {
+        if (!isOwner(userId, request)) {
             return forbidden("Acesso negado: você só pode salvar sua própria configuração Jira.");
         }
         config.setUserId(userId);
@@ -152,7 +165,7 @@ public class UserController {
         return ResponseEntity.noContent().build();
     }
 
-    /** Retorna a config TDN do usuário — exige que o chamador autenticado seja o dono do recurso ou ADMIN. */
+    /** Config TDN: dono recebe tudo; ADMIN lendo OUTRA pessoa recebe só {configured, baseUrl, space, label}, sem o token. */
     @GetMapping("/{userId}/tdn-config")
     public ResponseEntity<?> getTdnConfig(@PathVariable String userId, HttpServletRequest request) {
         if (!isOwnerOrAdmin(userId, request)) {
@@ -162,16 +175,24 @@ public class UserController {
         if (config == null) {
             return ResponseEntity.notFound().build();
         }
+        if (!isOwner(userId, request)) {
+            Map<String, Object> masked = new java.util.LinkedHashMap<>();
+            masked.put("configured", true);
+            masked.put("baseUrl", config.getBaseUrl() == null ? "" : config.getBaseUrl());
+            masked.put("space", config.getSpace() == null ? "" : config.getSpace());
+            masked.put("label", config.getLabel() == null ? "" : config.getLabel());
+            return ResponseEntity.ok(masked);
+        }
         return ResponseEntity.ok(config);
     }
 
-    /** Salva a config TDN — exige que o chamador autenticado seja o dono do recurso ou ADMIN. */
+    /** Salva a config TDN — só o dono. */
     @PostMapping("/{userId}/tdn-config")
     public ResponseEntity<?> saveTdnConfig(
             @PathVariable String userId,
             @RequestBody UserTdnConfig config,
             HttpServletRequest request) {
-        if (!isOwnerOrAdmin(userId, request)) {
+        if (!isOwner(userId, request)) {
             return forbidden("Acesso negado: você só pode salvar sua própria configuração TDN.");
         }
         config.setUserId(userId);
