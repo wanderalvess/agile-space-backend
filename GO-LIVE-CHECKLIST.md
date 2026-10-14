@@ -36,6 +36,29 @@ Observações do smoke:
 
 ---
 
+## 1b. Repetição do smoke test sem login — executado em 2026-10-14
+
+Mesma bateria da seção 1, de fora, contra o código que estava na VM (backend `9077a6b` e frontend `6e6ea54`, de 10/10; 46 migrations aplicadas). Depois do teste a VM foi atualizada para backend `6a89b42` e frontend `c922801` (14/10), com dump prévio em `~/backups/pre-deploy-20261014-162148.sql`; as migrations V56 e V61 entraram (48 no total), os containers ficaram saudáveis, `/actuator/health` 200 e as rotas protegidas seguem em 401. Os itens da tabela abaixo **não** foram repetidos sobre o código novo.
+
+| # | Verificação | Resultado |
+|---|---|---|
+| ✅ | `http://` redireciona para `https://` | 308 |
+| ✅ | Certificado válido, expira 2027-01-04 | ok |
+| ✅ | Headers HSTS, CSP, X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy | presentes (`X-Powered-By` e `Via` continuam aparecendo) |
+| ✅ | `/actuator/health` 200; `info`, `env`, `metrics` 404; Swagger e `/v3/api-docs` 404 | ok |
+| ✅ | `/api/users`, `/api/admin/api-keys`, `/api/squads`, `/api/workspaces`, `/api/auth/me`, `/api/v1/squads` sem token | 401 |
+| ✅ | CORS: origem estranha / origem do app | 403 / passa (401 sem token) |
+| ✅ | WebSocket `/ws/poker/*` sem token | 401 |
+| ✅ | Rate limit de auth com `X-Forwarded-For` diferente a cada tentativa | 429 a partir da 11ª |
+| ✅ | Portas: 5432, 8002 e 9002 só em `127.0.0.1`; públicas só 22/80/443 | ok |
+| ✅ | `ALLOWED_EMAIL_DOMAIN=totvs.com.br,ext.totvs.com.br`, perfil `prod` | ok |
+| ✅ | Containers saudáveis; backend 436 MB de 1 GB, sem erro nos logs de 24 h | ok |
+| ⬜ | Backup agendado | segue sem cron; último dump manual de 10/10 |
+
+Não executado: testes autenticados (a sessão do navegador não estava logada e não se cria conta nem se digita senha); Poker/Retro com dois usuários e os demais itens da seção 3 seguem pendentes. `/api/public/prompt-hub` (leitura anônima) respondeu 404 na raiz; verificar o caminho exato.
+
+---
+
 ## 2. Smoke test autenticado — executado em 2026-10-06
 
 Feito dentro do navegador, com a sessão do usuário ADMIN que já estava logado (nenhuma conta ou senha foi criada por mim).
