@@ -278,44 +278,67 @@ public class JoltJavaEngineService {
         return filtered;
     }
 
-    @SuppressWarnings("unchecked")
+    /**
+     * Operação TOTVS {@code custom-decode}/{@code custom-totvs}: decodifica campos Base64 (JSON vira objeto, texto fica
+     * texto) antes do Chainr, que não conhece a operação. A regra segue o mesmo formato das outras specs: chaves com o
+     * nome do campo, {@code "*"} (ou {@code "[*]"}) para cada item de lista ou valor de objeto, e na folha uma ação que
+     * começa com {@code =base64ToObject}. Mesmo comportamento do motor JS do sandbox (jolt-lite.ts).
+     */
     private Object handleBase64Preprocess(Object input, List<Object> specList) {
-        // Se houver diretiva de custom-decode, decodifica campos Base64
+        Object current = input;
         for (Object item : specList) {
             if (item instanceof Map<?, ?> opMap) {
                 Object op = opMap.get("operation");
                 if ("custom-decode".equalsIgnoreCase(String.valueOf(op)) || "custom-totvs".equalsIgnoreCase(String.valueOf(op))) {
-                    Object subSpec = opMap.get("spec");
-                    if (subSpec instanceof Map<?, ?> fieldMap && input instanceof Map<?, ?> inputMap) {
-                        return decodeBase64InMap(new LinkedHashMap<String, Object>((Map<String, Object>) inputMap), (Map<String, Object>) fieldMap);
-                    }
+                    current = decodeBase64(current, opMap.get("spec"), 0);
                 }
             }
         }
-        return input;
+        return current;
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> decodeBase64InMap(Map<String, Object> inputMap, Map<String, Object> fieldRules) {
-        for (Map.Entry<String, Object> entry : fieldRules.entrySet()) {
-            String field = entry.getKey();
-            Object val = inputMap.get(field);
-            if (val instanceof String strVal) {
-                try {
-                    byte[] decoded = Base64.getDecoder().decode(strVal.trim());
-                    String decodedStr = new String(decoded, StandardCharsets.UTF_8);
-                    try {
-                        inputMap.put(field, objectMapper.readValue(decodedStr, Object.class));
-                    } catch (Exception e) {
-                        inputMap.put(field, decodedStr);
-                    }
-                } catch (Exception ignored) {
-                    // Mantém o valor original se não for Base64 válido
+    private Object decodeBase64(Object data, Object rule, int depth) {
+        if (data == null || !(rule instanceof Map<?, ?> rules) || depth > MAX_DEPTH) return data;
+        if (data instanceof List<?> list) {
+            // Uma regra com nome de campo aplicada a uma lista não casa com nada; só "*" desce nela.
+            List<Object> out = new ArrayList<>(list);
+            Object each = rules.containsKey("*") ? rules.get("*") : rules.get("[*]");
+            if (each != null) {
+                for (int i = 0; i < out.size(); i++) out.set(i, decodeBase64(out.get(i), each, depth + 1));
+            }
+            return out;
+        }
+        if (!(data instanceof Map<?, ?> map)) return data;
+        Map<String, Object> out = new LinkedHashMap<>((Map<String, Object>) map);
+        for (Map.Entry<?, ?> entry : rules.entrySet()) {
+            String key = String.valueOf(entry.getKey());
+            Object action = entry.getValue();
+            if ("*".equals(key) || "[*]".equals(key)) {
+                for (Map.Entry<String, Object> field : out.entrySet()) {
+                    field.setValue(decodeBase64(field.getValue(), action, depth + 1));
                 }
-            } else if (val instanceof Map<?, ?> nested && entry.getValue() instanceof Map<?, ?> nestedRules) {
-                decodeBase64InMap((Map<String, Object>) nested, (Map<String, Object>) nestedRules);
+            } else if (action instanceof String fn && fn.startsWith("=base64ToObject")) {
+                if (out.get(key) instanceof String encoded) out.put(key, decodeOne(encoded));
+            } else if (action instanceof Map<?, ?>) {
+                if (out.containsKey(key)) out.put(key, decodeBase64(out.get(key), action, depth + 1));
             }
         }
-        return inputMap;
+        return out;
+    }
+
+    private Object decodeOne(String encoded) {
+        String trimmed = encoded.trim();
+        if (trimmed.isEmpty()) return encoded;
+        try {
+            String decoded = new String(Base64.getMimeDecoder().decode(trimmed), StandardCharsets.UTF_8);
+            try {
+                return objectMapper.readValue(decoded, Object.class);
+            } catch (Exception notJson) {
+                return decoded;
+            }
+        } catch (IllegalArgumentException notBase64) {
+            return encoded;
+        }
     }
 }

@@ -213,4 +213,36 @@ class JoltJavaEngineServiceTest {
         assertEquals("Entrada inválida.", JoltJavaEngineService.safeMessage(null));
         assertTrue(JoltJavaEngineService.safeMessage("x".repeat(1000)).length() <= 401);
     }
+
+    @Test
+    @DisplayName("custom-totvs decodifica Base64 dentro de lista (data → * → conteudo), como o motor JS")
+    @SuppressWarnings("unchecked")
+    void base64InsideListWithWildcard() throws Exception {
+        String conteudo = java.util.Base64.getEncoder().encodeToString(
+                "{\"Coo\":\"2765\",\"Loja\":{\"IdRetaguarda\":\"1\"},\"ValorBruto\":383.50}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String input = "{\"data\":[{\"id\":715254,\"conteudo\":\"" + conteudo + "\"},{\"id\":2,\"conteudo\":\"nao-e-base64!\"}]}";
+        String spec = """
+                [
+                  {"operation": "custom-totvs", "spec": {"data": {"*": {"conteudo": "=base64ToObject"}}}},
+                  {"operation": "shift", "spec": {"data": {"*": {
+                      "id": "items[&1].idPdv",
+                      "conteudo": {"Coo": "items[&2].numCupom", "Loja": {"IdRetaguarda": "items[&3].codFilial"},
+                                   "ValorBruto": "items[&2].vlTabela"}
+                  }}}}
+                ]
+                """;
+
+        JoltTransformResponseDto response = joltService.transform(new JoltTransformRequestDto(
+                objectMapper.readValue(input, Object.class), objectMapper.readValue(spec, Object.class), null));
+
+        assertTrue(response.isSuccess(), response.getError());
+        List<Map<String, Object>> items = (List<Map<String, Object>>) ((Map<String, Object>) response.getOutput()).get("items");
+        assertEquals("2765", items.get(0).get("numCupom"));
+        assertEquals("1", items.get(0).get("codFilial"));
+        assertEquals(383.5, ((Number) items.get(0).get("vlTabela")).doubleValue());
+        assertEquals(715254, items.get(0).get("idPdv"));
+        // Texto que não é Base64 fica como estava, sem derrubar a transformação.
+        assertEquals(2, items.get(1).get("idPdv"));
+        assertNull(items.get(1).get("numCupom"));
+    }
 }
