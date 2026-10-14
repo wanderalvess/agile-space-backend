@@ -121,7 +121,7 @@ public class SquadController {
     }
 
     // Motor de sync roda no backend (SquadSyncService) em vez de client-side —
-    // ver plano de unificação Squad Pulse + jiradash, Fase 2. callerUserId vem
+    // ver plano de unificação Squad Pulse, Fase 2. callerUserId vem
     // sempre do token validado, nunca do corpo da requisição, senão qualquer
     // chamador autenticado poderia sincronizar usando o PAT salvo de outra
     // pessoa só citando o userId dela.

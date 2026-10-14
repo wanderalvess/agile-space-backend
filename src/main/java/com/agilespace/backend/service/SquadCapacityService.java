@@ -22,10 +22,10 @@ import static com.agilespace.backend.domain.SquadPersonConfig.GLOBAL_SPRINT_ID;
 /**
  * Papel/capacidade por pessoa com herança campo a campo: sprint atual → sprint anterior
  * mais recente do squad com valor pro campo → default global do squad → default fixo
- * (8h/dia, sem papel). Transliterado de person-config.js (jiradash), sem a maquinaria de
+ * (8h/dia, sem papel). Transliterado de person-config.js, sem a maquinaria de
  * escopo/redação de identidade daquele arquivo — aqui a pessoa já é identificada por
  * jiraAccountId estável, não por displayName. Ver plano de unificação Squad Pulse +
- * jiradash, Fase 6.
+ * Fase 6.
  */
 @Service
 @RequiredArgsConstructor
@@ -141,7 +141,7 @@ public class SquadCapacityService {
     }
 
     // Lista de sprints anteriores do squad, mais recente primeiro — equivalente ao
-    // "priorSprintIdsSameBoard" do jiradash: aqui "mesmo board" já é implícito (um squad =
+    // "priorSprintIdsSameBoard" do painel anterior: aqui "mesmo board" já é implícito (um squad =
     // um board/projeto Jira), então basta olhar o próprio sprintHistory que o sync já mantém.
     private List<String> priorSprintIdsMostRecentFirst(String squadId, String currentSprintId) {
         Squad squad = squadRepository.findById(squadId).orElse(null);

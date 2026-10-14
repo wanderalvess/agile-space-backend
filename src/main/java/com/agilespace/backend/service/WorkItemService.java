@@ -18,7 +18,7 @@ import java.util.Map;
  * do Jira — em vez da antiga tabela work_items separada, que nunca era alimentada por um
  * sync de verdade. Os métodos seguem devolvendo WorkItem só como formato de resposta, pra
  * não quebrar o contrato que WorkItemController/frontend já consomem (ver plano de
- * unificação Squad Pulse + jiradash, Fase 1).
+ * unificação Squad Pulse, Fase 1).
  */
 @Service
 @RequiredArgsConstructor

@@ -32,7 +32,7 @@ import java.util.stream.Collectors;
 /**
  * Motor de sync do Squad, portado de agile-space-frontend/src/store/useSquadStore.ts
  * pra rodar no servidor em vez de no navegador (ver plano de unificação Squad Pulse
- * + jiradash, Fase 2). Reaproveita JiraService (chamadas HTTP já endurecidas: guarda
+ * + Fase 2). Reaproveita JiraService (chamadas HTTP já endurecidas: guarda
  * SSRF, TLS com fallback, retry em 429) e os métodos @Transactional de SquadService
  * pra persistir — esta classe não é @Transactional: uma sync percorre potencialmente
  * dezenas de chamadas HTTP ao Jira, e prender isso numa transação de banco só
@@ -491,7 +491,7 @@ public class SquadSyncService {
     // includeChangelog liga expand=changelog no Jira — payload bem mais pesado (histórico
     // inteiro de transições por issue), então só o sync FULL pede isso, pra cycle
     // time/scope churn (ver buildRollup) — nunca no sync delta. Ver plano de unificação
-    // Squad Pulse + jiradash, Fase 7.
+    // Squad Pulse, Fase 7.
     private FetchResult fetchAllIssues(String domain, String token, String jql, List<String> fields, String sprintFieldId, boolean includeChangelog) {
         List<ParsedJiraIssue> all = new ArrayList<>();
         int total = Integer.MAX_VALUE;
@@ -1016,7 +1016,7 @@ public class SquadSyncService {
         }
     }
 
-    // Taxa de escape de bugs — adaptado de issue-service.js:getSprintBugs (jiradash).
+    // Taxa de escape de bugs — adaptado de issue-service.js:getSprintBugs.
     // Simplificações conscientes: sem o "Tipo do Defeito" quebrado por customfield
     // específico deste tenant (mesma razão de não copiar customfields hardcoded pra cá),
     // e horas logadas somam a partição inteira de bugs desta sprint (não só o intervalo de
@@ -1050,7 +1050,7 @@ public class SquadSyncService {
     }
 
     // ===================== Cycle time por status (horas produtivas) =====================
-    // Adaptado de issue-service.js:getStatusEvents/cycleTimeByStatus (jiradash). Só roda
+    // Adaptado de issue-service.js:getStatusEvents/cycleTimeByStatus. Só roda
     // com changelog disponível (sync FULL — ver fetchAllIssues), e só soma issues resolvidas.
     // Simplificação consciente: o original pula o status TERMINAL nomeando-o via
     // issueRules.isClosed (lista de nomes PT-BR tipo "Concluído"/"Cancelado", não portada
@@ -1140,8 +1140,8 @@ public class SquadSyncService {
     }
 
     // ===================== Scope churn =====================
-    // Adaptado de issue-service.js:getSprintChurn (jiradash). Classifica issues de topo
-    // (sem parentKey — jiradash chama de "parents") em planejada vs. adicionada depois do
+    // Adaptado de issue-service.js:getSprintChurn. Classifica issues de topo
+    // (sem parentKey — "parents" no painel anterior) em planejada vs. adicionada depois do
     // início, e marca carryover (veio de outra sprint antes de entrar nesta). Não inclui
     // "removidas da sprint" (extractRemovedFromCandidates no original) — isso precisa de
     // uma segunda JQL derivada (`project=X AND updated>=inicio AND sprint!=sprintAtual`,
@@ -1211,7 +1211,7 @@ public class SquadSyncService {
     // Segunda JQL derivada (JQL sozinha não expressa "estava nesta sprint mas não está
     // mais"): busca issues do projeto atualizadas desde o início da sprint que hoje NÃO
     // estão nela, e filtra pelo changelog quais de fato SAÍRAM da sprint atual depois do
-    // início — adaptado de issue-service.js:extractRemovedFromCandidates (jiradash), mas
+    // início — adaptado de issue-service.js:extractRemovedFromCandidates, mas
     // devolvendo só a contagem (não a lista de issues) pra caber no formato compacto do
     // rollup. Best-effort: qualquer falha aqui vira 0 (scopeChurn.removed subestimado),
     // nunca aborta a sync.
@@ -1239,7 +1239,7 @@ public class SquadSyncService {
     }
 
     // ===================== Integridade de estimativa =====================
-    // Adaptado de issue-service.js:getEstimatedInSprint (jiradash). "Estimativa Ajustada"
+    // Adaptado de issue-service.js:getEstimatedInSprint. "Estimativa Ajustada"
     // = quanto da estimativa original de fato ENTROU nesta sprint, evitando que estouro
     // (apontado além do estimado) infle o número: o Jira trava o Restante em 0 quando
     // alguém aponta além da estimativa, e sem este teto o excesso vazaria direto pra

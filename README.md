@@ -34,7 +34,7 @@ A arquitetura do sistema é modularizada por domínios de negócio ágil:
   - `Retrospectivas Inteligentes`: Retro boards dinâmicos com colunas configuráveis, limite de votos por membro e fusão inteligente de cards preservando histórico integral (`originalTexts`).
   - `Sprint Showcase`: Sessões de Sprint Review com suporte ao Modo Teatro, renderização de evidências e proxy autenticado de mídias do Jira.
   - `Brainstorming Alpha`: Espaço colaborativo síncrono para dinâmicas de ideação.
-- **Gestão de Squads e Métricas (Squad Pulse & Jiradash):** Integração com snapshots do Jira, métricas diárias, consolidação (rollups) de saúde do time, capacidade e cache compartilhado de consultas JQL.
+- **Gestão de Squads e Métricas (Squad Pulse):** Integração com snapshots do Jira, métricas diárias, consolidação (rollups) de saúde do time, capacidade e cache compartilhado de consultas JQL.
 - **Daily Flow & Health Check:** Controle de humor, reporte de impedimentos e diagnóstico anônimo periódico do clima da squad.
 - **Plano de Ação (Action Plan):** Gestão tática de melhorias derivadas das retrospectivas com metodologia 5W2H, responsáveis e prazos.
 - **Vault (Cofre de Segredos):** Serviço de compartilhamento seguro de credenciais com expiração temporal (1h, 24h) ou visualização única (`once`).

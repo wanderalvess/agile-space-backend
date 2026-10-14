@@ -127,7 +127,7 @@ public class SquadIssueSnapshot {
     // que o sync real do Squad popula (type/status/assignee/estimate vindos do Jira de
     // verdade), então commit/estimativa/decisão de showcase passam a enriquecer o dado real
     // em vez de um casco paralelo nunca sincronizado. Ver plano de unificação Squad Pulse +
-    // jiradash, Fase 1. "ceremonyStatus" é o estágio da cerimônia (backlog/committed/
+    // Fase 1. "ceremonyStatus" é o estágio da cerimônia (backlog/committed/
     // delivered/rejected/carried_over) — nunca confundir com "status", que é o status bruto
     // do Jira (To Do/In Progress/Done).
     @Column(name = "ceremony_status")

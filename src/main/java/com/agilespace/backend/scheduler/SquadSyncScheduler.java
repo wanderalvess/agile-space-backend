@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Sync automático pros squads que optaram por isso (Squad.syncOwnerUserId configurado) —
  * sem isso, o squad só atualiza quando alguém clica em "Sincronizar". Desligado por padrão
- * via app.squad.scheduled-sync.enabled (ver plano de unificação Squad Pulse + jiradash,
+ * via app.squad.scheduled-sync.enabled (ver plano de unificação Squad Pulse,
  * Fase 4). Cada squad roda isolado (try/catch) — uma JQL ruim ou PAT expirado de um squad
  * não deve travar a rodada dos demais.
  */

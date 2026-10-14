@@ -7,11 +7,11 @@ import lombok.*;
 /**
  * Papel (DEV/QA) e capacidade por pessoa, com herança sprint atual → sprint anterior mais
  * recente do squad → default global do squad — transliterado de
- * agile-space-frontend/public/jiradash/assets/js/domain/person-config.js, mas sem a
+ * o painel anterior (removido), mas sem a
  * maquinaria de escopo/reconciliação/redação de identidade daquele arquivo: aqui a pessoa
  * já é identificada por jiraAccountId estável (SquadMember), não por displayName cru, que é
  * exatamente o problema que aquela maquinaria existia para contornar (ver plano de
- * unificação Squad Pulse + jiradash, Fase 6).
+ * unificação Squad Pulse, Fase 6).
  */
 @Entity
 @Table(name = "squad_person_configs")
