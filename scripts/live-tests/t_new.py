@@ -1,7 +1,12 @@
 # Roteiro das mudanças de 2026-10-13/14: sessão (refresh/logout/reset), chaves de API com validade,
 # token do Jira escondido do admin, Base de Conhecimento (permissão e versões), anonimato da Retro e do Brainstorming.
 # Pré-requisito: t_retro.py já rodou (cria as contas e o tokens.json). Use sempre um banco de teste.
-import json, os, subprocess, urllib.request, urllib.error, uuid, base64, time
+import json, os, subprocess, sys, urllib.request, urllib.error, uuid, base64, time
+
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+except Exception:
+    pass
 
 BASE = os.environ.get('API_BASE', 'http://localhost:8002/api')
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -14,7 +19,24 @@ ana, bruno, carla, dani, adm = 'ana.master', 'bruno.dev', 'carla.qa', 'dani.fora
 results = []
 
 
+_STRICT = ('/auth/login', '/auth/register', '/auth/forgot-password', '/auth/reset-password', '/auth/change-password')
+_strict_calls = []
+
+
+def _respect_strict_limit(path):
+    # Faixa apertada do servidor: 10 chamadas por minuto por IP nessas rotas. Espera a janela em vez de levar 429.
+    if path not in _STRICT:
+        return
+    now = time.time()
+    _strict_calls[:] = [t for t in _strict_calls if now - t < 60]
+    if len(_strict_calls) >= 9:
+        time.sleep(max(0.0, 61 - (now - _strict_calls[0])))
+        _strict_calls[:] = [t for t in _strict_calls if time.time() - t < 60]
+    _strict_calls.append(time.time())
+
+
 def req(method, path, who=None, body=None, headers=None, token=None):
+    _respect_strict_limit(path)
     data = json.dumps(body).encode() if body is not None else None
     r = urllib.request.Request(BASE + path, data=data, method=method)
     if data is not None:
@@ -91,21 +113,61 @@ s, j = relogin(dani)
 check('login depois do logout volta a funcionar', s == 200, (s, str(j)[:120]))
 check('token novo vale', req('GET', '/auth/me', dani)[0] == 200)
 
+# ---------------- Senha: link de uso único e troca da própria senha ----------------
+print('== senha')
+# Reexecução: a Carla pode ter ficado com outra senha. Volta para a senha de teste pelo mesmo caminho do produto.
+sl, _ = req('POST', '/auth/login', body={'email': carla + '@totvs.com.br', 'password': PW})
+if sl != 200:
+    _, pre = req('POST', '/admin/users/%s/reset-password' % ID(carla), adm)
+    req('POST', '/auth/reset-password', body={'token': (pre or {}).get('resetToken'), 'newPassword': PW})
+    time.sleep(1.2)
+    _, rl = relogin(carla)
 old_carla = T(carla)
 time.sleep(1.2)
 s, j = req('POST', '/admin/users/%s/reset-password' % ID(carla), adm)
-check('admin redefine a senha (200)', s == 200, (s, str(j)[:200]))
+check('admin gera o link de redefinição (200, com token e sem senha em claro)', s == 200 and isinstance(j, dict) and j.get('resetToken') and not j.get('tempPassword'), (s, str(j)[:200]))
+token = j.get('resetToken') if isinstance(j, dict) else None
+check('o banco guarda só o hash do token (nunca o token)', token and token not in psql("select coalesce(string_agg(token_hash,','),'') from password_reset_requests") and 'tokenHash' not in json.dumps(j), '')
 s, _ = req('GET', '/auth/me', token=old_carla)
-check('sessão aberta cai depois do reset de senha (401)', s == 401, s)
-temp = j.get('tempPassword') if isinstance(j, dict) else None
+check('gerar o link NÃO derruba a sessão de quem pediu', s == 200, s)
+s, j2 = req('POST', '/auth/login', body={'email': carla + '@totvs.com.br', 'password': PW})
+check('a senha atual continua valendo até o link ser usado', s == 200, (s, str(j2)[:100]))
+s, j3 = req('POST', '/auth/reset-password', body={'token': token, 'newPassword': 'curta'})
+check('link com senha fraca = 400 (e o link NÃO é gasto)', s == 400, (s, str(j3)[:120]))
+s, _ = req('POST', '/auth/reset-password', body={'token': 'chute-qualquer', 'newPassword': 'NovaSenha-123'})
+check('token inventado = 400', s == 400, s)
 time.sleep(1.2)
-if temp:
-    s, j2 = req('POST', '/auth/login', body={'email': carla + '@totvs.com.br', 'password': temp})
-    check('login com a senha temporária funciona', s == 200, (s, str(j2)[:120]))
-    if s == 200:
-        save_token(carla, j2['token'])
-else:
-    check('reset devolve a senha temporária ao admin', False, j)
+s, _ = req('POST', '/auth/reset-password', body={'token': token, 'newPassword': 'NovaSenha-123'})
+check('a pessoa define a própria senha pelo link (204, rota pública)', s == 204, s)
+s, _ = req('GET', '/auth/me', token=old_carla)
+check('sessão aberta cai depois da redefinição (401)', s == 401, s)
+s, _ = req('POST', '/auth/login', body={'email': carla + '@totvs.com.br', 'password': PW})
+check('senha antiga deixa de valer (401)', s == 401, s)
+time.sleep(1.2)
+s, j4 = req('POST', '/auth/login', body={'email': carla + '@totvs.com.br', 'password': 'NovaSenha-123'})
+check('senha nova entra', s == 200, (s, str(j4)[:100]))
+s, _ = req('POST', '/auth/reset-password', body={'token': token, 'newPassword': 'OutraSenha-456'})
+check('o mesmo link NÃO funciona duas vezes (400)', s == 400, s)
+
+# trocar a própria senha (logado); volta para a senha de teste
+if isinstance(j4, dict) and j4.get('token'):
+    tk = j4['token']
+    time.sleep(1.2)
+    s, _ = req('POST', '/auth/change-password', token=tk, body={'currentPassword': 'errada-errada', 'newPassword': PW})
+    check('trocar com a senha atual errada = 403', s == 403, s)
+    s, _ = req('POST', '/auth/change-password', token=tk, body={'currentPassword': 'NovaSenha-123', 'newPassword': 'NovaSenha-123'})
+    check('trocar para a mesma senha = 400', s == 400, s)
+    s, _ = req('POST', '/auth/change-password', token=tk, body={'currentPassword': 'NovaSenha-123', 'newPassword': 'curta'})
+    check('nova senha fraca = 400', s == 400, s)
+    s, jc = req('POST', '/auth/change-password', token=tk, body={'currentPassword': 'NovaSenha-123', 'newPassword': PW})
+    check('trocar a própria senha (200, devolve token novo)', s == 200 and isinstance(jc, dict) and jc.get('token'), (s, str(jc)[:120]))
+    s, _ = req('GET', '/auth/me', token=tk)
+    check('o token anterior à troca cai (401)', s == 401, s)
+    if isinstance(jc, dict) and jc.get('token'):
+        check('o token devolvido pela troca mantém a sessão', req('GET', '/auth/me', token=jc['token'])[0] == 200)
+        save_token(carla, jc['token'])
+s, _ = req('POST', '/auth/change-password', body={'currentPassword': PW, 'newPassword': 'Qualquer-123'})
+check('trocar senha sem sessão = 401', s == 401, s)
 
 # ---------------- Chaves de API ----------------
 print('== chaves de API')
@@ -236,6 +298,48 @@ check('resposta do voto em ideia oculta vem redigida (sem texto nem autor)', s =
 req('POST', '/brainstormings/%s/ideas/%s/vote' % (bb, iid), carla)  # desfaz o voto
 req('PATCH', '/brainstormings/' + bb, ana, {'settings': {'isRevealed': True}})
 check('reveladas: Carla vê o texto', 'IDEIA-SECRETA-BRUNO' in ideas(carla)[1])
+
+# ---------------- Poker: revelar e limpar são do facilitador ----------------
+print('== poker')
+rid = 'room-' + uuid.uuid4().hex[:8]
+room = {'id': rid, 'deckType': 'fibonacci', 'votesRevealed': False, 'creatorId': ID(ana), 'title': 'Poker facilitador', 'team': 'ANATIME',
+        'createdAt': '2026-10-14T10:00:00Z', 'mode': 'sync', 'participantsCount': 0,
+        'issuesQueue': [{'id': 'i1', 'key': 'T-1', 'title': 'Tarefa 1'}], 'activeIssueId': 'i1', 'participantIds': [ID(ana)], 'settings': {}}
+check('poker: criar sala', req('POST', '/poker', ana, room)[0] in (200, 201))
+for who, nick, fac in ((ana, 'Ana', True), (bruno, 'Bruno', False)):
+    req('POST', '/poker/%s/participants' % rid, who, {'id': ID(who), 'roomId': rid, 'nickname': nick, 'role': 'dev', 'isFacilitator': fac})
+req('POST', '/poker/%s/votes' % rid, bruno, {'id': '%s_%s_i1' % (rid, ID(bruno)), 'roomId': rid, 'participantId': ID(bruno), 'value': '5', 'issueId': 'i1', 'timestamp': 't'})
+s, cur = req('GET', '/poker/' + rid, ana)
+s, _ = req('POST', '/poker', bruno, {**cur, 'votesRevealed': True})
+check('poker: participante NÃO revela (403)', s == 403, s)
+s, now = req('GET', '/poker/' + rid, ana)
+check('poker: a sala segue oculta', now.get('votesRevealed') is False, now.get('votesRevealed'))
+s, _ = req('DELETE', '/poker/%s/votes' % rid, bruno)
+check('poker: participante NÃO limpa os votos (403)', s == 403, s)
+s, v = req('GET', '/poker/%s/votes' % rid, ana)
+check('poker: o voto continua lá', s == 200 and len(v) == 1, (s, str(v)[:100]))
+s, _ = req('DELETE', '/poker/%s/rounds' % rid, bruno)
+check('poker: participante NÃO apaga o histórico (403)', s == 403, s)
+s, _ = req('POST', '/poker/%s/participants' % rid, bruno, {'id': ID(bruno), 'roomId': rid, 'nickname': 'Bruno', 'role': 'organizador', 'isFacilitator': False})
+s, _ = req('POST', '/poker', bruno, {**cur, 'votesRevealed': True})
+check('poker: mandar role=organizador na entrada NÃO vira facilitador', s == 403, s)
+s, _ = req('POST', '/poker', ana, {**cur, 'votesRevealed': True})
+check('poker: o facilitador revela', s in (200, 201), s)
+s, _ = req('DELETE', '/poker/%s/votes' % rid, ana)
+check('poker: o facilitador limpa', s == 204, s)
+
+# ---------------- Homônimo não ganha acesso à squad ----------------
+print('== homônimo')
+s, _ = req('GET', '/squads/ANATIME/members', ana)
+check('integrante real lê a squad', s == 200, s)
+hom_email = 'ana.homonima.%s@totvs.com.br' % uuid.uuid4().hex[:5]
+s, jh = req('POST', '/auth/register', body={'email': hom_email, 'name': 'Ana Master', 'password': PW})
+check('cadastro do homônimo (mesmo nome da Ana, outro e-mail)', s == 200 and jh.get('token'), (s, str(jh)[:120]))
+if s == 200:
+    s, _ = req('GET', '/squads/ANATIME/members', token=jh['token'])
+    check('homônimo NÃO lê o roster da squad (403)', s == 403, s)
+    s, _ = req('GET', '/poker?squadId=ANATIME', token=jh['token'])
+    check('homônimo NÃO lista as salas de Poker da squad (403)', s == 403, s)
 
 ok = sum(1 for r in results if r[1])
 print('\nRESULTADO: %d/%d' % (ok, len(results)))

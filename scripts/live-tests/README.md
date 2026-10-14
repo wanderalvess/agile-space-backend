@@ -23,10 +23,10 @@ O contêiner do Postgres precisa se chamar `agile-space-db` (é o nome do `docke
 |---|---|---|
 | 1 | `python t_retro.py` | **59/59** na primeira execução num banco novo. Cria as contas (admin, Ana AM, Bruno, Carla, Dani) e guarda os tokens em `tokens.json`. Re-execuções dão ~5 "FAIL" explicados (ver abaixo). |
 | 2 | `python t_misc.py` | **57/57** (Biblioteca de IA, Meu Espaço, perfil/feedback, Jolt, Radar de Saúde, Brainstorming) |
-| 3 | `python t_poker_review.py` | **22/27**; os 5 "FAIL" são expectativas do roteiro ou o limite documentado do Poker (participante revela/limpa votos) e a Review aceitar troca de decisão |
+| 3 | `python t_poker_review.py` | **24/27** (depois de 2026-10-14; eram 22/27 antes de o servidor travar revelar e limpar); os 5 "FAIL" são expectativas do roteiro ou o limite documentado do Poker (participante revela/limpa votos) e a Review aceitar troca de decisão |
 | 4 | `node t_ws.js <boardId>` | **9/9** (use o id de um quadro criado pelo `t_retro.py`) |
 | 5 | `node t_takeover.js` | 4 linhas `PASS` (demora ~50 s: espera os 45 s de tolerância) |
-| 6 | `python t_new.py` | **50/50** (2026-10-14): refresh/logout/reset de senha, chaves de API com validade, token do Jira escondido do admin, Base de Conhecimento (permissão e versões), anonimato da Retro e do Brainstorming. Troca os tokens de `dani.fora` e `carla.qa` em `tokens.json` (logout e reset invalidam os antigos), então rode depois dos outros. |
+| 6 | `python t_new.py` | **78/78** (2026-10-14): refresh/logout, link de redefinição de senha e troca da própria senha, chaves de API com validade, token do Jira escondido do admin, Base de Conhecimento (permissão e versões), anonimato da Retro e do Brainstorming, Poker (só o facilitador revela e limpa), homônimo sem acesso à squad. Troca os tokens de `dani.fora` e `carla.qa` em `tokens.json` (logout e reset invalidam os antigos), então rode depois dos outros. Espera a janela de 10 chamadas por minuto das rotas de autenticação (leva ~2 min). No Windows use `PYTHONIOENCODING=utf-8`. |
 
 "FAIL" esperados nas re-execuções de `t_retro.py`: o roteiro assume banco novo (equipe e papel já existem; quem já é
 membro não muda de papel pelo `join`) e uma regra mudou de propósito em 2026-10-09 (quem recebe o link da Retro entra mesmo
