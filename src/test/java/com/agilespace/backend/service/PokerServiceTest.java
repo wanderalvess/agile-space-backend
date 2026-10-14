@@ -548,4 +548,115 @@ class PokerServiceTest {
             verifyNoInteractions(roundRepository, voteRepository);
         }
     }
+
+    @Nested
+    @DisplayName("Revelar e limpar votos são do facilitador")
+    class FacilitatorOnlyTests {
+
+        private PokerRoom revealedState(boolean revealed) {
+            return PokerRoom.builder().id("room-123").creatorId("user-creator").title("t").deckType("fibonacci")
+                    .votesRevealed(revealed).build();
+        }
+
+        private PokerRoom incoming(boolean revealed) {
+            return PokerRoom.builder().id("room-123").creatorId("user-creator").title("t").deckType("fibonacci")
+                    .votesRevealed(revealed).build();
+        }
+
+        private void participantIn(String userId) {
+            lenient().when(participantRepository.existsById("room-123_" + userId)).thenReturn(true);
+            lenient().when(participantRepository.findById("room-123_" + userId)).thenReturn(Optional.of(
+                    PokerParticipant.builder().id(userId).roomId("room-123").role("dev").isFacilitator(false).build()));
+        }
+
+        @Test
+        @DisplayName("Participante comum NÃO revela os votos pela sala (403)")
+        void participantCannotReveal() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(revealedState(false)));
+            participantIn("user-dev");
+
+            ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                    () -> service.saveOrUpdateRoom(incoming(true), "user-dev", "MEMBER"));
+
+            assertEquals(HttpStatus.FORBIDDEN, e.getStatusCode());
+            verify(roomRepository, never()).saveAndFlush(any());
+        }
+
+        @Test
+        @DisplayName("Participante comum NÃO desfaz a revelação: o estado do servidor vale")
+        void participantCannotUnreveal() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(revealedState(true)));
+            participantIn("user-dev");
+            when(roomRepository.saveAndFlush(any())).thenAnswer(i -> i.getArgument(0));
+
+            PokerRoom saved = service.saveOrUpdateRoom(incoming(false), "user-dev", "MEMBER");
+
+            assertTrue(Boolean.TRUE.equals(saved.getVotesRevealed()));
+        }
+
+        @Test
+        @DisplayName("Facilitador (criador) revela normalmente")
+        void creatorReveals() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(revealedState(false)));
+            when(roomRepository.saveAndFlush(any())).thenAnswer(i -> i.getArgument(0));
+
+            PokerRoom saved = service.saveOrUpdateRoom(incoming(true), "user-creator", "MEMBER");
+
+            assertTrue(Boolean.TRUE.equals(saved.getVotesRevealed()));
+        }
+
+        @Test
+        @DisplayName("Participante NÃO revela uma tarefa nova na sala assíncrona (403)")
+        void participantCannotRevealIssue() {
+            PokerRoom current = revealedState(false);
+            current.setRevealedIssues(new com.fasterxml.jackson.databind.ObjectMapper().createArrayNode().add("a"));
+            PokerRoom next = incoming(false);
+            next.setRevealedIssues(new com.fasterxml.jackson.databind.ObjectMapper().createArrayNode().add("a").add("b"));
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(current));
+            participantIn("user-dev");
+
+            ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                    () -> service.saveOrUpdateRoom(next, "user-dev", "MEMBER"));
+
+            assertEquals(HttpStatus.FORBIDDEN, e.getStatusCode());
+        }
+
+        @Test
+        @DisplayName("Participante NÃO limpa os votos (403); facilitador limpa")
+        void clearVotesIsFacilitatorOnly() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(revealedState(true)));
+            participantIn("user-dev");
+
+            ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                    () -> service.clearVotes("room-123", "user-dev", "MEMBER"));
+            assertEquals(HttpStatus.FORBIDDEN, e.getStatusCode());
+            verify(voteRepository, never()).deleteByRoomId(anyString());
+
+            service.clearVotes("room-123", "user-creator", "MEMBER");
+            verify(voteRepository).deleteByRoomId("room-123");
+        }
+
+        @Test
+        @DisplayName("Participante NÃO apaga o histórico de rodadas (403)")
+        void clearRoundsIsFacilitatorOnly() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(revealedState(true)));
+            participantIn("user-dev");
+
+            assertThrows(ResponseStatusException.class, () -> service.clearRounds("room-123", "user-dev", "MEMBER"));
+            verify(roundRepository, never()).deleteByRoomId(anyString());
+        }
+
+        @Test
+        @DisplayName("Participante NÃO vira facilitador mandando role=organizador na entrada")
+        void participantCannotPromoteViaRole() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(revealedState(false)));
+            when(participantRepository.findById("room-123_user-b")).thenReturn(Optional.empty());
+            PokerParticipant p = PokerParticipant.builder().id("user-b").roomId("room-123").nickname("B").role("organizador").isFacilitator(false).build();
+
+            service.joinRoom(p, "user-b", "MEMBER");
+
+            verify(participantRepository).upsertParticipant(
+                    eq("room-123_user-b"), eq("user-b"), eq("room-123"), any(), any(), eq("dev"), eq(false), any(), anyString());
+        }
+    }
 }

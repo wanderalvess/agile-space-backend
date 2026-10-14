@@ -95,6 +95,7 @@ public class PokerService {
             PokerRoom current = existing.get();
             requireRoomParticipant(current, callerId, callerRole);
             guardCreatorChange(current, room, callerId, callerRole);
+            enforceRevealControl(current, room, callerId, callerRole);
             // Quem não envia a versão (cliente antigo, MCP) mantém o comportamento anterior, última
             // gravação vence. Sem isso o Spring Data trataria a sala como nova e tentaria um INSERT.
             if (room.getVersion() == null) {
@@ -109,6 +110,38 @@ public class PokerService {
         PokerRoom saved = roomRepository.saveAndFlush(room);
         publish(saved.getId(), "ROOM_UPDATED", saved);
         return saved;
+    }
+
+    /**
+     * Revelar votos é do facilitador. Quem não é facilitador não pode revelar (votesRevealed ou novo item em
+     * revealedIssues) nem desfazer a revelação: tentar revelar dá 403 e qualquer outra divergência (cópia
+     * velha da sala no navegador) é descartada, valendo o estado do servidor. Quem acabou de assumir o
+     * controle (guardCreatorChange já o autorizou a virar creatorId) conta como facilitador.
+     */
+    private void enforceRevealControl(PokerRoom current, PokerRoom incoming, String callerId, String callerRole) {
+        boolean facilitator = callerId != null
+                && (isRoomFacilitator(current, callerId, callerRole) || callerId.equals(incoming.getCreatorId()));
+        if (facilitator) {
+            return;
+        }
+        boolean wasRevealed = Boolean.TRUE.equals(current.getVotesRevealed());
+        boolean reveals = Boolean.TRUE.equals(incoming.getVotesRevealed()) && !wasRevealed;
+        boolean revealsIssue = !textValues(current.getRevealedIssues()).containsAll(textValues(incoming.getRevealedIssues()));
+        if (reveals || revealsIssue) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só o facilitador pode revelar os votos.");
+        }
+        incoming.setVotesRevealed(current.getVotesRevealed());
+        incoming.setRevealedIssues(current.getRevealedIssues());
+    }
+
+    private static Set<String> textValues(JsonNode array) {
+        Set<String> out = new java.util.HashSet<>();
+        if (array != null && array.isArray()) {
+            for (JsonNode n : array) {
+                out.add(n.asText());
+            }
+        }
+        return out;
     }
 
     /**
@@ -257,6 +290,11 @@ public class PokerService {
         }
         if (!facilitatorCaller) {
             participant.setIsFacilitator(false);
+            // O papel "organizador" também vale como facilitador (isRoomFacilitator): sem isto qualquer
+            // participante se promovia mandando role=organizador no corpo da entrada.
+            if ("organizador".equalsIgnoreCase(participant.getRole())) {
+                participant.setRole("dev");
+            }
         }
         String dbId = participant.getRoomId() + "_" + participant.getId();
         participant.setDbId(dbId);
@@ -303,6 +341,12 @@ public class PokerService {
             if (value.equals(n.asText(null))) return true;
         }
         return false;
+    }
+
+    private void requireRoomFacilitator(PokerRoom room, String callerId, String callerRole, String action) {
+        if (callerId == null || !isRoomFacilitator(room, callerId, callerRole)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só o facilitador pode " + action + ".");
+        }
     }
 
     /**
@@ -506,7 +550,7 @@ public class PokerService {
     public void clearVotes(String roomId, String callerId, String callerRole) {
         PokerRoom room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sala não encontrada"));
-        requireRoomParticipant(room, callerId, callerRole);
+        requireRoomFacilitator(room, callerId, callerRole, "limpar os votos");
         voteRepository.deleteByRoomId(roomId);
         publish(roomId, "VOTES_CLEARED", Map.of());
     }
@@ -549,7 +593,7 @@ public class PokerService {
     public void clearRounds(String roomId, String callerId, String callerRole) {
         PokerRoom room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sala não encontrada"));
-        requireRoomParticipant(room, callerId, callerRole);
+        requireRoomFacilitator(room, callerId, callerRole, "apagar o histórico de rodadas");
         roundRepository.deleteByRoomId(roomId);
         publish(roomId, "ROUNDS_CLEARED", Map.of());
     }
