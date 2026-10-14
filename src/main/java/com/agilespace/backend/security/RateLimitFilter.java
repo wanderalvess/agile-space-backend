@@ -69,6 +69,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             response.setStatus(429);
             response.setHeader("Retry-After", String.valueOf(retryAfterSeconds));
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            response.setCharacterEncoding("UTF-8");
             response.getWriter().write("{\"error\": \"Muitas requisições. Tente novamente em instantes.\"}");
             return;
         }

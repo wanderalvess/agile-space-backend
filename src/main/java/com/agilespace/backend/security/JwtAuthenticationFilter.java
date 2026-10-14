@@ -160,6 +160,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private void reject(HttpServletResponse response, int status, String message) throws IOException {
         response.setStatus(status);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setCharacterEncoding("UTF-8");
         response.getWriter().write("{\"error\": \"" + message + "\"}");
     }
 }

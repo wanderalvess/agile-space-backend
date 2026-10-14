@@ -111,6 +111,7 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
     private void reject(HttpServletResponse response, String message) throws IOException {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setCharacterEncoding("UTF-8");
         response.getWriter().write("{\"error\": \"" + message + "\"}");
     }
 }
