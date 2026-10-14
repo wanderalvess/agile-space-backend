@@ -62,6 +62,26 @@ public class AuthController {
     }
 
     /**
+     * Renova a sessão: devolve um token novo enquanto o teto absoluto da sessão (7 dias) não foi atingido.
+     * O token atual precisa estar válido; quem ficou ausente além da validade entra de novo.
+     */
+    @PostMapping("/refresh")
+    public ResponseEntity<AuthResponseDto> refresh(HttpServletRequest request) {
+        String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        Object start = request.getAttribute(JwtAuthenticationFilter.ATTR_AUTH_AT);
+        long authAt = start instanceof Long l ? l : 0L;
+        return ResponseEntity.ok(authService.refresh(userId, authAt));
+    }
+
+    /** Encerra a sessão no servidor: todos os tokens emitidos até agora para esta conta deixam de valer. */
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(HttpServletRequest request) {
+        String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        authService.logout(userId);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
      * Alterna o projeto ativo do usuário autenticado.
      */
     @PostMapping("/switch-project")

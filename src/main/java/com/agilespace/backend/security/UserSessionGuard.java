@@ -25,7 +25,10 @@ public class UserSessionGuard {
     static final long TTL_MILLIS = 30_000L;
     static final int MAX_ENTRIES = 5_000;
 
-    public record State(boolean active, String role) {
+    public record State(boolean active, String role, long tokensValidAfter) {
+        public State(boolean active, String role) {
+            this(active, role, 0L);
+        }
     }
 
     private record Entry(State state, long loadedAt) {
@@ -48,7 +51,7 @@ public class UserSessionGuard {
             return Optional.ofNullable(cached.state());
         }
         Optional<User> user = userRepository.findById(userId);
-        State state = user.map(u -> new State(u.isActive(), u.getRole())).orElse(null);
+        State state = user.map(u -> new State(u.isActive(), u.getRole(), u.getTokensValidAfter() != null ? u.getTokensValidAfter() : 0L)).orElse(null);
         if (cache.size() >= MAX_ENTRIES) {
             cache.clear();
         }

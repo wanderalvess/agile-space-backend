@@ -22,6 +22,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Optional;
+import java.time.Instant;
 import java.util.UUID;
 
 @Service
@@ -36,6 +37,10 @@ public class AuthService {
     private final UserProjectResolverService userProjectResolverService;
     private final JwtTokenUtil jwtTokenUtil;
     private final JiraAccountIdGuard jiraAccountIdGuard;
+
+    /** Opcional (não entra no construtor): só serve para o logout limpar o cache de estado da conta. */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.agilespace.backend.security.UserSessionGuard sessionGuard;
 
     /** Hash de uma senha qualquer, só para gastar o mesmo tempo quando o e-mail não existe (evita enumeração por tempo de resposta). */
     private static volatile String dummyHash;
@@ -326,6 +331,41 @@ public class AuthService {
     }
 
     private AuthResponseDto buildAuthResponse(User user, UserProjectAccessDto access) {
+        return buildAuthResponse(user, access, Instant.now().getEpochSecond());
+    }
+
+    /**
+     * Renova a sessão: emite um token novo (mais 24 h por padrão) preservando o instante do login original.
+     * Depois do teto absoluto (app.security.jwt-max-session-seconds, 7 dias) é preciso entrar de novo.
+     */
+    @Transactional(readOnly = true)
+    public AuthResponseDto refresh(String userId, long sessionStartEpochSeconds) {
+        long now = Instant.now().getEpochSecond();
+        if (sessionStartEpochSeconds <= 0 || now - sessionStartEpochSeconds > jwtTokenUtil.getMaxSessionSeconds()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão expirada: entre novamente");
+        }
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão inválida ou expirada"));
+        if (!user.isActive()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão inválida: conta inativa");
+        }
+        UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(user);
+        return buildAuthResponse(user, access, sessionStartEpochSeconds);
+    }
+
+    /** Encerra a sessão no servidor: tokens emitidos até agora (de qualquer aparelho) deixam de valer. */
+    @Transactional
+    public void logout(String userId) {
+        userRepository.findById(userId).ifPresent(user -> {
+            user.setTokensValidAfter(Instant.now().getEpochSecond());
+            userRepository.save(user);
+            if (sessionGuard != null) {
+                sessionGuard.evict(userId);
+            }
+        });
+    }
+
+    private AuthResponseDto buildAuthResponse(User user, UserProjectAccessDto access, long authAt) {
         String activeProjId = (user.getDefaultProjectId() != null) ? user.getDefaultProjectId() : access.getPrimaryProjectId();
         String activeProjName = "";
         String activeProjRole = "Membro";
@@ -351,13 +391,14 @@ public class AuthService {
                 user.getRole(),
                 activeProjId,
                 segment,
-                tribe
+                tribe,
+                authAt
         );
 
         return AuthResponseDto.builder()
                 .token(token)
                 .tokenType("Bearer")
-                .expiresIn(86400L)
+                .expiresIn(jwtTokenUtil.getExpirationSeconds())
                 .id(user.getId())
                 .email(user.getEmail())
                 .name(user.getName())

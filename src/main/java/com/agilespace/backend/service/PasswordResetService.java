@@ -29,6 +29,10 @@ public class PasswordResetService {
     private final UserRepository userRepository;
     private final AuditLogRepository auditLogRepository;
 
+    /** Opcional (fora do construtor): limpa o cache de estado da conta quando as sessões são invalidadas. */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.agilespace.backend.security.UserSessionGuard sessionGuard;
+
     private static final String CHAR_LOWER = "abcdefghijklmnopqrstuvwxyz";
     private static final String CHAR_UPPER = CHAR_LOWER.toUpperCase();
     private static final String NUMBER = "0123456789";
@@ -115,7 +119,12 @@ public class PasswordResetService {
         if (userOpt.isPresent()) {
             User user = userOpt.get();
             user.setPasswordHash(PasswordUtil.hashPassword(tempPassword));
+            // Quem tinha a senha antiga (ou um token roubado) perde as sessões abertas.
+            user.setTokensValidAfter(java.time.Instant.now().getEpochSecond());
             userRepository.save(user);
+            if (sessionGuard != null) {
+                sessionGuard.evict(user.getId());
+            }
         }
 
         resetReq.setStatus("APPROVED");

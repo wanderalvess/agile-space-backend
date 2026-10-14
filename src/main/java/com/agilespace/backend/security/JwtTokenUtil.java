@@ -30,6 +30,10 @@ public class JwtTokenUtil {
     private final long expirationSeconds;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /** Teto absoluto de uma sessão renovada: depois disso é preciso entrar de novo, por mais que se renove. */
+    @Value("${app.security.jwt-max-session-seconds:604800}")
+    private long maxSessionSeconds = 604800L;
+
     public JwtTokenUtil(
             @Value("${app.security.jwt-secret}") String secretKey,
             @Value("${app.security.jwt-expiration-seconds:86400}") long expirationSeconds) {
@@ -49,6 +53,14 @@ public class JwtTokenUtil {
      * Gera um token JWT com as claims do usuário e projetos associados.
      */
     public String generateToken(String userId, String email, String name, String role, String defaultProjectId, String segmentName, String tribeName) {
+        return generateToken(userId, email, name, role, defaultProjectId, segmentName, tribeName, Instant.now().getEpochSecond());
+    }
+
+    /**
+     * Igual ao anterior, mas preserva o instante do login original (claim "authAt") quando o token é uma
+     * renovação, para o teto de {@code maxSessionSeconds} valer sobre a sessão inteira.
+     */
+    public String generateToken(String userId, String email, String name, String role, String defaultProjectId, String segmentName, String tribeName, long authAt) {
         try {
             long now = Instant.now().getEpochSecond();
             long exp = now + expirationSeconds;
@@ -66,6 +78,7 @@ public class JwtTokenUtil {
             claims.put("segmentName", segmentName != null ? segmentName : "");
             claims.put("tribeName", tribeName != null ? tribeName : "");
             claims.put("iat", now);
+            claims.put("authAt", authAt);
             claims.put("exp", exp);
 
             String encodedHeader = Base64.getUrlEncoder().withoutPadding().encodeToString(objectMapper.writeValueAsBytes(header));
@@ -114,6 +127,21 @@ public class JwtTokenUtil {
             log.error("Erro ao decodificar payload JWT", e);
             return null;
         }
+    }
+
+    /** Instante (epoch, s) do login que originou a sessão; tokens antigos sem a claim usam o próprio iat. */
+    public long authAtOf(JsonNode claims) {
+        if (claims == null) return 0L;
+        if (claims.hasNonNull("authAt")) return claims.get("authAt").asLong();
+        return claims.hasNonNull("iat") ? claims.get("iat").asLong() : 0L;
+    }
+
+    public long getMaxSessionSeconds() {
+        return maxSessionSeconds;
+    }
+
+    public long getExpirationSeconds() {
+        return expirationSeconds;
     }
 
     private String sign(String data, String key) {

@@ -31,6 +31,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
@@ -69,7 +70,7 @@ public class AuthServiceTest {
     @BeforeEach
     public void setup() {
         MockitoAnnotations.openMocks(this);
-        lenient().when(jwtTokenUtil.generateToken(anyString(), anyString(), anyString(), anyString(), any(), any(), any()))
+        lenient().when(jwtTokenUtil.generateToken(anyString(), anyString(), anyString(), anyString(), any(), any(), any(), anyLong()))
                 .thenReturn("jwt-token");
     }
 
@@ -167,7 +168,7 @@ public class AuthServiceTest {
                 LoginRequestDto.builder().email("joao.silva@empresa.com.br").password("senhaErrada").build()));
 
         assertEquals(HttpStatus.UNAUTHORIZED, ex.getStatusCode());
-        verify(jwtTokenUtil, never()).generateToken(anyString(), anyString(), anyString(), anyString(), any(), any(), any());
+        verify(jwtTokenUtil, never()).generateToken(anyString(), anyString(), anyString(), anyString(), any(), any(), any(), anyLong());
     }
 
     @Test
@@ -456,6 +457,60 @@ public class AuthServiceTest {
         ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> service.getMe("ghost"));
 
         assertEquals(HttpStatus.UNAUTHORIZED, ex.getStatusCode());
+    }
+
+    // ---------- refresh / logout ----------
+
+    @Test
+    public void testRefreshKeepsOriginalLoginInstantAndIssuesNewToken() {
+        long authAt = java.time.Instant.now().getEpochSecond() - 3600;
+        User user = activeUser();
+        user.setDefaultProjectId("DDWMISSI");
+        when(jwtTokenUtil.getMaxSessionSeconds()).thenReturn(604800L);
+        when(userRepository.findById("u1")).thenReturn(Optional.of(user));
+        when(userProjectResolverService.resolveUserAccess(user)).thenReturn(accessWith("DDWMISSI"));
+
+        AuthResponseDto response = service.refresh("u1", authAt);
+
+        assertEquals("jwt-token", response.getToken());
+        verify(jwtTokenUtil).generateToken(anyString(), anyString(), anyString(), anyString(), any(), any(), any(), eq(authAt));
+    }
+
+    @Test
+    public void testRefreshAfterAbsoluteSessionCapIsUnauthorized() {
+        long tooOld = java.time.Instant.now().getEpochSecond() - 8 * 24 * 3600;
+        when(jwtTokenUtil.getMaxSessionSeconds()).thenReturn(604800L);
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> service.refresh("u1", tooOld));
+
+        assertEquals(HttpStatus.UNAUTHORIZED, ex.getStatusCode());
+        verify(jwtTokenUtil, never()).generateToken(anyString(), anyString(), anyString(), anyString(), any(), any(), any(), anyLong());
+    }
+
+    @Test
+    public void testRefreshInactiveAccountIsUnauthorized() {
+        User user = activeUser();
+        user.setActive(false);
+        when(jwtTokenUtil.getMaxSessionSeconds()).thenReturn(604800L);
+        when(userRepository.findById("u1")).thenReturn(Optional.of(user));
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> service.refresh("u1", java.time.Instant.now().getEpochSecond()));
+
+        assertEquals(HttpStatus.UNAUTHORIZED, ex.getStatusCode());
+    }
+
+    @Test
+    public void testLogoutInvalidatesTokensIssuedBeforeNow() {
+        User user = activeUser();
+        when(userRepository.findById("u1")).thenReturn(Optional.of(user));
+        long before = java.time.Instant.now().getEpochSecond();
+
+        service.logout("u1");
+
+        assertNotNull(user.getTokensValidAfter());
+        assertTrue(user.getTokensValidAfter() >= before);
+        verify(userRepository).save(user);
     }
 
     // ---------- switchActiveProject ----------

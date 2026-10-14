@@ -28,6 +28,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     public static final String ATTR_USER_ID = "authUserId";
     public static final String ATTR_USER_EMAIL = "authUserEmail";
     public static final String ATTR_USER_ROLE = "authUserRole";
+    /** Instante (epoch, s) do login original da sessão; usado pelo /api/auth/refresh. */
+    public static final String ATTR_AUTH_AT = "authSessionStart";
 
     private static final List<String> PUBLIC_PATHS = List.of(
             "/api/auth/login",
@@ -125,6 +127,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         reject(response, HttpServletResponse.SC_UNAUTHORIZED, "Sessão inválida: conta inativa");
                         return;
                     }
+                    // Logout e redefinição de senha invalidam os tokens emitidos antes deles.
+                    long iat = claims.hasNonNull("iat") ? claims.get("iat").asLong() : 0L;
+                    if (state.tokensValidAfter() > 0 && iat < state.tokensValidAfter()) {
+                        reject(response, HttpServletResponse.SC_UNAUTHORIZED, "Sessão encerrada: entre novamente");
+                        return;
+                    }
                     if (state.role() != null && !state.role().isBlank()) {
                         role = state.role();
                     }
@@ -142,6 +150,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         request.setAttribute(ATTR_USER_ID, claims.get("sub").asText());
         request.setAttribute(ATTR_USER_EMAIL, claims.hasNonNull("email") ? claims.get("email").asText() : null);
         request.setAttribute(ATTR_USER_ROLE, role);
+        request.setAttribute(ATTR_AUTH_AT, jwtTokenUtil.authAtOf(claims));
 
         filterChain.doFilter(request, response);
     }

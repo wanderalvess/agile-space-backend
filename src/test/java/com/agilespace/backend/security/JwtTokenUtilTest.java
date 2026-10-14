@@ -38,4 +38,20 @@ class JwtTokenUtilTest {
 
         assertNull(new JwtTokenUtil(SECRET, 3600).validateAndExtractClaims(forged));
     }
+
+    @Test
+    @DisplayName("Renovação preserva o instante do login original; token novo usa o próprio iat")
+    void authAtIsPreservedOnRefresh() {
+        JwtTokenUtil util = new JwtTokenUtil(SECRET, 3600);
+        long original = java.time.Instant.now().getEpochSecond() - 7200;
+
+        JsonNode renewed = util.validateAndExtractClaims(
+                util.generateToken("u1", "a@totvs.com.br", "A", "MEMBER", null, null, null, original));
+        JsonNode fresh = util.validateAndExtractClaims(
+                util.generateToken("u1", "a@totvs.com.br", "A", "MEMBER", null, null, null));
+
+        assertEquals(original, util.authAtOf(renewed));
+        assertEquals(renewed.get("iat").asLong() - 7200, util.authAtOf(renewed));
+        assertEquals(fresh.get("iat").asLong(), util.authAtOf(fresh));
+    }
 }

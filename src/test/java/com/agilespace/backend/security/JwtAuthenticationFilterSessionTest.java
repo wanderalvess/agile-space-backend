@@ -68,6 +68,19 @@ class JwtAuthenticationFilterSessionTest {
     }
 
     @Test
+    @DisplayName("Logout ou reset de senha invalidam tokens emitidos antes deles")
+    void tokensIssuedBeforeLogoutAreRejected() throws Exception {
+        when(tokenUtil.validateAndExtractClaims(anyString())).thenReturn(
+                mapper.readTree("{\"sub\":\"u1\",\"role\":\"MEMBER\",\"iat\":1000}"));
+        when(guard.lookup("u1")).thenReturn(Optional.of(new UserSessionGuard.State(true, "MEMBER", 2000L)));
+        assertEquals(401, call("/api/projects", "t", null).getStatus());
+
+        when(tokenUtil.validateAndExtractClaims(anyString())).thenReturn(
+                mapper.readTree("{\"sub\":\"u1\",\"role\":\"MEMBER\",\"iat\":2000}"));
+        assertEquals(200, call("/api/projects", "t", null).getStatus());
+    }
+
+    @Test
     @DisplayName("Admin rebaixado perde /api/admin e o papel do banco vale no request")
     void demotedAdminLosesAccess() throws Exception {
         tokenFor("u1", "ADMIN");

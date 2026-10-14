@@ -95,6 +95,14 @@ public class User {
     private LocalDateTime lastLoginAt;
 
     /**
+     * Sessões (JWT) emitidas antes deste instante (epoch, segundos) deixam de valer. Preenchido no logout e na
+     * redefinição de senha. Null = nenhuma sessão invalidada.
+     */
+    @Column(name = "tokens_valid_after")
+    @JsonIgnore
+    private Long tokensValidAfter;
+
+    /**
      * Marcam se o corpo da requisição trouxe "role"/"active" de verdade. O getter de role devolve "MEMBER" e
      * active nasce true quando omitidos; sem este rastro um admin salvando só o nome rebaixaria e reativaria
      * a conta. Só o Jackson (setters) liga; entidade carregada do banco e builder não ligam.
