@@ -40,11 +40,21 @@ public final class JoltSpecGenerator {
     public enum Confidence { HIGH, MEDIUM, LOW, NONE }
 
     /** Uma regra inferida, como a tela mostra: campo da saída, de onde vem, como, e se precisa de confirmação. */
-    public record Rule(String output, Kind kind, String source, String detail, Confidence confidence,
+    /** {@code scope}: a lista da saída a que o campo pertence ("" = raiz, "items[]", "items[].produtoEmbalagens[]"). */
+    public record Rule(String output, String scope, Kind kind, String source, String detail, Confidence confidence,
                        boolean pending, String reason, List<String> alternatives, String example) {
     }
 
-    public record Result(ArrayNode spec, List<Rule> rules) {
+    /**
+     * Escolha da pessoa para um campo, indexada pelo {@link Rule#output()}: {@code kind} COPY, AS_TEXT, DIGITS ou VALUE_MAP
+     * com {@code source} (uma das origens de {@link Result#sources()} da mesma lista); CONSTANT com {@code value};
+     * VALUE_MAP com {@code map} (valor da entrada → valor da saída) e, opcional, {@code otherwise} (qualquer outro valor).
+     */
+    public record Override(String kind, String source, JsonNode value, Map<String, JsonNode> map, JsonNode otherwise) {
+    }
+
+    /** {@code sources}: por lista da saída, as origens que a pessoa pode escolher (mesma grafia de {@link Rule#source()}). */
+    public record Result(ArrayNode spec, List<Rule> rules, Map<String, List<String>> sources) {
     }
 
     static final int MAX_SOURCES = 4000;
@@ -125,6 +135,7 @@ public final class JoltSpecGenerator {
         List<Object> concatParts; // String (literal) ou Src
         Map<String, JsonNode> valueMap;
         JsonNode constant;
+        JsonNode otherwise;
         Confidence confidence = Confidence.HIGH;
         String reason = "";
         List<String> alternatives = List.of();
@@ -137,19 +148,85 @@ public final class JoltSpecGenerator {
     private final ObjectNode post = nodes.objectNode();
     private final ObjectNode defaults = nodes.objectNode();
     private final List<Rule> rules = new ArrayList<>();
+    private final Map<String, Override> overrides;
+    private final Map<String, List<String>> sourcesByScope = new LinkedHashMap<>();
     private int temp;
+    static final int MAX_LISTED_SOURCES = 400;
 
-    private JoltSpecGenerator() {
+    private JoltSpecGenerator(Map<String, Override> overrides) {
+        this.overrides = overrides == null ? Map.of() : overrides;
     }
 
     public static Result generate(JsonNode input, JsonNode output) {
+        return generate(input, output, Map.of());
+    }
+
+    public static Result generate(JsonNode input, JsonNode output, Map<String, Override> overrides) {
         if (input == null || !input.isContainerNode() || output == null || !output.isObject()) {
             throw new IllegalArgumentException("Entrada e saída precisam ser objetos ou listas JSON.");
         }
-        JoltSpecGenerator g = new JoltSpecGenerator();
+        JoltSpecGenerator g = new JoltSpecGenerator(overrides);
         Scope root = new Scope(List.of(), List.of(), List.of(new Pair(input, output, List.of())), List.of(), "");
         g.processRoot(root);
-        return new Result(g.buildSpec(), List.copyOf(g.rules));
+        return new Result(g.buildSpec(), List.copyOf(g.rules), Collections.unmodifiableMap(g.sourcesByScope));
+    }
+
+    private void listSources(Scope scope, String key) {
+        List<String> list = sourcesByScope.computeIfAbsent(key, k -> new ArrayList<>());
+        for (Src s : sources(scope)) {
+            if (list.size() >= MAX_LISTED_SOURCES) break;
+            String d = display(s);
+            if (!list.contains(d)) list.add(d);
+        }
+    }
+
+    /**
+     * Aplica a escolha da pessoa, se houver; senão infere. Devolve null quando a origem escolhida não existe nesta lista
+     * (quem chama tenta outra lista ou registra como não resolvido).
+     */
+    private Plan decide(Scope scope, List<String> field, List<JsonNode> targets, String display) {
+        Override o = overrides.get(display);
+        if (o == null) return infer(scope, field, targets);
+        String kind = o.kind() == null ? "" : o.kind().trim().toUpperCase(Locale.ROOT);
+        Plan p = new Plan();
+        p.reason = "definido por você";
+        if (kind.equals("CONSTANT")) {
+            p.kind = Kind.CONSTANT;
+            p.constant = o.value() != null ? o.value() : targets.get(0);
+            return p;
+        }
+        Kind k;
+        try {
+            k = Kind.valueOf(kind);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Tipo de regra inválido para " + display + ": " + o.kind());
+        }
+        if (k != Kind.COPY && k != Kind.AS_TEXT && k != Kind.DIGITS && k != Kind.VALUE_MAP) {
+            throw new IllegalArgumentException("Tipo de regra não aceito para " + display + ": " + o.kind());
+        }
+        Src chosen = null;
+        for (Src s : sources(scope)) {
+            if (display(s).equals(o.source())) {
+                chosen = s;
+                break;
+            }
+        }
+        if (chosen == null) return null;
+        p.kind = k;
+        p.source = chosen;
+        if (k == Kind.VALUE_MAP) {
+            if (o.map() == null || o.map().isEmpty()) {
+                throw new IllegalArgumentException("De-para sem valores para " + display);
+            }
+            for (String key : o.map().keySet()) {
+                if (!SHIFT_SAFE_KEY.matcher(key).matches()) {
+                    throw new IllegalArgumentException("Valor de entrada não aceito no de-para de " + display + ": " + key);
+                }
+            }
+            p.valueMap = new LinkedHashMap<>(o.map());
+            p.otherwise = o.otherwise();
+        }
+        return p;
     }
 
     // ------------------------------------------------------------------ escopos
@@ -161,9 +238,29 @@ public final class JoltSpecGenerator {
         collectOutput(out, new ArrayList<>(), leaves, root, children);
 
         Scope main = children.isEmpty() ? null : children.get(0);
+        listSources(root, "");
+        Scope mainFirst = main == null ? null : new Scope(main.inPattern(), main.outLevels(), List.of(main.pairs().get(0)),
+                main.ancestorLens(), main.display());
+        if (mainFirst != null) listSources(mainFirst, "");
         for (List<String> field : leaves) {
             JsonNode target = at(out, field);
             String display = String.join(".", field);
+            if (overrides.containsKey(display)) {
+                // Campo da raiz escolhido pela pessoa: a origem pode estar na raiz ou no item da lista principal.
+                Plan chosen = decide(root, field, List.of(target), display);
+                if (chosen != null) {
+                    emit(root, field, chosen, display, false);
+                    continue;
+                }
+                Plan fromItem = mainFirst == null ? null : decide(mainFirst, field, List.of(target), display);
+                if (fromItem != null) {
+                    emitAbsolute(mainFirst, field, fromItem, display, target.isArray());
+                } else {
+                    rules.add(new Rule(display, "", Kind.UNRESOLVED, overrides.get(display).source(), null, Confidence.NONE,
+                            true, "a origem escolhida não existe nesta entrada", List.of(), null));
+                }
+                continue;
+            }
             if (target.isArray() && main != null && target.size() == main.pairs().size() && allScalar(target)) {
                 List<JsonNode> targets = new ArrayList<>();
                 target.forEach(targets::add);
@@ -198,6 +295,7 @@ public final class JoltSpecGenerator {
     }
 
     private void processScope(Scope scope) {
+        listSources(scope, scope.display());
         JsonNode out = scope.pairs().get(0).out();
         List<List<String>> leaves = new ArrayList<>();
         List<Scope> children = new ArrayList<>();
@@ -208,8 +306,14 @@ public final class JoltSpecGenerator {
         for (List<String> field : leaves) {
             List<JsonNode> targets = new ArrayList<>();
             for (Pair p : scope.pairs()) targets.add(at(p.out(), field));
-            Plan plan = infer(scope, field, targets);
-            emit(scope, field, plan, scope.display() + "." + String.join(".", field), false);
+            String display = scope.display() + "." + String.join(".", field);
+            Plan plan = decide(scope, field, targets, display);
+            if (plan == null) {
+                rules.add(new Rule(display, scope.display(), Kind.UNRESOLVED, overrides.get(display).source(), null,
+                        Confidence.NONE, true, "a origem escolhida não existe nesta lista", List.of(), null));
+                continue;
+            }
+            emit(scope, field, plan, display, false);
             if (plan.kind == Kind.CONSTANT || plan.kind == Kind.VARIABLE) {
                 if (firstConstant == null && !(plan.constant.isTextual()
                         && (plan.constant.asText().startsWith("=") || plan.constant.asText().startsWith("@")))) {
@@ -249,7 +353,7 @@ public final class JoltSpecGenerator {
                 if (child != null) {
                     children.add(child);
                 } else {
-                    rules.add(new Rule(display, Kind.UNRESOLVED, null, null, Confidence.NONE, true,
+                    rules.add(new Rule(display, scope.display(), Kind.UNRESOLVED, null, null, Confidence.NONE, true,
                             "nenhuma lista da entrada tem o mesmo número de itens e conteúdo parecido", List.of(), null));
                 }
             } else {
@@ -787,8 +891,19 @@ public final class JoltSpecGenerator {
                     else if (v.isNumber()) putPost(scope, field, "=toDouble", absolute);
                     else if (v.isBoolean()) putPost(scope, field, "=toBoolean", absolute);
                 }
+                if (plan.otherwise != null && !plan.otherwise.isNull()) {
+                    List<String> path = new ArrayList<>(keys);
+                    path.add("*");
+                    path.add("#" + plan.otherwise.asText());
+                    putShift(scope, path, dst(scope, field, path.size(), absolute, asArray));
+                    JsonNode v = plan.otherwise;
+                    if (v.isIntegralNumber()) putPost(scope, field, "=toInteger", absolute);
+                    else if (v.isNumber()) putPost(scope, field, "=toDouble", absolute);
+                    else if (v.isBoolean()) putPost(scope, field, "=toBoolean", absolute);
+                }
                 StringBuilder ex = new StringBuilder();
                 plan.valueMap.forEach((k, v) -> ex.append(ex.length() == 0 ? "" : ", ").append(k).append(" → ").append(v));
+                if (plan.otherwise != null && !plan.otherwise.isNull()) ex.append(", outro → ").append(plan.otherwise);
                 example = ex.toString();
             }
             case UNRESOLVED, LIST -> {
@@ -797,7 +912,8 @@ public final class JoltSpecGenerator {
         String source = plan.source != null ? display(plan.source)
                 : plan.concatParts != null ? concatDisplay(plan.concatParts) : null;
         boolean pending = plan.kind == Kind.UNRESOLVED || plan.confidence != Confidence.HIGH;
-        rules.add(new Rule(display.isEmpty() ? fieldPath : display, plan.kind, source, null, plan.confidence, pending,
+        rules.add(new Rule(display.isEmpty() ? fieldPath : display, absolute ? "" : scope.display(), plan.kind, source, null,
+                plan.confidence, pending,
                 plan.reason, plan.alternatives, example));
     }
 

@@ -74,11 +74,11 @@ class JoltSpecGeneratorRulesTest {
     void controllerValidatesRequest() {
         JoltGeneratorController controller = new JoltGeneratorController(service);
         assertThrows(ResponseStatusException.class,
-                () -> controller.generate(new JoltGeneratorController.GenerateRequest(mapper.createObjectNode(), null)));
+                () -> controller.generate(new JoltGeneratorController.GenerateRequest(mapper.createObjectNode(), null, null)));
         var big = mapper.createArrayNode();
         for (int i = 0; i < 60_000; i++) big.add(i);
         JsonNode input = mapper.createObjectNode().set("items", big);
         assertThrows(ResponseStatusException.class,
-                () -> controller.generate(new JoltGeneratorController.GenerateRequest(input, mapper.createObjectNode())));
+                () -> controller.generate(new JoltGeneratorController.GenerateRequest(input, mapper.createObjectNode(), null)));
     }
 }

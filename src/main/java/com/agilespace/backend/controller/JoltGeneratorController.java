@@ -1,5 +1,6 @@
 package com.agilespace.backend.controller;
 
+import com.agilespace.backend.service.jolt.JoltSpecGenerator;
 import com.agilespace.backend.service.jolt.JoltSpecGeneratorService;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.Operation;
@@ -15,6 +16,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.Map;
 
 /**
  * Gerador de spec Jolt a partir de exemplo: recebe a entrada (resposta da API de origem) e a saída que a API de destino
@@ -31,7 +33,8 @@ public class JoltGeneratorController {
 
     private final JoltSpecGeneratorService generatorService;
 
-    public record GenerateRequest(JsonNode input, JsonNode output) {
+    /** {@code overrides}: escolhas da pessoa por campo da saída (ver {@link JoltSpecGenerator.Override}). */
+    public record GenerateRequest(JsonNode input, JsonNode output, Map<String, JoltSpecGenerator.Override> overrides) {
     }
 
     @Operation(summary = "Gera a spec Jolt a partir de um par entrada/saída e valida no motor Java")
@@ -46,7 +49,15 @@ public class JoltGeneratorController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Exemplo grande demais (máximo de " + MAX_NODES + " campos). Use um ou poucos registros.");
         }
-        return ResponseEntity.ok(generatorService.generate(request.input(), request.output()));
+        if (request.overrides() != null && request.overrides().size() > 2_000) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Escolhas demais na mesma requisição.");
+        }
+        try {
+            return ResponseEntity.ok(generatorService.generate(request.input(), request.output(),
+                    request.overrides() == null ? Map.of() : request.overrides()));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
     }
 
     static int countNodes(JsonNode root) {

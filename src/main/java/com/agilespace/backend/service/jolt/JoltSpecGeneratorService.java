@@ -34,14 +34,21 @@ public class JoltSpecGeneratorService {
     public record Validation(boolean ran, boolean matches, String error, List<Difference> differences, int checkedFields) {
     }
 
-    public record Generated(JsonNode spec, List<JoltSpecGenerator.Rule> rules, Validation validation, int pending) {
+    public record Generated(JsonNode spec, List<JoltSpecGenerator.Rule> rules, Validation validation, int pending,
+                            Map<String, List<String>> sources) {
     }
 
     public Generated generate(JsonNode input, JsonNode expected) {
-        JoltSpecGenerator.Result result = JoltSpecGenerator.generate(input, expected);
+        return generate(input, expected, Map.of());
+    }
+
+    /** Com as escolhas da pessoa ({@code overrides}, por campo da saída): refaz a spec e revalida. */
+    public Generated generate(JsonNode input, JsonNode expected, Map<String, JoltSpecGenerator.Override> overrides) {
+        JoltSpecGenerator.Result result = JoltSpecGenerator.generate(input, expected, overrides);
         Validation validation = validate(input, result.spec(), expected);
         int pending = (int) result.rules().stream().filter(JoltSpecGenerator.Rule::pending).count();
-        return new Generated(result.spec(), JoltSpecGenerator.pendingFirst(result.rules()), validation, pending);
+        return new Generated(result.spec(), JoltSpecGenerator.pendingFirst(result.rules()), validation, pending,
+                result.sources());
     }
 
     public Validation validate(JsonNode input, JsonNode spec, JsonNode expected) {
