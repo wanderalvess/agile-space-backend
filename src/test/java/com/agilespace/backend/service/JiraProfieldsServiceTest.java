@@ -208,14 +208,14 @@ class JiraProfieldsServiceTest {
         }
 
         @Test
-        @DisplayName("Linha do roster casa com a pessoa por e-mail, conta do Jira ou nome completo")
-        void rowMatchesUserByEmailAccountOrName() {
+        @DisplayName("Linha do roster casa com a pessoa por e-mail ou conta do Jira; nome igual (homônimo) NÃO casa")
+        void rowMatchesUserByEmailOrAccountButNeverByName() {
             User u = User.builder().id("u4").name("Ana Paula Nogueira").email("ana@x.com").jiraAccountId("ana.n").build();
             assertTrue(JiraProfieldsService.rowMatchesUser(
                     ProjectMemberRole.builder().email("ANA@x.com").displayName("Outro").build(), u));
             assertTrue(JiraProfieldsService.rowMatchesUser(
                     ProjectMemberRole.builder().jiraAccountId("ana.n").displayName("Outro").build(), u));
-            assertTrue(JiraProfieldsService.rowMatchesUser(
+            assertFalse(JiraProfieldsService.rowMatchesUser(
                     ProjectMemberRole.builder().displayName("ana paula nogueira").build(), u));
             assertFalse(JiraProfieldsService.rowMatchesUser(
                     ProjectMemberRole.builder().email("outra@x.com").displayName("Ana Nogueira").build(), u));

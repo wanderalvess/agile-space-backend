@@ -151,14 +151,16 @@ public class JiraProfieldsService {
                 && TEAM_MANAGER_ROLE_KEYS.contains(row.getRoleKey().toUpperCase(java.util.Locale.ROOT));
     }
 
-    /** A linha do roster é desta pessoa? E-mail, conta do Jira ou nome completo (sem acento/caixa). */
+    /**
+     * A linha do roster é desta pessoa? Vínculo explícito (userId), e-mail ou conta do Jira. Nome NÃO conta:
+     * User.name é editável, e a regra decide quem gerencia equipe; um homônimo do Agile Master não pode herdar o poder dele.
+     */
     static boolean rowMatchesUser(ProjectMemberRole row, User user) {
         if (row == null || user == null) return false;
         if (user.getId() != null && user.getId().equals(row.getUserId())) return true;
         if (notBlank(user.getEmail()) && notBlank(row.getEmail()) && user.getEmail().trim().equalsIgnoreCase(row.getEmail().trim())) return true;
         if (notBlank(user.getJiraAccountId()) && notBlank(row.getJiraAccountId()) && user.getJiraAccountId().trim().equals(row.getJiraAccountId().trim())) return true;
-        String myName = OnboardingService.normalize(user.getName());
-        return !myName.isBlank() && myName.equals(OnboardingService.normalize(row.getDisplayName()));
+        return false;
     }
 
     private static boolean notBlank(String s) {

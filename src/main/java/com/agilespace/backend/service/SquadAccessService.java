@@ -104,11 +104,12 @@ public class SquadAccessService {
             }
         }
         if (members != null && !members.isEmpty()) {
+            // Nome NÃO conta: User.name é editável pela própria pessoa, e um homônimo de alguém do roster
+            // ganharia acesso à squad. Vale a vaga reivindicada ("Sou eu"), o e-mail ou a conta do Jira.
             matches = members.stream().anyMatch(m ->
                     (m.getClaimedByUid() != null && m.getClaimedByUid().equals(caller.getId()))
                     || (caller.getEmail() != null && m.getEmail() != null && caller.getEmail().trim().equalsIgnoreCase(m.getEmail().trim()))
                     || (caller.getJiraAccountId() != null && m.getJiraAccountId() != null && caller.getJiraAccountId().trim().equalsIgnoreCase(m.getJiraAccountId().trim()))
-                    || (caller.getName() != null && m.getDisplayName() != null && caller.getName().trim().equalsIgnoreCase(m.getDisplayName().trim()))
             );
         }
         return matches;
