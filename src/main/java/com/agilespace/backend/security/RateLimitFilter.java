@@ -83,7 +83,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
      * recebiam 429 e eram mandadas ao login. Elas ficam na faixa geral.
      */
     private static final Set<String> STRICT_AUTH_PATHS = Set.of(
-            "/api/auth/login", "/api/auth/register", "/api/auth/forgot-password");
+            "/api/auth/login", "/api/auth/register", "/api/auth/forgot-password",
+            // reset-password é público (token adivinhável por força bruta); change-password confere a senha atual.
+            "/api/auth/reset-password", "/api/auth/change-password");
 
     static boolean isStrictAuthPath(String uri) {
         if (uri == null) return false;

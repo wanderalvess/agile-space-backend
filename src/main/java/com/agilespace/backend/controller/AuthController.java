@@ -73,6 +73,22 @@ public class AuthController {
         return ResponseEntity.ok(authService.refresh(userId, authAt));
     }
 
+    /** Troca a própria senha (logado). Devolve um token novo; as outras sessões caem. */
+    @PostMapping("/change-password")
+    public ResponseEntity<AuthResponseDto> changePassword(
+            @Valid @RequestBody com.agilespace.backend.dto.ChangePasswordRequestDto body,
+            HttpServletRequest request) {
+        String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        return ResponseEntity.ok(authService.changePassword(userId, body.getCurrentPassword(), body.getNewPassword()));
+    }
+
+    /** Pública: conclui a redefinição com o token do link gerado pelo administrador. */
+    @PostMapping("/reset-password")
+    public ResponseEntity<Void> resetPassword(@Valid @RequestBody com.agilespace.backend.dto.ResetPasswordRequestDto body) {
+        passwordResetService.completeReset(body.getToken(), body.getNewPassword());
+        return ResponseEntity.noContent().build();
+    }
+
     /** Encerra a sessão no servidor: todos os tokens emitidos até agora para esta conta deixam de valer. */
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(HttpServletRequest request) {

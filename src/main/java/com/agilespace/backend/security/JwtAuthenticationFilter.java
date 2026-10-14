@@ -35,6 +35,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/api/auth/login",
             "/api/auth/register",
             "/api/auth/forgot-password",
+            // Conclui a redefinição de senha com o token do link (quem usa não tem sessão).
+            "/api/auth/reset-password",
             "/api/public",
             // Execução pública da transformação JOLT no motor Java Bazaarvoice
             "/api/jolt/transform",

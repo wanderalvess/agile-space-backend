@@ -513,6 +513,48 @@ public class AuthServiceTest {
         verify(userRepository).save(user);
     }
 
+    // ---------- changePassword ----------
+
+    @Test
+    public void testChangePasswordSetsNewHashAndInvalidatesOtherSessions() {
+        User user = activeUser();
+        when(userRepository.findById("u1")).thenReturn(Optional.of(user));
+        when(userRepository.save(user)).thenReturn(user);
+        when(userProjectResolverService.resolveUserAccess(user)).thenReturn(accessWith("DDWMISSI"));
+
+        AuthResponseDto response = service.changePassword("u1", RAW_PASSWORD, "OutraSenha-456");
+
+        assertTrue(PasswordUtil.verifyPassword("OutraSenha-456", user.getPasswordHash()));
+        assertFalse(PasswordUtil.verifyPassword(RAW_PASSWORD, user.getPasswordHash()));
+        assertNotNull(user.getTokensValidAfter());
+        assertEquals("jwt-token", response.getToken(), "quem trocou recebe um token novo para continuar logado");
+    }
+
+    @Test
+    public void testChangePasswordWrongCurrentIsForbiddenAndKeepsTheHash() {
+        User user = activeUser();
+        String before = user.getPasswordHash();
+        when(userRepository.findById("u1")).thenReturn(Optional.of(user));
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> service.changePassword("u1", "errada-errada", "OutraSenha-456"));
+
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+        assertEquals(before, user.getPasswordHash());
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    public void testChangePasswordToTheSameOneIsRejected() {
+        User user = activeUser();
+        when(userRepository.findById("u1")).thenReturn(Optional.of(user));
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> service.changePassword("u1", RAW_PASSWORD, RAW_PASSWORD));
+
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatusCode());
+    }
+
     // ---------- switchActiveProject ----------
 
     @Test

@@ -353,6 +353,30 @@ public class AuthService {
         return buildAuthResponse(user, access, sessionStartEpochSeconds);
     }
 
+    /**
+     * Troca a própria senha (exige a atual). As outras sessões abertas caem; a resposta traz um token novo
+     * para a sessão de quem trocou continuar.
+     */
+    @Transactional
+    public AuthResponseDto changePassword(String userId, String currentPassword, String newPassword) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão inválida ou expirada"));
+        if (user.getPasswordHash() == null || !PasswordUtil.verifyPassword(currentPassword, user.getPasswordHash())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Senha atual incorreta");
+        }
+        if (currentPassword.equals(newPassword)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A nova senha precisa ser diferente da atual");
+        }
+        user.setPasswordHash(PasswordUtil.hashPassword(newPassword));
+        user.setTokensValidAfter(Instant.now().getEpochSecond());
+        user = userRepository.save(user);
+        if (sessionGuard != null) {
+            sessionGuard.evict(userId);
+        }
+        UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(user);
+        return buildAuthResponse(user, access);
+    }
+
     /** Encerra a sessão no servidor: tokens emitidos até agora (de qualquer aparelho) deixam de valer. */
     @Transactional
     public void logout(String userId) {

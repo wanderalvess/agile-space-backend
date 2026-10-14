@@ -134,8 +134,8 @@ class AccessHardeningTest {
     }
 
     @Test
-    @DisplayName("Senha temporária some do registro depois de 1 hora")
-    void tempPasswordIsWipedAfterAnHour() {
+    @DisplayName("Senha temporária legada em claro é apagada de qualquer registro ao listar")
+    void legacyTempPasswordIsWipedOnRead() {
         PasswordResetRequestRepository repo = mock(PasswordResetRequestRepository.class);
         PasswordResetRequest old = PasswordResetRequest.builder().id("a").status("APPROVED").tempPassword("Abc123")
                 .approvedAt(LocalDateTime.now().minusHours(2)).build();
@@ -146,8 +146,9 @@ class AccessHardeningTest {
 
         service.getAllRequests();
 
+        // O fluxo novo (link de uso único) não cria senha em claro; as antigas somem na primeira leitura.
         assertNull(old.getTempPassword());
-        assertEquals("Xyz789", fresh.getTempPassword());
+        assertNull(fresh.getTempPassword());
     }
 
     @Test
