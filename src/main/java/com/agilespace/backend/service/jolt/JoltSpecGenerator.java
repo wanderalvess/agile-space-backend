@@ -35,7 +35,7 @@ import java.util.regex.Pattern;
  */
 public final class JoltSpecGenerator {
 
-    public enum Kind { COPY, AS_TEXT, DIGITS, CONCAT, VALUE_MAP, CONSTANT, VARIABLE, LIST, UNRESOLVED }
+    public enum Kind { COPY, AS_TEXT, AS_NUMBER, DIGITS, CONCAT, VALUE_MAP, CONSTANT, VARIABLE, LIST, UNRESOLVED }
 
     public enum Confidence { HIGH, MEDIUM, LOW, NONE }
 
@@ -54,7 +54,41 @@ public final class JoltSpecGenerator {
     }
 
     /** {@code sources}: por lista da saída, as origens que a pessoa pode escolher (mesma grafia de {@link Rule#source()}). */
-    public record Result(ArrayNode spec, List<Rule> rules, Map<String, List<String>> sources) {
+    public record Result(ArrayNode spec, List<Rule> rules, Map<String, List<String>> sources, Mode mode) {
+    }
+
+    /**
+     * VALORES: a saída de exemplo traz os valores do mesmo registro da entrada (regras saem pelo valor).
+     * CONTRATO: a saída é o exemplo do contrato do destino, com valores genéricos ("string", 0, true): as regras saem
+     * pelo nome do campo e pelo tipo, e a validação confere campos e tipos, não valores.
+     */
+    public enum Mode { VALORES, CONTRATO }
+
+    private static final Pattern PLACEHOLDER_TEXT =
+            Pattern.compile("^(string|str|text|texto|number|numero|integer|int|long|double|decimal|boolean|bool|date|datetime|date-time|uuid)?$",
+                    Pattern.CASE_INSENSITIVE);
+
+    /** Valor de contrato: "string" (ou o nome de um tipo, ou vazio), 0, true/false. */
+    public static boolean isPlaceholder(JsonNode v) {
+        if (v == null || v.isNull() || v.isBoolean()) return true;
+        if (v.isNumber()) return v.asDouble() == 0;
+        return v.isTextual() && PLACEHOLDER_TEXT.matcher(v.asText().trim()).matches();
+    }
+
+    /** Contrato quando a maioria dos textos da saída é genérica ("string"). Variáveis {{X}} não contam. */
+    static Mode detectMode(JsonNode output) {
+        int[] texts = {0, 0};
+        countTexts(output, texts);
+        return texts[0] >= 3 && texts[1] * 10 >= texts[0] * 6 ? Mode.CONTRATO : Mode.VALORES;
+    }
+
+    private static void countTexts(JsonNode n, int[] acc) {
+        if (n.isContainerNode()) {
+            n.elements().forEachRemaining(c -> countTexts(c, acc));
+        } else if (n.isTextual() && !VARIABLE.matcher(n.asText()).matches()) {
+            acc[0]++;
+            if (isPlaceholder(n)) acc[1]++;
+        }
     }
 
     static final int MAX_SOURCES = 4000;
@@ -149,6 +183,11 @@ public final class JoltSpecGenerator {
     private final ObjectNode defaults = nodes.objectNode();
     private final List<Rule> rules = new ArrayList<>();
     private final Map<String, Override> overrides;
+    private Mode mode = Mode.VALORES;
+    /** Glossário da equipe: campo da saída (termKey) → campos da entrada já ligados a ele em specs válidas. */
+    private Map<String, Set<String>> learned = Map.of();
+    /** Campo da saída em inferência agora (o glossário compara nomes inteiros, não palavras). */
+    private String currentName;
     private final Map<String, List<String>> sourcesByScope = new LinkedHashMap<>();
     private int temp;
     static final int MAX_LISTED_SOURCES = 400;
@@ -162,13 +201,20 @@ public final class JoltSpecGenerator {
     }
 
     public static Result generate(JsonNode input, JsonNode output, Map<String, Override> overrides) {
+        return generate(input, output, overrides, Map.of());
+    }
+
+    public static Result generate(JsonNode input, JsonNode output, Map<String, Override> overrides,
+                                  Map<String, Set<String>> learned) {
         if (input == null || !input.isContainerNode() || output == null || !output.isObject()) {
             throw new IllegalArgumentException("Entrada e saída precisam ser objetos ou listas JSON.");
         }
         JoltSpecGenerator g = new JoltSpecGenerator(overrides);
+        g.learned = learned == null ? Map.of() : learned;
+        g.mode = detectMode(output);
         Scope root = new Scope(List.of(), List.of(), List.of(new Pair(input, output, List.of())), List.of(), "");
         g.processRoot(root);
-        return new Result(g.buildSpec(), List.copyOf(g.rules), Collections.unmodifiableMap(g.sourcesByScope));
+        return new Result(g.buildSpec(), List.copyOf(g.rules), Collections.unmodifiableMap(g.sourcesByScope), g.mode);
     }
 
     private void listSources(Scope scope, String key) {
@@ -201,7 +247,7 @@ public final class JoltSpecGenerator {
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("Tipo de regra inválido para " + display + ": " + o.kind());
         }
-        if (k != Kind.COPY && k != Kind.AS_TEXT && k != Kind.DIGITS && k != Kind.VALUE_MAP) {
+        if (k != Kind.COPY && k != Kind.AS_TEXT && k != Kind.AS_NUMBER && k != Kind.DIGITS && k != Kind.VALUE_MAP) {
             throw new IllegalArgumentException("Tipo de regra não aceito para " + display + ": " + o.kind());
         }
         Src chosen = null;
@@ -375,14 +421,19 @@ public final class JoltSpecGenerator {
             for (Pair p : scope.pairs()) {
                 JsonNode inList = at(p.in(), inPath);
                 JsonNode outList = at(p.out(), outPath);
-                if (!inList.isArray() || !outList.isArray() || inList.size() != outList.size() || !allObjects(inList)) {
+                boolean contractExample = mode == Mode.CONTRATO && outList.isArray() && outList.size() == 1
+                        && inList.isArray() && inList.size() >= 1;
+                if (!inList.isArray() || !outList.isArray() || !allObjects(inList)
+                        || (inList.size() != outList.size() && !contractExample)) {
                     ok = false;
                     break;
                 }
                 List<JsonNode> anc = new ArrayList<>();
                 anc.add(p.in());
                 anc.addAll(p.ancestors());
-                for (int i = 0; i < inList.size(); i++) pairs.add(new Pair(inList.get(i), outList.get(i), anc));
+                // Contrato: o exemplo tem um item só; o primeiro item da entrada representa a lista (a spec vale para todos).
+                int n = contractExample ? 1 : inList.size();
+                for (int i = 0; i < n; i++) pairs.add(new Pair(inList.get(i), outList.get(i), anc));
             }
             if (!ok || pairs.isEmpty()) continue;
             List<String> pattern = new ArrayList<>(scope.inPattern());
@@ -437,7 +488,7 @@ public final class JoltSpecGenerator {
             if (!local) continue;
             total += switch (plan.kind) {
                 case COPY, DIGITS, CONCAT -> plan.confidence == Confidence.LOW ? 1 : 3;
-                case AS_TEXT -> 2;
+                case AS_TEXT, AS_NUMBER -> 2;
                 case VALUE_MAP -> 1;
                 default -> 0;
             };
@@ -533,6 +584,7 @@ public final class JoltSpecGenerator {
     private Plan infer(Scope scope, List<String> field, List<JsonNode> targets) {
         JsonNode t0 = targets.get(0);
         String name = field.get(field.size() - 1);
+        currentName = name;
         Set<String> nameTokens = tokens(name);
 
         if (allEqual(targets) && t0.isTextual() && VARIABLE.matcher(t0.asText()).matches()) {
@@ -544,6 +596,9 @@ public final class JoltSpecGenerator {
         }
         if (targets.stream().anyMatch(t -> t.isMissingNode() || t.isContainerNode())) {
             return constantOrUnresolved(targets);
+        }
+        if (mode == Mode.CONTRATO && targets.stream().allMatch(JoltSpecGenerator::isPlaceholder)) {
+            return inferByName(scope, nameTokens, name, t0);
         }
         List<Src> all = sources(scope);
         // Fraco = valor comum (0, 1, false, "", sigla) E igual em todos os itens. Se muda de item para item, o campo
@@ -587,6 +642,78 @@ public final class JoltSpecGenerator {
         return constant;
     }
 
+    /**
+     * Contrato sem valores: a origem é o campo da entrada de nome mais parecido (glossário, plural, prefixos), e a regra
+     * sai do tipo que o contrato declara. Sem nome parecido fica sem origem, para a pessoa escolher.
+     */
+    private Plan inferByName(Scope scope, Set<String> nameTokens, String name, JsonNode t0) {
+        List<Src> all = sources(scope);
+        Src best = null;
+        double bestScore = -1;
+        double bestSim = 0;
+        int ties = 0;
+        boolean targetIsId = isIdName(name);
+        for (Src s : all) {
+            double sim = sourceSimilarity(nameTokens, s);
+            // "cidade" x "cityId": o nome bate, mas um é o nome e o outro é o código. Origem id/código só serve a
+            // campo do contrato que também é id/código.
+            if (!targetIsId && isIdName(s.lastKey()) && !isLearned(s)) sim -= 0.4;
+            if (sim < 0.5) continue;
+            boolean sameKind = t0.isTextual() ? s.values().get(0).isTextual() : typeCompatible(s.values().get(0), t0);
+            double score = rank(s, sim) + (sameKind ? 0.2 : 0);
+            if (score > bestScore + 1e-9) {
+                best = s;
+                bestScore = score;
+                bestSim = sim;
+                ties = 0;
+            } else if (Math.abs(score - bestScore) < 1e-9) {
+                ties++;
+            }
+        }
+        Plan p = new Plan();
+        if (best == null) {
+            p.kind = Kind.UNRESOLVED;
+            p.confidence = Confidence.NONE;
+            p.reason = "contrato sem valores e nenhum campo da entrada com nome parecido: escolha a origem";
+            return p;
+        }
+        JsonNode v = best.values().get(0);
+        p.source = best;
+        if (t0.isTextual() && !v.isTextual()) p.kind = Kind.AS_TEXT;
+        else if (t0.isNumber() && v.isTextual()) p.kind = Kind.AS_NUMBER;
+        else p.kind = Kind.COPY;
+        boolean sameName = normalize(name).equals(normalize(best.lastKey()));
+        p.confidence = (sameName || bestSim >= 0.99) && ties == 0 ? Confidence.HIGH : bestSim >= 0.8 ? Confidence.MEDIUM : Confidence.LOW;
+        p.reason = "pelo nome do campo (o contrato não traz valores)"
+                + (typeCompatible(v, t0) ? "" : "; o tipo da entrada difere do contrato")
+                + (ties > 0 ? "; outro campo tem nome igualmente parecido" : "");
+        List<String> alts = new ArrayList<>();
+        for (Src s : all) {
+            double sim = sourceSimilarity(nameTokens, s) - (!targetIsId && isIdName(s.lastKey()) ? 0.4 : 0);
+            if (s != best && sim >= 0.5) alts.add(display(s));
+            if (alts.size() >= 4) break;
+        }
+        p.alternatives = alts;
+        if (isLearned(best)) {
+            p.confidence = Confidence.HIGH;
+            p.reason = "ligado antes pela equipe (glossário)";
+        }
+        return p;
+    }
+
+    /** Nome de identificador: termina em "Id"/"ID", começa com "id"/"cod", ou é "codigo" + algo. */
+    static boolean isIdName(String raw) {
+        String n = raw.replaceAll("[^A-Za-z]", "");
+        return n.matches("(?i)^(id|cod|codigo).*") || n.matches(".*[a-z](Id|ID|Cod|Codigo)$") || n.equalsIgnoreCase("id");
+    }
+
+    private static boolean typeCompatible(JsonNode source, JsonNode target) {
+        if (target.isTextual()) return true; // tudo vira texto
+        if (target.isNumber()) return source.isNumber() || (source.isTextual() && source.asText().matches("-?\\d+(\\.\\d+)?"));
+        if (target.isBoolean()) return source.isBoolean();
+        return true;
+    }
+
     private interface ValueTest {
         boolean test(JsonNode source, JsonNode target);
     }
@@ -623,6 +750,10 @@ public final class JoltSpecGenerator {
         if (ranked.size() > 1) {
             p.alternatives = ranked.subList(1, Math.min(ranked.size(), 5)).stream().map(this::display).toList();
             if (p.confidence != Confidence.HIGH) p.reason = p.reason + "; " + ranked.size() + " origens possíveis";
+        }
+        if (isLearned(best)) {
+            p.confidence = Confidence.HIGH;
+            p.reason = "ligado antes pela equipe (glossário)";
         }
         return p;
     }
@@ -841,6 +972,13 @@ public final class JoltSpecGenerator {
                     putShift(scope, List.of(t), dst(scope, field, 1, absolute, asArray));
                 }
                 example = plan.source.values().get(0).toString();
+            }
+            case AS_NUMBER -> {
+                String t = newTemp();
+                String target = at(scope.pairs().get(0).out(), field).isIntegralNumber() ? "=toInteger(" : "=toDouble(";
+                modifyAt(scope).put(t, target + ref(scope, plan.source) + ")");
+                putShift(scope, List.of(t), dst(scope, field, 1, absolute, asArray));
+                example = plan.source.values().get(0) + " → número";
             }
             case AS_TEXT -> {
                 String t = newTemp();
@@ -1076,7 +1214,29 @@ public final class JoltSpecGenerator {
         return (double) matches / Math.max(a.size(), b.size());
     }
 
+    /** Nome do campo como o glossário guarda: sem acento, minúsculo, só letras e dígitos. */
+    public static String termKey(String raw) {
+        return raw == null ? "" : normalize(raw).replaceAll("[^a-z0-9]", "");
+    }
+
+    /** Último nome de campo de uma origem como a tela mostra ("↑produto.embalagens[0].codigoDeBarra" → "codigoDeBarra"). */
+    public static String lastFieldOf(String display) {
+        if (display == null) return "";
+        String clean = display.replace("↑", "").replaceAll("\\[\\d+]", "");
+        int dot = clean.lastIndexOf('.');
+        return dot >= 0 ? clean.substring(dot + 1) : clean;
+    }
+
+    private boolean isLearned(Src s) {
+        if (currentName == null || learned.isEmpty()) return false;
+        Set<String> to = learned.get(termKey(currentName));
+        if (to == null) return false;
+        return to.contains(termKey(s.lastKey()));
+    }
+
     private double sourceSimilarity(Set<String> target, Src s) {
+        // Ligação que a equipe já confirmou numa spec válida vale mais que qualquer semelhança de nome.
+        if (isLearned(s)) return 1.2;
         double last = similarity(target, tokens(s.lastKey()));
         Set<String> all = new LinkedHashSet<>();
         for (Object p : s.path()) if (p instanceof String str) all.addAll(tokens(str));

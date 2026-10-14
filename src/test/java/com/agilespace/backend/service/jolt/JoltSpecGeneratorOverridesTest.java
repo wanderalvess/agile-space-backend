@@ -87,9 +87,9 @@ class JoltSpecGeneratorOverridesTest {
 
         JoltGeneratorController controller = new JoltGeneratorController(service);
         assertThrows(ResponseStatusException.class, () -> controller.generate(new JoltGeneratorController.GenerateRequest(
-                in, out, Map.of("items[].nome", new JoltSpecGenerator.Override("APAGAR", "name", null, null, null)))));
+                in, out, Map.of("items[].nome", new JoltSpecGenerator.Override("APAGAR", "name", null, null, null)), false)));
         assertThrows(ResponseStatusException.class, () -> controller.generate(new JoltGeneratorController.GenerateRequest(
                 in, out, Map.of("items[].nome", new JoltSpecGenerator.Override("VALUE_MAP", "name", null,
-                        Map.of("a*b", TextNode.valueOf("x")), null)))));
+                        Map.of("a*b", TextNode.valueOf("x")), null)), false)));
     }
 }

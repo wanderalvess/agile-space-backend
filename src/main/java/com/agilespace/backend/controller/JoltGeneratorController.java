@@ -33,8 +33,12 @@ public class JoltGeneratorController {
 
     private final JoltSpecGeneratorService generatorService;
 
-    /** {@code overrides}: escolhas da pessoa por campo da saída (ver {@link JoltSpecGenerator.Override}). */
-    public record GenerateRequest(JsonNode input, JsonNode output, Map<String, JoltSpecGenerator.Override> overrides) {
+    /**
+     * {@code overrides}: escolhas da pessoa por campo da saída (ver {@link JoltSpecGenerator.Override}).
+     * {@code learn}: grava no glossário da equipe as escolhas, se a spec cumprir a saída.
+     */
+    public record GenerateRequest(JsonNode input, JsonNode output, Map<String, JoltSpecGenerator.Override> overrides,
+                                  boolean learn) {
     }
 
     @Operation(summary = "Gera a spec Jolt a partir de um par entrada/saída e valida no motor Java")
@@ -54,7 +58,7 @@ public class JoltGeneratorController {
         }
         try {
             return ResponseEntity.ok(generatorService.generate(request.input(), request.output(),
-                    request.overrides() == null ? Map.of() : request.overrides()));
+                    request.overrides() == null ? Map.of() : request.overrides(), request.learn()));
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }
