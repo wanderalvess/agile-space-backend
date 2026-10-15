@@ -125,6 +125,7 @@ Regras de status (fonte única: `SessionStatusResolver` no backend; documentar a
 - HEALTH_CHECK: collecting → ASYNC_OPEN (pesquisa anônima, coleta ao longo do tempo); finished → FINISHED.
 - RETRO / BRAINSTORMING: encerrada/fase final → FINISHED; senão LIVE se houve atividade recente, senão FINISHED (regra definida pelo backend — ver seção 8).
 - Proteção contra sessões abandonadas: LIVE sem atividade há mais de 12 h é reportada como FINISHED.
+- Sala criada e ainda não iniciada (PLANNING) conta como "ao vivo agora" (a home mostra "Aguardando"), mas some da lista depois de 24 h sem nenhum sinal (criação, início ou heartbeat de participante).
 
 ## 6. Histórico por ritual (drawer)
 

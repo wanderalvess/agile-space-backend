@@ -102,6 +102,7 @@ class RitualSessionServiceTest {
         PokerRoom stale = room("stale", "sync", "2026-10-14T08:00:00.000Z", null);
         PokerRoom async = room("async", "async", null, null);
         PokerRoom planning = room("plan", "sync", null, null);
+        planning.setCreatedAt("2026-10-15T11:55:00.000Z");
         when(pokerRoomRepository.findOpenByTeams(eq(Set.of("SQA")), anyString(), any())).thenReturn(List.of(planning, async, stale, live));
         when(pokerParticipantRepository.summarizeByRoom(any())).thenReturn(List.<Object[]>of(new Object[]{"live", 4L, "2026-10-15T11:50:00.000Z"}));
         HealthCheckBoard hc = new HealthCheckBoard();
@@ -128,6 +129,70 @@ class RitualSessionServiceTest {
         assertEquals("ASYNC_OPEN", health.status());
         assertEquals(9, health.participantsCount());
         assertEquals("/health-check/h1", health.link());
+    }
+
+    @Test
+    @DisplayName("Ao vivo: sala de refinamento recém-criada (ainda sem início) aparece como PLANNING, com a pessoa dentro")
+    void freshPokerRoomIsListedAsPlanning() {
+        PokerRoom fresh = room("nova", "sync", null, null);
+        fresh.setCreatedAt("2026-10-15T11:59:30.000Z");
+        when(pokerRoomRepository.findOpenByTeams(eq(Set.of("SQA")), anyString(), any())).thenReturn(List.of(fresh));
+        when(pokerParticipantRepository.summarizeByRoom(any())).thenReturn(List.<Object[]>of(new Object[]{"nova", 1L, "2026-10-15T11:59:40.000Z"}));
+
+        List<LiveSessionDto> out = service.live(List.of("SQA"), NOW);
+
+        assertEquals(1, out.size());
+        assertEquals("PLANNING", out.get(0).status());
+        assertEquals("POKER", out.get(0).tool());
+        assertEquals("/room/nova", out.get(0).link());
+        assertEquals(1, out.get(0).participantsCount());
+        assertEquals("SQA", out.get(0).squadId());
+    }
+
+    @Test
+    @DisplayName("Ao vivo: sala aguardando esquecida há mais de 24 h some; com heartbeat recente continua; encerrada nunca")
+    void forgottenPlanningRoomDisappears() {
+        PokerRoom forgotten = room("velha", "sync", null, null);
+        forgotten.setCreatedAt("2026-10-13T09:00:00.000Z");
+        PokerRoom revisited = room("revisitada", "sync", null, null);
+        revisited.setCreatedAt("2026-10-13T09:00:00.000Z");
+        PokerRoom ended = room("encerrada", "sync", null, "2026-10-15T11:00:00.000Z");
+        ended.setCreatedAt("2026-10-15T10:00:00.000Z");
+        when(pokerRoomRepository.findOpenByTeams(eq(Set.of("SQA")), anyString(), any())).thenReturn(List.of(forgotten, revisited, ended));
+        when(pokerParticipantRepository.summarizeByRoom(any())).thenReturn(List.<Object[]>of(new Object[]{"revisitada", 2L, "2026-10-15T11:30:00.000Z"}));
+
+        List<String> ids = service.live(List.of("SQA"), NOW).stream().map(LiveSessionDto::id).toList();
+
+        assertEquals(List.of("revisitada"), ids);
+    }
+
+    @Test
+    @DisplayName("Ao vivo: retro, brainstorming e review criados agora entram na mesma regra uniforme")
+    void freshBoardsOfOtherToolsAreListed() {
+        RetroBoard retro = RetroBoard.builder().id("rt").title("Retro nova").squadId("sqa")
+                .createdAt(ServerTime.toLocal(NOW.minusSeconds(30))).updatedAt(ServerTime.toLocal(NOW.minusSeconds(30))).build();
+        when(retroBoardRepository.findActiveBySquads(eq(Set.of("SQA")), any(), any())).thenReturn(List.of(retro));
+        BrainstormingBoard brain = new BrainstormingBoard();
+        brain.setId("bs");
+        brain.setTeam("SQA");
+        brain.setTitle("Ideias");
+        brain.setCreatedAt("2026-10-15T11:58:00.000Z");
+        when(brainstormingBoardRepository.findRecentByTeams(eq(Set.of("SQA")), anyString(), any())).thenReturn(List.of(brain));
+        ShowcaseSession review = new ShowcaseSession();
+        review.setId("sc");
+        review.setSquadName("SQA");
+        review.setName("Review 41");
+        review.setStatus("planning");
+        review.setCreatedAt(ServerTime.toLocal(NOW.minusSeconds(120)));
+        review.setUpdatedAt(ServerTime.toLocal(NOW.minusSeconds(120)));
+        when(showcaseSessionRepository.findOpenBySquads(eq(Set.of("SQA")), any(), any())).thenReturn(List.of(review));
+
+        Map<String, String> statusByTool = new HashMap<>();
+        service.live(List.of("SQA"), NOW).forEach(d -> statusByTool.put(d.tool(), d.status()));
+
+        assertEquals("LIVE", statusByTool.get("RETRO"));
+        assertEquals("LIVE", statusByTool.get("BRAINSTORMING"));
+        assertEquals("PLANNING", statusByTool.get("SHOWCASE"));
     }
 
     @Test

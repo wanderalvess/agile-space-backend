@@ -47,6 +47,16 @@ class SessionStatusResolverTest {
     }
 
     @Test
+    @DisplayName("Sala aguardando: só expira em \"ao vivo\" depois de 24 h sem sinal; sem data conhecida continua listada")
+    void planningExpiry() {
+        assertFalse(resolver.planningExpired(PLANNING, ago(23), NOW));
+        assertTrue(resolver.planningExpired(PLANNING, ago(25), NOW));
+        assertFalse(resolver.planningExpired(PLANNING, null, NOW));
+        assertFalse(resolver.planningExpired(LIVE, ago(30), NOW), "só vale para PLANNING");
+        assertFalse(resolver.planningExpired(ASYNC_OPEN, ago(30), NOW));
+    }
+
+    @Test
     @DisplayName("Showcase: planning, active, finished; active abandonada vira FINISHED")
     void showcase() {
         assertEquals(PLANNING, resolver.showcase("planning", ago(1), NOW));

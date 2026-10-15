@@ -19,6 +19,8 @@ import java.util.Optional;
  *   <li>RETRO / BRAINSTORMING: não têm estado de encerramento no modelo. LIVE se houve atividade nas últimas
  *       {@link #BOARD_ACTIVITY_WINDOW} (3 h), senão FINISHED.</li>
  *   <li>Sessão abandonada: LIVE sem atividade há mais de {@link #STALE_LIVE} (12 h) vira FINISHED.</li>
+ *   <li>Sala aguardando (PLANNING) sem nenhum sinal há mais de {@link #PLANNING_WINDOW} (24 h) não entra em "ao vivo"
+ *       ({@link #planningExpired}); o status dela continua PLANNING no histórico.</li>
  * </ul>
  */
 @Component
@@ -26,6 +28,8 @@ public class SessionStatusResolver {
 
     public static final Duration STALE_LIVE = Duration.ofHours(12);
     public static final Duration BOARD_ACTIVITY_WINDOW = Duration.ofHours(3);
+    /** Quanto tempo uma sala criada e ainda não iniciada (PLANNING) continua aparecendo em "ao vivo agora". */
+    public static final Duration PLANNING_WINDOW = Duration.ofHours(24);
 
     public enum Tool {
         POKER("poker", "/room/"),
@@ -93,6 +97,14 @@ public class SessionStatusResolver {
     private static SessionStatus recentBoard(Instant lastActivity, Instant now) {
         if (lastActivity == null) return SessionStatus.FINISHED;
         return lastActivity.isAfter(now.minus(BOARD_ACTIVITY_WINDOW)) ? SessionStatus.LIVE : SessionStatus.FINISHED;
+    }
+
+    /**
+     * Sala aguardando que ninguém abriu nem tocou há mais de {@link #PLANNING_WINDOW}: esquecida, não é "ao vivo".
+     * Sem nenhuma data conhecida não dá para afirmar que é velha, então continua listada.
+     */
+    public boolean planningExpired(SessionStatus status, Instant lastActivity, Instant now) {
+        return status == SessionStatus.PLANNING && lastActivity != null && lastActivity.isBefore(now.minus(PLANNING_WINDOW));
     }
 
     /** LIVE só enquanto houve atividade nas últimas 12 h; sem nenhuma data conhecida, não dá para afirmar que está ao vivo. */

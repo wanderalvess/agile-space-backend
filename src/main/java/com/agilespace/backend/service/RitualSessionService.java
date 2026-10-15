@@ -57,7 +57,10 @@ public class RitualSessionService {
 
     // ---------------------------------------------------------------- ao vivo
 
-    /** Sessões das squads com status diferente de FINISHED. Ordem: LIVE, ASYNC_OPEN, PLANNING; dentro, a mais recente. */
+    /**
+     * Sessões das squads com status diferente de FINISHED, inclusive a sala recém-criada que ainda aguarda o início
+     * (PLANNING, até 24 h sem sinal). Ordem: LIVE, ASYNC_OPEN, PLANNING; dentro, a mais recente.
+     */
     @Transactional(readOnly = true)
     public List<LiveSessionDto> live(Collection<String> squadIds, Instant now) {
         Map<String, String> canon = canonical(squadIds);
@@ -65,7 +68,8 @@ public class RitualSessionService {
         List<LiveSessionDto> out = new ArrayList<>();
         for (Tool tool : Tool.values()) {
             for (Row r : load(tool, canon, null, LIVE_LIMIT_PER_TOOL, now, true)) {
-                if (r.status != SessionStatus.FINISHED) out.add(r.toLive());
+                if (r.status == SessionStatus.FINISHED || resolver.planningExpired(r.status, r.updatedAt, now)) continue;
+                out.add(r.toLive());
             }
         }
         out.sort(Comparator.comparingInt((LiveSessionDto d) -> SessionStatus.valueOf(d.status()).ordinal())
