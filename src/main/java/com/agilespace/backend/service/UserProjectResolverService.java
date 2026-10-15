@@ -86,7 +86,10 @@ public class UserProjectResolverService {
                     .build());
 
             // Identifica se é liderança de tribo / segmento (ex: Tribe Lead, Agile Coach, People Lead)
-            if ("TRIBE_LEAD".equalsIgnoreCase(role.getRoleKey()) || "AGILE_COACH".equalsIgnoreCase(role.getRoleKey()) || "PEOPLE_LEAD".equalsIgnoreCase(role.getRoleKey())) {
+            // Só vale para linha de liderança de verdade (isLeadership=true: sync do Jira ou gestão de time). A roleKey
+            // sozinha vem do NOME do papel, que um convite/backfill grava com isLeadership=false: sem esta exigência,
+            // convidar alguém como "Tribe Lead" dava acesso a todos os projetos da tribo.
+            if (role.isLeadership() && ("TRIBE_LEAD".equalsIgnoreCase(role.getRoleKey()) || "AGILE_COACH".equalsIgnoreCase(role.getRoleKey()) || "PEOPLE_LEAD".equalsIgnoreCase(role.getRoleKey()))) {
                 isTransversalLeader = true;
                 if (!tribeName.isBlank()) leaderTribes.add(tribeName.toLowerCase());
                 if (!segmentName.isBlank()) leaderSegments.add(segmentName.toLowerCase());

@@ -116,6 +116,24 @@ public class UserProjectResolverServiceTest {
     }
 
     @Test
+    public void testRoleKeyWithoutLeadershipFlagDoesNotGrantTransversalAccess() {
+        // Linha criada por convite/backfill: roleKey vem do nome digitado, isLeadership=false.
+        when(projectMemberRoleRepository.findByEmailIgnoreCase(anyString()))
+                .thenReturn(List.of(role("r1", "DDWMISSI", "TRIBE_LEAD", "Tribe Lead", false)));
+        when(projectConfigRepository.findById("DDWMISSI"))
+                .thenReturn(Optional.of(project("DDWMISSI", "Missao Digital", "Segmento X", "Distribuicao")));
+        when(projectConfigRepository.findAll()).thenReturn(List.of(
+                project("DDWMISSI", "Missao Digital", "Segmento X", "Distribuicao"),
+                project("OUTRO-DA-TRIBO", "Outro Projeto", "Segmento Z", "Distribuicao")));
+
+        UserProjectAccessDto access = service.resolveUserAccess(user("convidado@empresa.com.br", null));
+
+        assertFalse(access.isTransversalLeader());
+        assertEquals(1, access.getProjects().size());
+        assertEquals("DDWMISSI", access.getProjects().get(0).getProjectId());
+    }
+
+    @Test
     public void testTribeLeadGetsTransversalAccessToWholeTribe() {
         when(projectMemberRoleRepository.findByEmailIgnoreCase(anyString()))
                 .thenReturn(List.of(role("r1", "DDWMISSI", "TRIBE_LEAD", "Tribe Lead", true)));
