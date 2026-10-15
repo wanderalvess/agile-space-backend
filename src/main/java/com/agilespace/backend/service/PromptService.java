@@ -6,6 +6,7 @@ import com.agilespace.backend.domain.PromptCollection;
 import com.agilespace.backend.repository.PromptCommentRepository;
 import com.agilespace.backend.repository.PromptCollectionRepository;
 import com.agilespace.backend.repository.PromptRepository;
+import com.agilespace.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -35,6 +36,7 @@ public class PromptService {
     private final PromptRepository promptRepository;
     private final PromptCommentRepository commentRepository;
     private final PromptCollectionRepository promptCollectionRepository;
+    private final UserRepository userRepository;
 
     // ───────────── Regras de acesso ─────────────
 
@@ -54,8 +56,15 @@ public class PromptService {
         }
     }
 
+    /** Só "public" (qualquer caixa) vira público; qualquer outro valor cai no padrão seguro, privado. */
     private static String normalizeVisibility(String visibility) {
-        return PUBLIC.equals(visibility) ? PUBLIC : PRIVATE;
+        return visibility != null && PUBLIC.equals(visibility.trim().toLowerCase(java.util.Locale.ROOT)) ? PUBLIC : PRIVATE;
+    }
+
+    /** Nome do autor vem do cadastro do usuário autenticado, nunca do corpo (evita assinar como outra pessoa). */
+    private String authorNameOf(PromptCaller caller) {
+        if (caller == null || caller.id() == null || userRepository == null) return null;
+        return userRepository.findById(caller.id()).map(u -> u.getName()).orElse(null);
     }
 
     /** Sem ordenação explícita a paginação do Postgres é arbitrária: padroniza por atualização mais recente. */
@@ -81,6 +90,7 @@ public class PromptService {
         prompt.setCreatedAt(null);
         prompt.setUpdatedAt(null);
         prompt.setAuthorId(caller.id());
+        prompt.setAuthorName(authorNameOf(caller));
         prompt.setVisibility(normalizeVisibility(prompt.getVisibility()));
         prompt.setTags(cleanTags(prompt.getTags()));
         if (prompt.getTitle() != null) prompt.setTitle(prompt.getTitle().trim());
@@ -177,7 +187,7 @@ public class PromptService {
                 existing.setTags(skillPrompt.getTags());
             }
             if (skillPrompt.getVisibility() != null) {
-                existing.setVisibility(skillPrompt.getVisibility());
+                existing.setVisibility(normalizeVisibility(skillPrompt.getVisibility()));
             }
             if (skillPrompt.getStatus() != null) {
                 existing.setStatus(skillPrompt.getStatus());
@@ -296,7 +306,7 @@ public class PromptService {
                 .gemLink(source.getGemLink())
                 .architectureLink(source.getArchitectureLink())
                 .authorId(caller.id())
-                .authorName(snapshot != null ? snapshot.getAuthorName() : null)
+                .authorName(authorNameOf(caller))
                 .authorRole(snapshot != null ? snapshot.getAuthorRole() : null)
                 .authorSquad(snapshot != null ? snapshot.getAuthorSquad() : null)
                 .authorAvatar(snapshot != null ? snapshot.getAuthorAvatar() : null)

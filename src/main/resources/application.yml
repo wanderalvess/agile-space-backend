@@ -86,6 +86,12 @@ app:
     # default de dev/teste (fixtures usam @empresa.com.br). Produção restringe via
     # application-prod.yml.
     allowed-email-domain: ${ALLOWED_EMAIL_DOMAIN:}
+    # Proxies reversos confiáveis (IPs/CIDRs separados por vírgula) cujo X-Forwarded-For o RateLimitFilter
+    # pode ler para achar o IP real do cliente. Vazio (default) = o cabeçalho é IGNORADO e o limite vale por
+    # endereço da conexão, então um cliente não escapa do limite forjando XFF. Atrás do Caddy do docker-compose
+    # (profile "proxy") use TRUSTED_PROXIES=172.16.0.0/12 (faixa padrão das redes Docker); sem isso todos
+    # compartilham o balde do proxy. Ver DEPLOYMENT.md.
+    trusted-proxies: ${TRUSTED_PROXIES:}
   cors:
     # Lista separada por vírgula das origens que podem chamar a API com credenciais
     # (ver WebCorsConfig/WebSocketConfig). Default cobre só o frontend em dev local

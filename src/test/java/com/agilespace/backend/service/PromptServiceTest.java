@@ -35,6 +35,7 @@ class PromptServiceTest {
     @Mock private PromptRepository promptRepository;
     @Mock private PromptCommentRepository commentRepository;
     @Mock private PromptCollectionRepository promptCollectionRepository;
+    @Mock private com.agilespace.backend.repository.UserRepository userRepository;
 
     private final PromptCaller owner = new PromptCaller("user-123", "MEMBER");
     private final PromptCaller stranger = new PromptCaller("intruso", "MEMBER");
@@ -86,6 +87,30 @@ class PromptServiceTest {
 
             assertEquals(0, saved.getUseCount(), "Contador de uso deve iniciar em zero");
             assertEquals(0, saved.getForkCount(), "Contador de fork deve iniciar em zero");
+        }
+
+        @Test
+        @DisplayName("authorName vem do usuário autenticado, não do corpo; visibility 'PUBLIC' é normalizada")
+        void shouldTakeAuthorNameFromAuthenticatedUser() {
+            com.agilespace.backend.domain.User u = new com.agilespace.backend.domain.User();
+            u.setId("user-123");
+            u.setName("Nome Real");
+            when(userRepository.findById("user-123")).thenReturn(Optional.of(u));
+            when(promptRepository.save(any(Prompt.class))).thenAnswer(i -> i.getArgument(0));
+            Prompt prompt = Prompt.builder().title("T").authorName("CEO Falso").visibility("PUBLIC").build();
+
+            Prompt saved = service.createPrompt(prompt, owner);
+
+            assertEquals("Nome Real", saved.getAuthorName());
+            assertEquals("public", saved.getVisibility());
+        }
+
+        @Test
+        @DisplayName("Visibilidade inválida cai em privado")
+        void shouldDefaultInvalidVisibilityToPrivate() {
+            when(promptRepository.save(any(Prompt.class))).thenAnswer(i -> i.getArgument(0));
+            Prompt saved = service.createPrompt(Prompt.builder().title("T").visibility("tudo").build(), owner);
+            assertEquals("private", saved.getVisibility());
         }
 
         @Test

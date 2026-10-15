@@ -27,6 +27,9 @@ public class SupportTicketControllerTest {
     @Mock
     private SupportTicketService supportTicketService;
 
+    @Mock
+    private com.agilespace.backend.repository.UserRepository userRepository;
+
     @InjectMocks
     private SupportTicketController controller;
 
@@ -63,8 +66,12 @@ public class SupportTicketControllerTest {
     }
 
     @Test
-    public void testCreateTicketKeepsProvidedRequesterName() {
-        SupportTicket payload = SupportTicket.builder().subject("Erro").requesterName("Joao Silva").build();
+    public void testCreateTicketIgnoresRequesterNameFromBody() {
+        com.agilespace.backend.domain.User u = new com.agilespace.backend.domain.User();
+        u.setId("u1");
+        u.setName("Joao Silva");
+        when(userRepository.findById("u1")).thenReturn(java.util.Optional.of(u));
+        SupportTicket payload = SupportTicket.builder().subject("Erro").requesterName("CEO Falso").build();
         when(supportTicketService.createTicket(anyString(), anyString(), anyString(), any())).thenReturn(ticket());
 
         controller.createTicket(requestAs("u1", "joao@empresa.com.br", "MEMBER"), payload);
@@ -137,10 +144,11 @@ public class SupportTicketControllerTest {
 
         ResponseEntity<SupportTicketReply> response = controller.addReply(
                 requestAs("admin1", "admin@empresa.com.br", "ADMIN"), ticketId,
-                Map.of("message", "Resolvido", "authorName", "Suporte"));
+                Map.of("message", "Resolvido", "authorName", "Falso"));
 
         assertEquals(HttpStatus.CREATED, response.getStatusCode());
-        verify(supportTicketService).addReply(ticketId, "admin1", "Suporte", true, "Resolvido");
+        // nome do corpo é ignorado; sem cadastro, cai no e-mail do token
+        verify(supportTicketService).addReply(ticketId, "admin1", "admin@empresa.com.br", true, "Resolvido");
     }
 
     @Test

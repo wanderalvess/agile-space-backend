@@ -6,7 +6,9 @@ import com.agilespace.backend.domain.SystemConfig;
 import com.agilespace.backend.repository.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -54,9 +56,17 @@ public class AdminService {
 
     @Transactional
     public GlobalAnnouncement createAnnouncement(GlobalAnnouncement announcement) {
-        if (announcement.getId() == null || announcement.getId().isEmpty()) {
-            announcement.setId(UUID.randomUUID().toString());
+        if (announcement.getTitle() == null || announcement.getTitle().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "O título do comunicado é obrigatório.");
         }
+        if (announcement.getContent() == null || announcement.getContent().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "O conteúdo do comunicado é obrigatório.");
+        }
+        if (announcement.getCreatedBy() == null || announcement.getCreatedBy().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Autor do comunicado não identificado.");
+        }
+        // id sempre novo: um id vindo do cliente sobrescreveria um comunicado existente.
+        announcement.setId(UUID.randomUUID().toString());
         announcement.setCreatedAt(LocalDateTime.now());
         return announcementRepository.save(announcement);
     }

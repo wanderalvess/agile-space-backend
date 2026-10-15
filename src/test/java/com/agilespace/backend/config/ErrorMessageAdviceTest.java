@@ -41,6 +41,18 @@ class ErrorMessageAdviceTest {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Jira respondeu 500: java.net.ConnectException host interno 10.0.0.7");
         }
 
+        @org.springframework.web.bind.annotation.PostMapping("/t/body")
+        void body(@org.springframework.web.bind.annotation.RequestBody Map<String, String> body) {
+        }
+
+        @GetMapping("/t/uuid/{id}")
+        void uuid(@org.springframework.web.bind.annotation.PathVariable java.util.UUID id) {
+        }
+
+        @GetMapping("/t/param")
+        void param(@org.springframework.web.bind.annotation.RequestParam String status) {
+        }
+
         @GetMapping("/t/boom")
         void boom() {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "NullPointer em SquadService");
@@ -114,5 +126,24 @@ class ErrorMessageAdviceTest {
         org.springframework.core.annotation.Order order =
                 ErrorMessageAdvice.class.getAnnotation(org.springframework.core.annotation.Order.class);
         assertEquals(org.springframework.core.Ordered.LOWEST_PRECEDENCE, order.value());
+    }
+
+    @Test
+    @DisplayName("JSON inválido, corpo ausente, UUID inválido e parâmetro faltando: 400 no formato padrão, sem nome de método")
+    void malformedRequestsGet400InStandardFormat() throws Exception {
+        for (org.springframework.test.web.servlet.RequestBuilder rb : java.util.List.of(
+                org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/t/body")
+                        .contentType("application/json").content("{quebrado"),
+                org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/t/body")
+                        .contentType("application/json"),
+                get("/t/uuid/nao-e-uuid"),
+                get("/t/param"))) {
+            String body = mvc.perform(rb)
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value("400 BAD_REQUEST"))
+                    .andExpect(jsonPath("$.message").isString())
+                    .andReturn().getResponse().getContentAsString();
+            assertFalse(body.contains("PlainController") || body.contains("java.") || body.contains("Required request body"));
+        }
     }
 }

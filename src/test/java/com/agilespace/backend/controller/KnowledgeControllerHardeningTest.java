@@ -51,9 +51,12 @@ class KnowledgeControllerHardeningTest {
         when(service.semanticSearch(any(float[].class), any())).thenReturn(new PageImpl<>(List.of()));
 
         assertEquals(HttpStatus.OK, controller.semanticSearch(Map.of("embedding", List.of(0, 1, 0.5)), PageRequest.of(0, 10)).getStatusCode());
-        assertEquals(HttpStatus.BAD_REQUEST, controller.semanticSearch(Map.of("embedding", List.of("a")), PageRequest.of(0, 10)).getStatusCode());
-        assertEquals(HttpStatus.BAD_REQUEST, controller.semanticSearch(Map.of("embedding", "texto"), PageRequest.of(0, 10)).getStatusCode());
-        assertEquals(HttpStatus.BAD_REQUEST, controller.semanticSearch(Map.of(), PageRequest.of(0, 10)).getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                () -> controller.semanticSearch(Map.of("embedding", List.of("a")), PageRequest.of(0, 10))).getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                () -> controller.semanticSearch(Map.of("embedding", "texto"), PageRequest.of(0, 10))).getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                () -> controller.semanticSearch(Map.of(), PageRequest.of(0, 10))).getStatusCode());
     }
 
     @Test

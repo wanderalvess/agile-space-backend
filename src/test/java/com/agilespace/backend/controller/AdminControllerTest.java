@@ -57,10 +57,14 @@ public class AdminControllerTest {
     @Test
     public void testCreateAnnouncement() {
         GlobalAnnouncement ann = new GlobalAnnouncement();
+        ann.setCreatedBy("forjado");
         when(service.createAnnouncement(ann)).thenReturn(ann);
-        
-        ResponseEntity<GlobalAnnouncement> response = controller.createAnnouncement(ann);
-        
+        jakarta.servlet.http.HttpServletRequest req = mock(jakarta.servlet.http.HttpServletRequest.class);
+        when(req.getAttribute(com.agilespace.backend.security.JwtAuthenticationFilter.ATTR_USER_EMAIL)).thenReturn("adm@x.com");
+
+        ResponseEntity<GlobalAnnouncement> response = controller.createAnnouncement(ann, req);
+
         assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals("adm@x.com", ann.getCreatedBy());
     }
 }

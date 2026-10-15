@@ -180,6 +180,28 @@ public class JiraService {
         }
     }
 
+    /**
+     * Status HTTP de uma falha no proxy: domínio recusado pela política de hosts é erro do pedido (400); Jira
+     * inalcançável (timeout, DNS, conexão recusada, TLS) é falha do upstream (502); o resto segue 500.
+     */
+    static HttpStatus statusFor(Exception e) {
+        if (e instanceof IllegalArgumentException && e.getMessage() != null && e.getMessage().startsWith("Domain")) {
+            return HttpStatus.BAD_REQUEST;
+        }
+        if (e instanceof org.springframework.web.client.ResourceAccessException) {
+            return HttpStatus.BAD_GATEWAY;
+        }
+        Throwable cur = e;
+        while (cur != null) {
+            if (cur instanceof java.net.SocketTimeoutException || cur instanceof java.net.UnknownHostException
+                    || cur instanceof java.net.ConnectException || cur instanceof javax.net.ssl.SSLException) {
+                return HttpStatus.BAD_GATEWAY;
+            }
+            cur = cur.getCause();
+        }
+        return HttpStatus.INTERNAL_SERVER_ERROR;
+    }
+
     /** Motivo curto e seguro para o cliente: não vaza URL, consulta nem detalhes de rede interna. */
     static String describe(Exception e) {
         Throwable cur = e;
@@ -377,7 +399,7 @@ public class JiraService {
             jiraUri = new URI(urlStr);
         } catch (Exception e) {
             log.error("Failed to construct encoded Jira URI", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            return ResponseEntity.status(statusFor(e))
                     .body(jsonError("Erro ao construir URL de busca do Jira: " + describe(e)));
         }
 
@@ -429,7 +451,7 @@ public class JiraService {
             return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
         } catch (Exception e) {
             log.error("Jira search failed", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            return ResponseEntity.status(statusFor(e))
                     .body(jsonError("Erro ao conectar ao Jira: " + describe(e)));
         }
     }
@@ -447,7 +469,7 @@ public class JiraService {
             jiraUri = new URI("https://" + cleanDomain + "/rest/api/2/field");
         } catch (Exception e) {
             log.error("Failed to construct Jira field URI", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            return ResponseEntity.status(statusFor(e))
                     .body(jsonError("Erro ao construir URL do Jira: " + describe(e)));
         }
 
@@ -468,7 +490,7 @@ public class JiraService {
             return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
         } catch (Exception e) {
             log.error("Jira field metadata failed", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            return ResponseEntity.status(statusFor(e))
                     .body(jsonError("Erro ao buscar campos do Jira: " + describe(e)));
         }
     }
@@ -488,7 +510,7 @@ public class JiraService {
         try {
             jiraUri = new URI("https://" + cleanDomain + "/rest/atm/1.0/testcase/" + key);
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            return ResponseEntity.status(statusFor(e))
                     .body(jsonError("Erro ao construir URL do Jira: " + describe(e)));
         }
         HttpHeaders headers = new HttpHeaders();
@@ -505,7 +527,7 @@ public class JiraService {
             return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
         } catch (Exception e) {
             log.warn("Jira testcase {} failed: {}", key, e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            return ResponseEntity.status(statusFor(e))
                     .body(jsonError("Erro ao buscar o caso de teste no Jira: " + describe(e)));
         }
     }
@@ -521,7 +543,7 @@ public class JiraService {
             jiraUri = new URI("https://" + cleanDomain + "/rest/agile/1.0/board?type=scrum&maxResults=50&projectKeyOrId="
                     + java.net.URLEncoder.encode(projectKey.trim(), java.nio.charset.StandardCharsets.UTF_8));
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            return ResponseEntity.status(statusFor(e))
                     .body(jsonError("Erro ao construir URL do Jira: " + describe(e)));
         }
         HttpHeaders headers = new HttpHeaders();
@@ -537,7 +559,7 @@ public class JiraService {
             return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
         } catch (Exception e) {
             log.warn("Jira boards failed: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            return ResponseEntity.status(statusFor(e))
                     .body(jsonError("Erro ao buscar quadros no Jira: " + describe(e)));
         }
     }
@@ -556,7 +578,7 @@ public class JiraService {
             jiraUri = new URI("https://" + cleanDomain + "/rest/agile/1.0/sprint/" + java.net.URLEncoder.encode(sprintId.trim(), java.nio.charset.StandardCharsets.UTF_8));
         } catch (Exception e) {
             log.error("Failed to construct Jira sprint URI", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            return ResponseEntity.status(statusFor(e))
                     .body(jsonError("Erro ao construir URL do Jira: " + describe(e)));
         }
 
@@ -577,7 +599,7 @@ public class JiraService {
             return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
         } catch (Exception e) {
             log.error("Jira sprint metadata failed", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            return ResponseEntity.status(statusFor(e))
                     .body(jsonError("Erro ao buscar sprint no Jira: " + describe(e)));
         }
     }
@@ -630,7 +652,7 @@ public class JiraService {
             return ResponseEntity.status(e.getStatusCode()).body("{\"error\": \"Erro do Jira: " + e.getStatusCode().value() + "\"}");
         } catch (Exception e) {
             log.error("Jira attachment fetch failed", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(jsonError("Erro ao buscar anexo do Jira: " + describe(e)));
+            return ResponseEntity.status(statusFor(e)).body(jsonError("Erro ao buscar anexo do Jira: " + describe(e)));
         }
     }
 
@@ -641,7 +663,7 @@ public class JiraService {
             jiraUri = new URI("https://" + cleanDomain + "/rest/api/2/myself");
         } catch (Exception e) {
             log.error("Failed to construct Jira myself URI", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            return ResponseEntity.status(statusFor(e))
                     .body(jsonError("Erro ao construir URL do Jira: " + describe(e)));
         }
 
@@ -662,7 +684,7 @@ public class JiraService {
             return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
         } catch (Exception e) {
             log.error("Jira myself failed", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            return ResponseEntity.status(statusFor(e))
                     .body(jsonError("Erro ao buscar dados do usuário no Jira: " + describe(e)));
         }
     }
@@ -681,7 +703,7 @@ public class JiraService {
             jiraUri = new URI(urlStr);
         } catch (Exception e) {
             log.error("Failed to construct Greenhopper URI", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            return ResponseEntity.status(statusFor(e))
                     .body(jsonError("Erro ao construir URL do Greenhopper: " + describe(e)));
         }
 
@@ -703,7 +725,7 @@ public class JiraService {
             return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
         } catch (Exception e) {
             log.error("Greenhopper work data failed", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            return ResponseEntity.status(statusFor(e))
                     .body(jsonError("Erro ao buscar dados do quadro Greenhopper: " + describe(e)));
         }
     }

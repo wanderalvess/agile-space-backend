@@ -187,7 +187,7 @@ public class JiraServiceTest {
 
         ResponseEntity<String> response = service.searchIssues(request);
 
-        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         assertThat(response.getBody(), containsString("não permitido"));
     }
 
@@ -203,7 +203,7 @@ public class JiraServiceTest {
     }
 
     @Test
-    public void testSearchIssuesReturnsInternalErrorOnTransportFailure() {
+    public void testSearchIssuesReturnsBadGatewayOnTransportFailure() {
         server.expect(requestTo(containsString("/rest/api/2/search")))
                 .andRespond(request -> {
                     throw new java.io.IOException("conexao recusada");
@@ -211,7 +211,7 @@ public class JiraServiceTest {
 
         ResponseEntity<String> response = service.searchIssues(searchRequest("project = DDW"));
 
-        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
+        assertEquals(HttpStatus.BAD_GATEWAY, response.getStatusCode());
         assertThat(response.getBody(), containsString("Erro ao conectar ao Jira"));
     }
 

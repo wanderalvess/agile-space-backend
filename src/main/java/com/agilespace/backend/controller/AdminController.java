@@ -59,7 +59,12 @@ public class AdminController {
     }
 
     @PostMapping("/announcements")
-    public ResponseEntity<GlobalAnnouncement> createAnnouncement(@RequestBody GlobalAnnouncement announcement) {
+    public ResponseEntity<GlobalAnnouncement> createAnnouncement(@RequestBody GlobalAnnouncement announcement,
+                                                                 HttpServletRequest request) {
+        // Autoria vem do token, nunca do corpo.
+        String email = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_EMAIL);
+        String author = email != null && !email.isBlank() ? email : (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        announcement.setCreatedBy(author != null ? author : "ADMIN");
         return ResponseEntity.ok(service.createAnnouncement(announcement));
     }
 

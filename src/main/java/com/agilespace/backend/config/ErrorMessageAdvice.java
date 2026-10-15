@@ -3,7 +3,11 @@ package com.agilespace.backend.config;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -44,5 +48,29 @@ public class ErrorMessageAdvice {
         return ResponseEntity.status(status).body(Map.of(
                 "error", status.toString(),
                 "message", reason == null || reason.isBlank() ? DEFAULT_4XX : reason));
+    }
+
+    /** JSON malformado, corpo ausente ou tipo errado: 400 no mesmo formato, sem expor o método Java nem o parser. */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Map<String, String>> handleUnreadable(HttpMessageNotReadableException ex) {
+        log.debug("Corpo da requisição ilegível: {}", ex.getMessage());
+        return badRequest("Corpo da requisição ausente ou inválido.");
+    }
+
+    /** UUID/número inválido em path ou query. */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Map<String, String>> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        return badRequest("Parâmetro '" + ex.getName() + "' inválido.");
+    }
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<Map<String, String>> handleMissingParam(MissingServletRequestParameterException ex) {
+        return badRequest("Parâmetro '" + ex.getParameterName() + "' é obrigatório.");
+    }
+
+    private static ResponseEntity<Map<String, String>> badRequest(String message) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
+                "error", HttpStatus.BAD_REQUEST.toString(),
+                "message", message));
     }
 }

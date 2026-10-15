@@ -57,13 +57,15 @@ public class KnowledgeController {
             @PageableDefault(size = 10) Pageable pageable) {
         Object raw = body.get("embedding");
         if (!(raw instanceof List<?> rawEmbedding) || rawEmbedding.isEmpty() || rawEmbedding.size() > KnowledgeService.MAX_EMBEDDING_DIMS) {
-            return ResponseEntity.badRequest().build();
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "Informe 'embedding': uma lista de números com 1 a " + KnowledgeService.MAX_EMBEDDING_DIMS + " posições.");
         }
         float[] queryEmbedding = new float[rawEmbedding.size()];
         for (int i = 0; i < rawEmbedding.size(); i++) {
             // JSON com inteiros (ex.: 0) chegava como Integer e estourava ClassCastException (500).
             if (!(rawEmbedding.get(i) instanceof Number n)) {
-                return ResponseEntity.badRequest().build();
+                throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
+                        "O 'embedding' deve conter apenas números.");
             }
             queryEmbedding[i] = n.floatValue();
         }

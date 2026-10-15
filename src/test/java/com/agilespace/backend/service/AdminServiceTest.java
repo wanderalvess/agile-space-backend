@@ -118,6 +118,20 @@ class AdminServiceTest {
         }
 
         @Test
+        @DisplayName("Comunicado sem título, conteúdo ou autor responde 400 e nada é salvo")
+        void shouldRejectInvalidAnnouncement() {
+            for (GlobalAnnouncement a : List.of(
+                    GlobalAnnouncement.builder().content("c").createdBy("a").build(),
+                    GlobalAnnouncement.builder().title("t").content(" ").createdBy("a").build(),
+                    GlobalAnnouncement.builder().title("t").content("c").build())) {
+                org.springframework.web.server.ResponseStatusException ex = assertThrows(
+                        org.springframework.web.server.ResponseStatusException.class, () -> service.createAnnouncement(a));
+                assertEquals(org.springframework.http.HttpStatus.BAD_REQUEST, ex.getStatusCode());
+            }
+            verify(announcementRepository, never()).save(any());
+        }
+
+        @Test
         @DisplayName("Deve excluir comunicado pelo identificador")
         void shouldDeleteAnnouncement() {
             service.deleteAnnouncement("ann-123");
