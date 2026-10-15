@@ -10,4 +10,6 @@ import java.util.UUID;
 @Repository
 public interface ActionPlanTaskRepository extends JpaRepository<ActionPlanTask, UUID> {
     List<ActionPlanTask> findByBoardIdOrderByOrderAsc(UUID boardId);
+
+    void deleteByBoardId(UUID boardId);
 }

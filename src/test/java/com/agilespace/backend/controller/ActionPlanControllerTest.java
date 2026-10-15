@@ -223,4 +223,36 @@ public class ActionPlanControllerTest {
 
         assertEquals("O título é obrigatório.", response.getBody().get("message"));
     }
+
+    @Test
+    public void testUpdateBoardByCreatorAndAdminButNotOthers() {
+        UUID id = UUID.randomUUID();
+        ActionPlan board = new ActionPlan();
+        board.setCreatorId("u1");
+        when(service.getBoardById(id)).thenReturn(board);
+        ActionPlan body = new ActionPlan();
+        when(service.updateBoard(id, body)).thenReturn(board);
+
+        assertEquals(HttpStatus.OK, controller.updateBoard(id, body, mockRequest("u1", "MEMBER")).getStatusCode());
+        assertEquals(HttpStatus.OK, controller.updateBoard(id, body, mockRequest("adm", "ADMIN")).getStatusCode());
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> controller.updateBoard(id, body, mockRequest("u2", "MEMBER")));
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+    }
+
+    @Test
+    public void testDeleteBoardOnlyCreatorOrAdmin() {
+        UUID id = UUID.randomUUID();
+        ActionPlan board = new ActionPlan();
+        board.setCreatorId("u1");
+        when(service.getBoardById(id)).thenReturn(board);
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> controller.deleteBoard(id, mockRequest("u2", "MEMBER")));
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+        verify(service, never()).deleteBoard(id);
+
+        assertEquals(HttpStatus.NO_CONTENT, controller.deleteBoard(id, mockRequest("u1", "MEMBER")).getStatusCode());
+        verify(service).deleteBoard(id);
+    }
 }

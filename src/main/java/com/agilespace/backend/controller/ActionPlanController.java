@@ -82,6 +82,32 @@ public class ActionPlanController {
         return ResponseEntity.ok(requireBoardAccess(id, request));
     }
 
+    /** Editar/apagar o board em si: só o criador ou ADMIN (participante comum edita tarefas, não o board). */
+    private ActionPlan requireBoardOwner(UUID boardId, HttpServletRequest request) {
+        ActionPlan board = requireBoardAccess(boardId, request);
+        CeremonyCaller caller = caller(request);
+        if (!caller.isAdmin() && !caller.is(board.getCreatorId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Apenas o criador do plano ou um administrador pode alterá-lo.");
+        }
+        return board;
+    }
+
+    @RequestMapping(value = "/{id}", method = {RequestMethod.PUT, RequestMethod.PATCH})
+    public ResponseEntity<ActionPlan> updateBoard(
+            @PathVariable("id") UUID id,
+            @RequestBody ActionPlan body,
+            HttpServletRequest request) {
+        requireBoardOwner(id, request);
+        return ResponseEntity.ok(actionPlanService.updateBoard(id, body));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteBoard(@PathVariable("id") UUID id, HttpServletRequest request) {
+        requireBoardOwner(id, request);
+        actionPlanService.deleteBoard(id);
+        return ResponseEntity.noContent().build();
+    }
+
     /**
      * Entrar no plano: o participante adicionado é sempre quem chama. ADMIN e o criador podem informar outro
      * {@code participantId}. Em board privado exige acesso prévio (senão seria a porta dos fundos do check).

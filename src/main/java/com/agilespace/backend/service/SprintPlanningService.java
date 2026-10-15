@@ -49,6 +49,7 @@ public class SprintPlanningService {
         ValidationSupport.requireNonBlank(planner.getTitle(), "title");
         ValidationSupport.requireMaxSize(planner.getTasks(), MAX_TASKS, "tasks");
         ValidationSupport.requireMaxSize(planner.getMembers(), MAX_MEMBERS, "members");
+        validateContent(planner);
 
         Optional<SprintPlanning> existing = planner.getId() != null && !planner.getId().trim().isEmpty()
                 ? sprintPlanningRepository.findById(planner.getId())
@@ -112,6 +113,44 @@ public class SprintPlanningService {
     }
 
     private static final int MAX_LIST_LIMIT = 100;
+    private static final int MAX_SHORT = 255;
+
+    /** Campos que viram coluna varchar(255) ou texto livre sem teto: 400 aqui em vez de 500 no INSERT. */
+    private static void validateContent(SprintPlanning planner) {
+        ValidationSupport.requireMaxLength(planner.getTitle(), MAX_SHORT, "title");
+        if (planner.getTasks() != null) {
+            for (SprintPlanningTask task : planner.getTasks()) {
+                ValidationSupport.requireNonBlank(task.getName(), "name da task");
+                ValidationSupport.requireMaxLength(task.getName(), MAX_SHORT, "name da task");
+                ValidationSupport.requireMaxLength(task.getDescription(), ValidationSupport.MAX_FREE_TEXT, "description da task");
+                ValidationSupport.requireMaxLength(task.getLink(), ValidationSupport.MAX_FREE_TEXT, "link da task");
+                ValidationSupport.requireMaxLength(task.getStatus(), MAX_SHORT, "status da task");
+                ValidationSupport.requireMaxLength(task.getRole(), MAX_SHORT, "role da task");
+                ValidationSupport.requireMaxLength(task.getAssigneeId(), MAX_SHORT, "assigneeId da task");
+                ValidationSupport.requireMaxLength(task.getStartDate(), MAX_SHORT, "startDate da task");
+                ValidationSupport.requireMaxLength(task.getEndDate(), MAX_SHORT, "endDate da task");
+                if (task.getSubtasks() != null) {
+                    for (SprintPlanningSubtask sub : task.getSubtasks()) {
+                        ValidationSupport.requireNonBlank(sub.getName(), "name da subtask");
+                        ValidationSupport.requireMaxLength(sub.getName(), MAX_SHORT, "name da subtask");
+                        ValidationSupport.requireMaxLength(sub.getLink(), ValidationSupport.MAX_FREE_TEXT, "link da subtask");
+                        ValidationSupport.requireMaxLength(sub.getStatus(), MAX_SHORT, "status da subtask");
+                        ValidationSupport.requireMaxLength(sub.getRole(), MAX_SHORT, "role da subtask");
+                        ValidationSupport.requireMaxLength(sub.getAssigneeId(), MAX_SHORT, "assigneeId da subtask");
+                        ValidationSupport.requireMaxLength(sub.getStartDate(), MAX_SHORT, "startDate da subtask");
+                        ValidationSupport.requireMaxLength(sub.getEndDate(), MAX_SHORT, "endDate da subtask");
+                    }
+                }
+            }
+        }
+        if (planner.getMembers() != null) {
+            for (SprintPlanningMember member : planner.getMembers()) {
+                ValidationSupport.requireNonBlank(member.getName(), "name do integrante");
+                ValidationSupport.requireMaxLength(member.getName(), MAX_SHORT, "name do integrante");
+                ValidationSupport.requireMaxLength(member.getRole(), MAX_SHORT, "role do integrante");
+            }
+        }
+    }
 
     /**
      * Planejamentos prontos para o Poker. Planejamento não tem squad; para não expor o de outras pessoas,

@@ -81,6 +81,33 @@ public class ActionPlanService {
         return boardRepository.save(board);
     }
 
+    /** Edição parcial do board: título (obrigatório se enviado, mesmo limite da criação) e visibilidade. */
+    @Transactional
+    public ActionPlan updateBoard(UUID id, ActionPlan updated) {
+        ActionPlan existing = getBoardById(id);
+        if (updated.getTitle() != null) {
+            String title = text(updated.getTitle(), MAX_TITLE, "O título");
+            if (title.isEmpty()) {
+                throw badRequest("O título é obrigatório.");
+            }
+            existing.setTitle(title);
+        }
+        if (updated.getIsPublic() != null) {
+            existing.setIsPublic(updated.getIsPublic());
+        }
+        return boardRepository.save(existing);
+    }
+
+    /** Apaga o board com todas as tarefas. */
+    @Transactional
+    public void deleteBoard(UUID id) {
+        if (!boardRepository.existsById(id)) {
+            throw new IllegalArgumentException("Action Plan not found with id: " + id);
+        }
+        taskRepository.deleteByBoardId(id);
+        boardRepository.deleteById(id);
+    }
+
     @Transactional(readOnly = true)
     public List<ActionPlan> listBoardsBySprintId(String sprintId) {
         return boardRepository.findBySprintIdOrderByCreatedAtDesc(sprintId);

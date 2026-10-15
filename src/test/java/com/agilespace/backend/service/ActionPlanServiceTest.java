@@ -216,4 +216,54 @@ class ActionPlanServiceTest {
             assertThrows(IllegalArgumentException.class, () -> service.deleteTask(missing));
         }
     }
+
+    @Nested
+    @DisplayName("Editar e apagar board")
+    class BoardUpdateDeleteTests {
+
+        @Test
+        void updateBoardChangesTitleAndVisibility() {
+            UUID id = UUID.randomUUID();
+            ActionPlan existing = new ActionPlan();
+            existing.setTitle("Velho");
+            when(boardRepository.findById(id)).thenReturn(Optional.of(existing));
+            when(boardRepository.save(any(ActionPlan.class))).thenAnswer(i -> i.getArgument(0));
+
+            ActionPlan patch = new ActionPlan();
+            patch.setTitle("  Novo  ");
+            patch.setIsPublic(false);
+            ActionPlan result = service.updateBoard(id, patch);
+
+            assertEquals("Novo", result.getTitle());
+            assertFalse(result.getIsPublic());
+        }
+
+        @Test
+        void updateBoardRejectsBlankAndLongTitle() {
+            UUID id = UUID.randomUUID();
+            when(boardRepository.findById(id)).thenReturn(Optional.of(new ActionPlan()));
+            ActionPlan blank = new ActionPlan();
+            blank.setTitle("   ");
+            assertBadRequest(() -> service.updateBoard(id, blank));
+            ActionPlan big = new ActionPlan();
+            big.setTitle("x".repeat(256));
+            assertBadRequest(() -> service.updateBoard(id, big));
+        }
+
+        @Test
+        void deleteBoardRemovesTasksThenBoard() {
+            UUID id = UUID.randomUUID();
+            when(boardRepository.existsById(id)).thenReturn(true);
+            service.deleteBoard(id);
+            verify(taskRepository).deleteByBoardId(id);
+            verify(boardRepository).deleteById(id);
+        }
+
+        @Test
+        void deleteBoardNotFound() {
+            UUID id = UUID.randomUUID();
+            when(boardRepository.existsById(id)).thenReturn(false);
+            assertThrows(IllegalArgumentException.class, () -> service.deleteBoard(id));
+        }
+    }
 }
