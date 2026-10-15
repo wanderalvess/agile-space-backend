@@ -27,6 +27,6 @@ public interface PokerRoomRepository extends JpaRepository<PokerRoom, String> {
 
     /** Home: salas não encerradas das squads (ids em MAIÚSCULAS) criadas desde {@code since} (ISO). */
     @Query("SELECT r FROM PokerRoom r WHERE UPPER(r.team) IN :teams AND (r.sessionEndedAt IS NULL OR r.sessionEndedAt = '') "
-            + "AND r.createdAt >= :since ORDER BY r.createdAt DESC")
+            + "AND (r.createdAt >= :since OR r.sessionStartedAt >= :since) ORDER BY r.createdAt DESC")
     List<PokerRoom> findOpenByTeams(@Param("teams") Collection<String> upperTeams, @Param("since") String sinceIso, Pageable pageable);
 }

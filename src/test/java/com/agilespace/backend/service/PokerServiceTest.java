@@ -110,6 +110,19 @@ class PokerServiceTest {
         }
 
         @Test
+        @DisplayName("Sala nova sem createdAt ganha a data do servidor; a enviada pelo cliente é mantida")
+        void shouldFillCreatedAtOnlyWhenMissing() {
+            when(roomRepository.saveAndFlush(any(PokerRoom.class))).thenAnswer(i -> i.getArgument(0));
+
+            PokerRoom semData = service.saveOrUpdateRoom(PokerRoom.builder().id("r1").title("A").build(), "u", "MEMBER");
+            PokerRoom comData = service.saveOrUpdateRoom(
+                    PokerRoom.builder().id("r2").title("B").createdAt("2026-01-02T03:04:05.000Z").build(), "u", "MEMBER");
+
+            org.junit.jupiter.api.Assertions.assertTrue(semData.getCreatedAt().matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z"));
+            assertEquals("2026-01-02T03:04:05.000Z", comData.getCreatedAt());
+        }
+
+        @Test
         @DisplayName("Deve permitir ao criador atualizar dados da sala existente")
         void shouldAllowCreatorToUpdateExistingRoom() {
             when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));

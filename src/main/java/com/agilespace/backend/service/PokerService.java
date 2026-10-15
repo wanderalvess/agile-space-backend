@@ -112,6 +112,11 @@ public class PokerService {
             }
         } else {
             room.setCreatorId(callerId);
+            // O navegador manda createdAt; outros caminhos (API, MCP) não. A home filtra salas por essa data.
+            if (room.getCreatedAt() == null || room.getCreatedAt().isBlank()) {
+                room.setCreatedAt(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+                        .withZone(java.time.ZoneOffset.UTC).format(java.time.Instant.now()));
+            }
         }
         // saveAndFlush: a versão só é incrementada no flush, e o broadcast abaixo ainda roda dentro
         // da transação. Com save() os clientes receberiam a versão antiga e o próprio autor tomaria
