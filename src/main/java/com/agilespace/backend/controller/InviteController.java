@@ -4,10 +4,12 @@ import com.agilespace.backend.domain.Invite;
 import com.agilespace.backend.domain.ProjectMemberRole;
 import com.agilespace.backend.domain.SquadMember;
 import com.agilespace.backend.domain.User;
+import com.agilespace.backend.dto.AuthResponseDto;
 import com.agilespace.backend.repository.ProjectMemberRoleRepository;
 import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.security.SquadLeadership;
+import com.agilespace.backend.service.AuthService;
 import com.agilespace.backend.service.InviteService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +33,7 @@ public class InviteController {
     private final InviteService inviteService;
     private final UserRepository userRepository;
     private final ProjectMemberRoleRepository projectMemberRoleRepository;
+    private final AuthService authService;
 
     /**
      * ADMIN/LEAD (tier de sistema) entram em qualquer squad; liderança de negócio só
@@ -60,6 +63,10 @@ public class InviteController {
         boolean ownsSquad = (caller.getSquadId() != null && caller.getSquadId().equalsIgnoreCase(squadId))
                 || (caller.getDefaultProjectId() != null && caller.getDefaultProjectId().equalsIgnoreCase(squadId));
         if (!ownsSquad) {
+            // Liderança de roster conta mesmo com outra squad ativa (ex.: AM que acabou de criar uma equipe manual).
+            if (isRosterLeader(squadId, caller)) {
+                return caller;
+            }
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a administradores ou lideranças deste squad.");
         }
 
@@ -76,6 +83,13 @@ public class InviteController {
         }
 
         throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a administradores ou lideranças deste squad.");
+    }
+
+    private boolean isRosterLeader(String squadId, User caller) {
+        return projectMemberRoleRepository.findByProjectId(squadId).stream()
+                .anyMatch(pmr -> pmr.isLeadership()
+                        && ((pmr.getUserId() != null && pmr.getUserId().equals(caller.getId()))
+                            || (pmr.getEmail() != null && caller.getEmail() != null && pmr.getEmail().equalsIgnoreCase(caller.getEmail()))));
     }
 
     @PostMapping("/api/squads/{squadId}/invites")
@@ -112,16 +126,24 @@ public class InviteController {
 
     @GetMapping("/api/invites/{token}")
     public ResponseEntity<Invite> getInvite(@PathVariable String token) {
-        return ResponseEntity.ok(inviteService.getByToken(token));
+        return ResponseEntity.ok(inviteService.getForDisplay(token));
     }
 
     @PostMapping("/api/invites/{token}/accept")
-    public ResponseEntity<SquadMember> acceptInvite(@PathVariable String token, HttpServletRequest request) {
+    public ResponseEntity<AuthResponseDto> acceptInvite(@PathVariable String token, HttpServletRequest request) {
         String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
         User acceptingUser = userId != null ? userRepository.findById(userId).orElse(null) : null;
         if (acceptingUser == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão inválida");
         }
-        return ResponseEntity.ok(inviteService.acceptInvite(token, acceptingUser));
+        SquadMember member = inviteService.acceptInvite(token, acceptingUser);
+        // Devolve a sessão já com a squad ativa (mesmo contrato de /projects/{key}/join), pro cliente não precisar
+        // de um segundo round-trip nem cair de volta no onboarding.
+        try {
+            return ResponseEntity.ok(authService.switchActiveProject(acceptingUser.getId(), member.getSquadId()));
+        } catch (ResponseStatusException e) {
+            // Squad sem projeto cadastrado (só roster): não há projeto ativo pra trocar.
+            return ResponseEntity.ok(authService.getMe(acceptingUser.getId()));
+        }
     }
 }

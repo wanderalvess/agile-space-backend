@@ -28,6 +28,9 @@ class InviteServiceTest {
     @Mock private InviteRepository inviteRepository;
     @Mock private AuditLogRepository auditLogRepository;
     @Mock private SquadService squadService;
+    @Mock private com.agilespace.backend.repository.ProjectConfigRepository projectConfigRepository;
+    @Mock private com.agilespace.backend.repository.ProjectMemberRoleRepository projectMemberRoleRepository;
+    @Mock private com.agilespace.backend.repository.UserRepository userRepository;
     @InjectMocks private InviteService service;
 
     private User user() {
@@ -67,6 +70,22 @@ class InviteServiceTest {
     }
 
     @Test
+    @DisplayName("Aceitar convite cria o vínculo de projeto (sem liderança) e define a squad ativa")
+    void acceptLinksProjectMembership() {
+        when(inviteRepository.findByTokenForUpdate("tok")).thenReturn(Optional.of(pending(null, LocalDateTime.now().plusDays(1))));
+        when(squadService.saveMember(anyString(), anyString(), any(SquadMember.class))).thenAnswer(i -> i.getArgument(2));
+        when(projectConfigRepository.existsById("SQ")).thenReturn(true);
+        when(projectMemberRoleRepository.findByProjectId("SQ")).thenReturn(java.util.List.of());
+
+        User u = user();
+        service.acceptInvite("tok", u);
+
+        verify(projectMemberRoleRepository).save(argThat(m -> "SQ".equals(m.getProjectId()) && "u1".equals(m.getUserId()) && !m.isLeadership()));
+        assertEquals("SQ", u.getSquadId());
+        verify(userRepository).save(u);
+    }
+
+    @Test
     @DisplayName("Convite já usado, expirado ou de outro e-mail é recusado")
     void acceptRejectsUsedExpiredOrWrongEmail() {
         Invite used = pending(null, LocalDateTime.now().plusDays(1));
@@ -96,5 +115,21 @@ class InviteServiceTest {
         when(inviteRepository.findById("i2")).thenReturn(Optional.of(open));
         service.revoke("i2", "SQ", "lead");
         assertEquals("REVOKED", open.getStatus());
+    }
+
+    @Test
+    @DisplayName("Página do convite recebe o nome da squad; sem projeto cadastrado, fica só a chave")
+    void displayCarriesSquadName() {
+        Invite invite = pending(null, LocalDateTime.now().plusDays(1));
+        when(inviteRepository.findByToken("t1")).thenReturn(Optional.of(invite));
+        com.agilespace.backend.domain.ProjectConfig project = new com.agilespace.backend.domain.ProjectConfig();
+        project.setName("Time da Ana");
+        when(projectConfigRepository.findById(invite.getSquadId())).thenReturn(Optional.of(project));
+        assertEquals("Time da Ana", service.getForDisplay("t1").getSquadName());
+
+        Invite semProjeto = pending(null, LocalDateTime.now().plusDays(1));
+        when(inviteRepository.findByToken("t2")).thenReturn(Optional.of(semProjeto));
+        when(projectConfigRepository.findById(semProjeto.getSquadId())).thenReturn(Optional.empty());
+        assertNull(service.getForDisplay("t2").getSquadName());
     }
 }

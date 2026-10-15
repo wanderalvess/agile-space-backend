@@ -52,6 +52,10 @@ public class Invite {
     @Column(name = "accepted_by_user_id")
     private String acceptedByUserId;
 
+    /** Nome legível da squad, só na resposta da página do convite (a chave sozinha não diz nada a quem recebeu). */
+    @Transient
+    private String squadName;
+
     @PrePersist
     public void onPrePersist() {
         if (createdAt == null) {

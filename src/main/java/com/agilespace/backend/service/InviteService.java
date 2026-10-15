@@ -2,10 +2,14 @@ package com.agilespace.backend.service;
 
 import com.agilespace.backend.domain.AuditLog;
 import com.agilespace.backend.domain.Invite;
+import com.agilespace.backend.domain.ProjectMemberRole;
 import com.agilespace.backend.domain.SquadMember;
 import com.agilespace.backend.domain.User;
 import com.agilespace.backend.repository.AuditLogRepository;
 import com.agilespace.backend.repository.InviteRepository;
+import com.agilespace.backend.repository.ProjectConfigRepository;
+import com.agilespace.backend.repository.ProjectMemberRoleRepository;
+import com.agilespace.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -33,6 +37,9 @@ public class InviteService {
     private final InviteRepository inviteRepository;
     private final AuditLogRepository auditLogRepository;
     private final SquadService squadService;
+    private final ProjectConfigRepository projectConfigRepository;
+    private final ProjectMemberRoleRepository projectMemberRoleRepository;
+    private final UserRepository userRepository;
 
     @Transactional
     public Invite createInvite(String squadId, String roleName, String email, String invitedByUserId) {
@@ -70,6 +77,16 @@ public class InviteService {
     public Invite getByToken(String token) {
         return inviteRepository.findByToken(token)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Convite não encontrado"));
+    }
+
+    /** Para a página do convite: o convite com o nome da squad (a chave fica se a squad não tiver projeto). */
+    public Invite getForDisplay(String token) {
+        Invite invite = getByToken(token);
+        projectConfigRepository.findById(invite.getSquadId())
+                .map(p -> p.getName())
+                .filter(n -> n != null && !n.isBlank())
+                .ifPresent(invite::setSquadName);
+        return invite;
     }
 
     @Transactional
@@ -118,6 +135,7 @@ public class InviteService {
                 .claimedByUid(acceptingUser.getId())
                 .build();
         SquadMember saved = squadService.saveMember(invite.getSquadId(), jiraAccountId, member);
+        linkProjectMembership(invite, acceptingUser);
 
         invite.setStatus("ACCEPTED");
         invite.setAcceptedAt(LocalDateTime.now());
@@ -128,6 +146,38 @@ public class InviteService {
                 "Convite " + invite.getId() + " aceito, vinculado ao squad " + invite.getSquadId() + " como " + invite.getRoleName());
         log.info("Convite {} aceito por {} (squad {})", invite.getId(), acceptingUser.getEmail(), invite.getSquadId());
         return saved;
+    }
+
+    /**
+     * A sessão resolve a squad ativa por project_member_roles (UserProjectResolverService), não por
+     * squad_members: sem esta linha o convidado voltava pro onboarding e sumia do roster. Entra sem
+     * liderança (isLeadership=false), mesma regra do /projects/{key}/join — governança vem do Jira ou de admin.
+     */
+    private void linkProjectMembership(Invite invite, User user) {
+        String projectId = invite.getSquadId();
+        if (!projectConfigRepository.existsById(projectId)) {
+            return;
+        }
+        boolean alreadyLinked = projectMemberRoleRepository.findByProjectId(projectId).stream()
+                .anyMatch(m -> user.getId().equals(m.getUserId()));
+        if (!alreadyLinked) {
+            String roleName = invite.getRoleName();
+            projectMemberRoleRepository.save(ProjectMemberRole.builder()
+                    .projectId(projectId)
+                    .roleName(roleName)
+                    .roleKey(roleName.toUpperCase().replace(" ", "_").replaceAll("[^A-Z_]", ""))
+                    .jiraAccountId(user.getJiraAccountId())
+                    .displayName(user.getName())
+                    .email(user.getEmail())
+                    .userId(user.getId())
+                    .isLeadership(false)
+                    .build());
+        }
+        if (user.getDefaultProjectId() == null || user.getDefaultProjectId().isBlank()) {
+            user.setDefaultProjectId(projectId);
+        }
+        user.setSquadId(projectId);
+        userRepository.save(user);
     }
 
     private String generateToken() {
