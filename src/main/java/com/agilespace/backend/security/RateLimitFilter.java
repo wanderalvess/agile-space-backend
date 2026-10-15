@@ -8,6 +8,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
@@ -42,6 +43,18 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     private static final int GENERAL_CAPACITY = 300;
     private static final Duration GENERAL_REFILL_PERIOD = Duration.ofMinutes(1);
+
+    /**
+     * Proxies reversos confiáveis (IPs/CIDRs, separados por vírgula; TRUSTED_PROXIES). Vazio = X-Forwarded-For é
+     * ignorado e o limite vale por endereço da conexão. Atrás do Caddy, informe a rede dele, senão todo mundo
+     * cai no mesmo balde (o do proxy).
+     */
+    private TrustedProxies proxies = new TrustedProxies("");
+
+    @Value("${app.security.trusted-proxies:}")
+    void setTrustedProxies(String config) {
+        this.proxies = new TrustedProxies(config);
+    }
 
     private final ConcurrentMap<String, Bucket> authBuckets = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Bucket> generalBuckets = new ConcurrentHashMap<>();
@@ -105,10 +118,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
     }
 
     private String clientIp(HttpServletRequest request) {
-        String forwardedFor = request.getHeader("X-Forwarded-For");
-        if (forwardedFor != null && !forwardedFor.isBlank()) {
-            return forwardedFor.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
+        return proxies.clientIp(request.getRemoteAddr(), request.getHeader("X-Forwarded-For"));
     }
 }

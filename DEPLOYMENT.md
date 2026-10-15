@@ -148,6 +148,9 @@ export APP_JWT_SECRET="$(openssl rand -base64 48)"
 export ALLOWED_EMAIL_DOMAIN="totvs.com.br"
 export DB_URL="jdbc:postgresql://db:5432/espacoagil"
 export DB_PASSWORD="secure_password"
+# Rede do Caddy: sem isto o limite de login enxerga todo mundo com o IP do proxy (um balde só). Com isto, vale o IP
+# que o Caddy acrescenta ao X-Forwarded-For; sem proxy, deixe vazio (o cabeçalho é ignorado, pois o cliente o forja).
+export TRUSTED_PROXIES="172.16.0.0/12"
 
 # NEXT_PUBLIC_* do frontend: precisam do domínio público real ANTES do build (ver Dockerfile
 # do frontend) — setar depois via "environment:" não muda o bundle já compilado.

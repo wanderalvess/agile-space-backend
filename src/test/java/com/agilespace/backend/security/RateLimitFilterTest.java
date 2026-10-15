@@ -125,15 +125,16 @@ class RateLimitFilterTest {
     }
 
     @Test
-    @DisplayName("Usa o primeiro IP de X-Forwarded-For quando presente")
-    void shouldUseForwardedForHeaderWhenPresent() throws Exception {
+    @DisplayName("Sem proxy confiável configurado, X-Forwarded-For não escolhe o balde (vale o endereço da conexão)")
+    void shouldIgnoreForwardedForHeaderByDefault() throws Exception {
         when(request.getRequestURI()).thenReturn("/api/auth/login");
+        when(request.getRemoteAddr()).thenReturn("10.0.0.8");
         when(request.getHeader("X-Forwarded-For")).thenReturn("203.0.113.5, 10.0.0.1");
 
         filter.doFilterInternal(request, response, filterChain);
 
         verify(filterChain, times(1)).doFilter(request, response);
-        verify(request, never()).getRemoteAddr();
+        verify(request, atLeastOnce()).getRemoteAddr();
     }
 
     private boolean invokeShouldNotFilter(HttpServletRequest req) throws Exception {

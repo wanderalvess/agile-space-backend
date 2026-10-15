@@ -57,6 +57,9 @@ services:
       APP_ADMIN_KEY: ${APP_ADMIN_KEY:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:9002}
       ALLOWED_EMAIL_DOMAIN: ${ALLOWED_EMAIL_DOMAIN:-}
+      # Rede do proxy reverso (Caddy) cujo X-Forwarded-For o limitador de login pode ler. Vazio = ignora o cabeçalho.
+      # Com o profile "proxy": TRUSTED_PROXIES=172.16.0.0/12 (faixa padrão das redes do Docker; confira com docker network inspect).
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
       # OpenTelemetry: agente sempre presente na imagem (ver Dockerfile), inerte até
       # OTEL_JAVAAGENT_ENABLED=true. Vendor-neutro (OTLP) — funciona com SigNoz ou qualquer
