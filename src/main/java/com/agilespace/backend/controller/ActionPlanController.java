@@ -5,6 +5,7 @@ import com.agilespace.backend.domain.ActionPlanTask;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.ActionPlanService;
 import com.agilespace.backend.service.CeremonyCaller;
+import com.agilespace.backend.service.SquadAccessService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -23,6 +24,7 @@ import java.util.UUID;
 public class ActionPlanController {
 
     private final ActionPlanService actionPlanService;
+    private final SquadAccessService squadAccessService;
 
     private static CeremonyCaller caller(HttpServletRequest request) {
         return new CeremonyCaller(
@@ -64,7 +66,19 @@ public class ActionPlanController {
 
     @GetMapping
     public ResponseEntity<List<ActionPlan>> listBoards(
-            @RequestParam(value = "sprintId", required = false) String sprintId) {
+            @RequestParam(value = "sprintId", required = false) String sprintId,
+            @RequestParam(value = "squadId", required = false) String squadId,
+            HttpServletRequest request) {
+        // Por squad: exige acesso à squad (planos privados só aparecem para criador/participante/ADMIN).
+        if (squadId != null && !squadId.isBlank()) {
+            squadAccessService.requireSquadReadAccess(squadId, request);
+            CeremonyCaller caller = caller(request);
+            List<ActionPlan> boards = actionPlanService.listBoardsBySquad(squadId).stream()
+                    .filter(b -> caller.isAdmin() || Boolean.TRUE.equals(b.getIsPublic()) || caller.is(b.getCreatorId())
+                            || (caller.isAuthenticated() && b.getParticipantIds().contains(caller.id())))
+                    .toList();
+            return ResponseEntity.ok(boards);
+        }
         if (sprintId == null || sprintId.isBlank()) {
             return ResponseEntity.ok(List.of());
         }
@@ -149,7 +163,7 @@ public class ActionPlanController {
             @RequestBody ActionPlanTask task,
             HttpServletRequest request) {
         requireBoardAccess(taskBoardId(taskId), request);
-        return ResponseEntity.ok(actionPlanService.updateTask(taskId, task));
+        return ResponseEntity.ok(actionPlanService.updateTask(taskId, task, caller(request).id()));
     }
 
     @DeleteMapping("/tasks/{taskId}")

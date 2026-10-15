@@ -29,6 +29,9 @@ public class ActionPlanControllerTest {
     @Mock
     private ActionPlanService service;
 
+    @Mock
+    private com.agilespace.backend.service.SquadAccessService squadAccessService;
+
     @InjectMocks
     private ActionPlanController controller;
 
@@ -113,7 +116,7 @@ public class ActionPlanControllerTest {
         ActionPlan board = new ActionPlan();
         when(service.listBoardsBySprintId("SPRINT-1")).thenReturn(Arrays.asList(board));
 
-        ResponseEntity<List<ActionPlan>> response = controller.listBoards("SPRINT-1");
+        ResponseEntity<List<ActionPlan>> response = controller.listBoards("SPRINT-1", null, mockRequest("u1", "MEMBER"));
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals(1, response.getBody().size());
@@ -121,7 +124,7 @@ public class ActionPlanControllerTest {
 
     @Test
     public void testListBoardsWithoutSprintIdReturnsEmpty() {
-        ResponseEntity<List<ActionPlan>> response = controller.listBoards(null);
+        ResponseEntity<List<ActionPlan>> response = controller.listBoards(null, null, mockRequest("u1", "MEMBER"));
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals(0, response.getBody().size());
@@ -181,7 +184,7 @@ public class ActionPlanControllerTest {
         ResponseStatusException ex = assertThrows(ResponseStatusException.class,
                 () -> controller.updateTask(taskId, new ActionPlanTask(), mockRequest("intruso", "MEMBER")));
         assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
-        verify(service, never()).updateTask(any(), any());
+        verify(service, never()).updateTask(any(), any(), any());
     }
 
     @Test
@@ -254,5 +257,27 @@ public class ActionPlanControllerTest {
 
         assertEquals(HttpStatus.NO_CONTENT, controller.deleteBoard(id, mockRequest("u1", "MEMBER")).getStatusCode());
         verify(service).deleteBoard(id);
+    }
+
+    @Test
+    public void listBoardsBySquadChecksAccessAndHidesPrivateOnes() {
+        ActionPlan pub = new ActionPlan();
+        pub.setIsPublic(true);
+        ActionPlan priv = new ActionPlan();
+        priv.setIsPublic(false);
+        priv.setCreatorId("outro");
+        when(service.listBoardsBySquad("SQA")).thenReturn(Arrays.asList(pub, priv));
+
+        ResponseEntity<List<ActionPlan>> response = controller.listBoards(null, "SQA", mockRequest("u1", "MEMBER"));
+
+        assertEquals(List.of(pub), response.getBody());
+        verify(squadAccessService).requireSquadReadAccess(eq("SQA"), any());
+    }
+
+    @Test
+    public void listBoardsBySquadWithoutAccessIs403() {
+        doThrow(new ResponseStatusException(HttpStatus.FORBIDDEN)).when(squadAccessService).requireSquadReadAccess(eq("SQX"), any());
+        assertThrows(ResponseStatusException.class, () -> controller.listBoards(null, "SQX", mockRequest("u1", "MEMBER")));
+        verify(service, never()).listBoardsBySquad(any());
     }
 }

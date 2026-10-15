@@ -30,6 +30,13 @@ public class ActionPlan {
 
     private String team;
 
+    /**
+     * Squad dona do plano (V73). Antes só havia "team", texto livre; ele vira squadId quando é o id de uma squad/projeto
+     * cadastrado (backfill na migration e na criação). Null = plano sem squad identificada (não entra na listagem por squad).
+     */
+    @Column(name = "squad_id", length = 100)
+    private String squadId;
+
     @Column(length = 100)
     private String sprintId;
 

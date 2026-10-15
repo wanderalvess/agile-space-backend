@@ -3,6 +3,9 @@ package com.agilespace.backend.repository;
 import com.agilespace.backend.domain.BrainstormingIdea;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import java.time.LocalDateTime;
+import java.util.Collection;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -23,4 +26,8 @@ public interface BrainstormingIdeaRepository extends JpaRepository<Brainstorming
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select i from BrainstormingIdea i where i.id = :id")
     Optional<BrainstormingIdea> findByIdForUpdate(@Param("id") String id);
+
+    /** [boardId, ideias, última ideia (ISO)]. */
+    @Query("SELECT i.boardId, COUNT(i), MAX(i.createdAt) FROM BrainstormingIdea i WHERE i.boardId IN :boardIds GROUP BY i.boardId")
+    List<Object[]> summarizeByBoard(@Param("boardIds") Collection<String> boardIds);
 }

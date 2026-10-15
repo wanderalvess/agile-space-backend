@@ -3,6 +3,8 @@ package com.agilespace.backend.repository;
 import com.agilespace.backend.domain.ShowcaseSession;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import java.time.LocalDateTime;
+import java.util.Collection;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -26,4 +28,9 @@ public interface ShowcaseSessionRepository extends JpaRepository<ShowcaseSession
 
     @Query("SELECT s FROM ShowcaseSession s WHERE LOWER(s.squadName) = LOWER(:squadId) ORDER BY s.createdAt DESC")
     List<ShowcaseSession> findLatestSessionsBySquad(@Param("squadId") String squadId, Pageable pageable);
+
+    /** Home: Reviews não encerradas das squads (squadName guarda o id da squad, em MAIÚSCULAS aqui) desde {@code since}. */
+    @Query("SELECT s FROM ShowcaseSession s WHERE UPPER(s.squadName) IN :squadIds AND LOWER(s.status) <> 'finished' "
+            + "AND s.createdAt >= :since ORDER BY s.createdAt DESC")
+    List<ShowcaseSession> findOpenBySquads(@Param("squadIds") Collection<String> upperSquadIds, @Param("since") LocalDateTime since, Pageable pageable);
 }

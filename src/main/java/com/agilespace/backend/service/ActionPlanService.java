@@ -32,6 +32,22 @@ public class ActionPlanService {
     private final ActionPlanRepository boardRepository;
     private final ActionPlanTaskRepository taskRepository;
 
+    /** Opcionais (testes que montam o serviço à mão seguem sem eles). */
+    private SquadAudienceService audienceService;
+    private NotificationTriggers notificationTriggers;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setAudienceService(SquadAudienceService audienceService) {
+        this.audienceService = audienceService;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setNotificationTriggers(NotificationTriggers notificationTriggers) {
+        this.notificationTriggers = notificationTriggers;
+    }
+
+    static final int MAX_LIST = 100;
+
     private static ResponseStatusException badRequest(String msg) {
         return new ResponseStatusException(HttpStatus.BAD_REQUEST, msg);
     }
@@ -69,6 +85,7 @@ public class ActionPlanService {
         board.setTitle(title);
         board.setTeam(text(board.getTeam(), MAX_TITLE, "A squad"));
         board.setSprintId(text(board.getSprintId(), 100, "A sprint"));
+        board.setSquadId(squadIdFor(board.getSquadId(), board.getTeam()));
         if (board.getIsPublic() == null) {
             board.setIsPublic(true);
         }
@@ -113,6 +130,26 @@ public class ActionPlanService {
         return boardRepository.findBySprintIdOrderByCreatedAtDesc(sprintId);
     }
 
+    /** Planos da squad, mais novos primeiro (limite {@value #MAX_LIST}). */
+    @Transactional(readOnly = true)
+    public List<ActionPlan> listBoardsBySquad(String squadId) {
+        return boardRepository.findBySquad(squadId, org.springframework.data.domain.PageRequest.of(0, MAX_LIST));
+    }
+
+    /**
+     * squadId do plano: o informado ou o "team", desde que seja o id de uma squad/projeto cadastrado (o controller já
+     * conferiu o acesso do criador). Texto livre ("Squad Geral") não vira squad.
+     */
+    String squadIdFor(String explicitSquadId, String team) {
+        if (audienceService == null) return null;
+        for (String candidate : new String[]{explicitSquadId, team}) {
+            if (candidate == null || candidate.isBlank()) continue;
+            String id = candidate.trim();
+            if (audienceService.squadNames(List.of(id)).containsKey(id)) return id;
+        }
+        return null;
+    }
+
     @Transactional(readOnly = true)
     public ActionPlan getBoardById(UUID id) {
         return boardRepository.findById(id)
@@ -148,7 +185,9 @@ public class ActionPlanService {
         if (clean.getOrder() == null) {
             clean.setOrder(listTasks(boardId).size());
         }
-        return taskRepository.save(clean);
+        ActionPlanTask saved = taskRepository.save(clean);
+        notifyWho(saved, null, authorId);
+        return saved;
     }
 
     @Transactional(readOnly = true)
@@ -161,8 +200,15 @@ public class ActionPlanService {
     /** Edição parcial: só os campos enviados (não nulos) mudam; texto vazio limpa o campo. */
     @Transactional
     public ActionPlanTask updateTask(UUID taskId, ActionPlanTask updated) {
+        return updateTask(taskId, updated, null);
+    }
+
+    /** Como {@link #updateTask(UUID, ActionPlanTask)}; {@code actorId} = quem edita (não é notificado de si mesmo). */
+    @Transactional
+    public ActionPlanTask updateTask(UUID taskId, ActionPlanTask updated, String actorId) {
         ActionPlanTask existing = taskRepository.findById(taskId)
                 .orElseThrow(() -> new IllegalArgumentException("Task not found with id: " + taskId));
+        String previousWho = existing.getWho();
 
         if (updated.getWhat() != null) {
             String what = text(updated.getWhat(), MAX_TEXT, "O quê");
@@ -180,7 +226,22 @@ public class ActionPlanService {
         if (updated.getStatus() != null) existing.setStatus(status(updated.getStatus()));
         if (updated.getOrder() != null) existing.setOrder(updated.getOrder());
 
-        return taskRepository.save(existing);
+        ActionPlanTask saved = taskRepository.save(existing);
+        notifyWho(saved, previousWho, actorId);
+        return saved;
+    }
+
+    /** Responsável ("quem") novo ou trocado: notifica a pessoa, se der para achá-la na squad do plano. */
+    private void notifyWho(ActionPlanTask task, String previousWho, String actorId) {
+        String who = task.getWho();
+        if (notificationTriggers == null || who == null || who.isBlank()
+                || who.trim().equalsIgnoreCase(previousWho == null ? "" : previousWho.trim())) {
+            return;
+        }
+        ActionPlan plan = boardRepository.findById(task.getBoardId()).orElse(null);
+        if (plan == null || plan.getSquadId() == null) return;
+        notificationTriggers.actionPlanTaskAssigned(plan.getId().toString(), plan.getTitle(), plan.getSquadId(),
+                String.valueOf(task.getId()), task.getWhat(), who, actorId);
     }
 
     @Transactional
