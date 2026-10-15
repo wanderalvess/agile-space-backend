@@ -2,6 +2,7 @@ package com.agilespace.backend.repository;
 
 import com.agilespace.backend.domain.ProjectMemberRole;
 import org.springframework.data.jpa.repository.JpaRepository;
+import java.util.Collection;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -27,4 +28,10 @@ public interface ProjectMemberRoleRepository extends JpaRepository<ProjectMember
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("DELETE FROM ProjectMemberRole pmr WHERE pmr.projectId = :projectId")
     void deleteByProjectId(@Param("projectId") String projectId);
+
+    @Query("SELECT pmr FROM ProjectMemberRole pmr WHERE UPPER(pmr.projectId) IN :ids")
+    List<ProjectMemberRole> findByProjectIdsUpper(@Param("ids") Collection<String> upperProjectIds);
+
+    @Query("SELECT pmr FROM ProjectMemberRole pmr WHERE UPPER(pmr.roleKey) IN :keys")
+    List<ProjectMemberRole> findByRoleKeysUpper(@Param("keys") Collection<String> upperRoleKeys);
 }
