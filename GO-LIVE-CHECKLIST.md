@@ -138,8 +138,8 @@ Não coberto: Showcase (criação), Brainstorming pela interface, sprint-planner
 - ⬜ Acesso cruzado: usuário de um squad não lê dados de outro squad.
 - ⬜ API Key: criar via admin, usar em `/api/v1/**` com `X-Api-Key`.
 - ⬜ Upload/evidência de Showcase (proxy de anexos do Jira).
-- ⬜ Reiniciar o stack (`docker compose restart`) e confirmar que sessões e dados persistem.
-- ⬜ Teste de carga leve (algumas dezenas de usuários na sala) observando CPU/RAM da VM.
+- ✅ Reiniciar o stack (`docker compose restart`) e confirmar que sessões e dados persistem. **Feito em 2026-10-15:** contagens de usuários, projetos, salas, quadros e migrations iguais antes e depois; os 4 containers voltaram saudáveis em ~50 s; `APP_JWT_SECRET` é fixo no `.env` (64 caracteres, não é o padrão de dev), então as sessões continuam valendo.
+- 🟡 Teste de carga leve (algumas dezenas de usuários na sala) observando CPU/RAM da VM. **Parcial em 2026-10-15, sem login:** 40 usuários virtuais por 60 s nas páginas (25 req/s) + API pública (Jolt e configuração): p50 ~90 ms, p95 ~135 ms; pico de CPU 16% (frontend), 6% (backend), load < 1,4 em 2 núcleos, RAM estável (backend ~355 MB de 1 GB). As falhas vistas foram da rede de quem disparou (o próprio Google ficou lento junto), não da VM (sem erro nos logs). **Falta:** sala de Poker/Retro com dezenas de pessoas logadas (WebSocket), que precisa de contas de teste; de um só IP a API para em 300 req/min pelo limitador.
 
 ---
 
