@@ -1,7 +1,8 @@
 package com.agilespace.backend.controller;
 
-import com.agilespace.backend.domain.GlobalAnnouncement;
+import com.agilespace.backend.dto.AnnouncementDto;
 import com.agilespace.backend.service.AdminService;
+import com.agilespace.backend.service.AnnouncementService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -25,6 +26,7 @@ public class PublicController {
     );
 
     private final AdminService adminService;
+    private final AnnouncementService announcementService;
 
     @GetMapping("/system-config")
     public ResponseEntity<Map<String, String>> getSystemConfig() {
@@ -38,8 +40,9 @@ public class PublicController {
         return ResponseEntity.ok(config);
     }
 
+    /** Antes do login: só avisos para todos (audienceType=ALL) e vigentes. */
     @GetMapping("/announcements")
-    public ResponseEntity<List<GlobalAnnouncement>> getAnnouncements() {
-        return ResponseEntity.ok(adminService.getAnnouncements());
+    public ResponseEntity<List<AnnouncementDto>> getAnnouncements() {
+        return ResponseEntity.ok(announcementService.publicActive());
     }
 }

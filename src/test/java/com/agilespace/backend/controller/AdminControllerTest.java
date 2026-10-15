@@ -1,8 +1,10 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.AuditLog;
-import com.agilespace.backend.domain.GlobalAnnouncement;
+import com.agilespace.backend.dto.AnnouncementDto;
+import com.agilespace.backend.dto.AnnouncementRequest;
 import com.agilespace.backend.service.AdminService;
+import com.agilespace.backend.service.AnnouncementService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -23,6 +25,9 @@ public class AdminControllerTest {
 
     @Mock
     private AdminService service;
+
+    @Mock
+    private AnnouncementService announcementService;
 
     @InjectMocks
     private AdminController controller;
@@ -55,16 +60,32 @@ public class AdminControllerTest {
     }
 
     @Test
-    public void testCreateAnnouncement() {
-        GlobalAnnouncement ann = new GlobalAnnouncement();
-        ann.setCreatedBy("forjado");
-        when(service.createAnnouncement(ann)).thenReturn(ann);
+    public void testCreateAnnouncementUsesAuthorFromToken() {
+        AnnouncementRequest body = new AnnouncementRequest("t", "c", "INFO", "ALL", List.of(), List.of(), null, null, null);
+        AnnouncementDto dto = new AnnouncementDto("a1", "t", "c", "INFO", "ALL", List.of(), List.of(),
+                java.time.Instant.now(), null, null, "adm@x.com", "Adm", java.time.Instant.now(), false);
         jakarta.servlet.http.HttpServletRequest req = mock(jakarta.servlet.http.HttpServletRequest.class);
         when(req.getAttribute(com.agilespace.backend.security.JwtAuthenticationFilter.ATTR_USER_EMAIL)).thenReturn("adm@x.com");
+        when(req.getAttribute(com.agilespace.backend.security.JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("adm");
+        when(announcementService.create(body, "adm@x.com", "adm")).thenReturn(dto);
 
-        ResponseEntity<GlobalAnnouncement> response = controller.createAnnouncement(ann, req);
+        ResponseEntity<AnnouncementDto> response = controller.createAnnouncement(body, req);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertEquals("adm@x.com", ann.getCreatedBy());
+        assertEquals(dto, response.getBody());
+    }
+
+    @Test
+    public void testUpdateAndDeleteAnnouncement() {
+        AnnouncementRequest body = new AnnouncementRequest("t", "c", "IMPORTANT", "ROLES", List.of(), List.of("AGILE_MASTER"), null, null, null);
+        jakarta.servlet.http.HttpServletRequest req = mock(jakarta.servlet.http.HttpServletRequest.class);
+        when(req.getAttribute(com.agilespace.backend.security.JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("adm");
+
+        assertEquals(HttpStatus.OK, controller.updateAnnouncement("a1", body, req).getStatusCode());
+        verify(announcementService).update("a1", body, "adm");
+        assertEquals(HttpStatus.NO_CONTENT, controller.deleteAnnouncement("a1").getStatusCode());
+        verify(announcementService).delete("a1");
+        controller.getAnnouncements();
+        verify(announcementService).adminList();
     }
 }

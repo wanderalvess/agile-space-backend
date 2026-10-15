@@ -14,7 +14,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.*;
 
 /**
@@ -76,7 +75,7 @@ public class NotificationService {
         Notification n = notificationRepository.findByIdAndUserId(notificationId, userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Notificação não encontrada."));
         if (n.getReadAt() == null) {
-            n.setReadAt(now());
+            n.setReadAt(ServerTime.now());
             notificationRepository.save(n);
         }
         signalService.signal(userId, UserSignalService.UNREAD);
@@ -86,7 +85,7 @@ public class NotificationService {
     @Transactional
     public void markAllRead(String userId, String category) {
         requireUser(userId);
-        notificationRepository.markAllRead(userId, kindsOf(category, true), now());
+        notificationRepository.markAllRead(userId, kindsOf(category, true), ServerTime.now());
         signalService.signal(userId, UserSignalService.UNREAD);
     }
 
@@ -112,7 +111,7 @@ public class NotificationService {
                 return Set.of();
             }
         }
-        LocalDateTime now = now();
+        LocalDateTime now = ServerTime.now();
         List<Notification> rows = new ArrayList<>(targets.size());
         for (String userId : targets) {
             rows.add(Notification.builder()
@@ -149,12 +148,9 @@ public class NotificationService {
     private static NotificationDto toDto(Notification n, User actor) {
         return new NotificationDto(n.getId(), n.getKind(), n.getTitle(), n.getText(), n.getLink(),
                 n.getActorId(), actor != null ? actor.getName() : null, null, n.getSquadId(),
-                toInstant(n.getCreatedAt()), toInstant(n.getReadAt()));
+                ServerTime.toInstant(n.getCreatedAt()), ServerTime.toInstant(n.getReadAt()));
     }
 
-    private static java.time.Instant toInstant(LocalDateTime t) {
-        return t == null ? null : t.toInstant(ZoneOffset.UTC);
-    }
 
     static String truncate(String value, int max) {
         if (value == null) return null;
@@ -167,8 +163,4 @@ public class NotificationService {
         }
     }
 
-    /** Mesmo referencial das demais datas do servidor (LocalDateTime da JVM, UTC em produção; ver JacksonUtcConfig). */
-    private static LocalDateTime now() {
-        return LocalDateTime.now();
-    }
 }

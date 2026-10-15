@@ -1,11 +1,13 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.AuditLog;
-import com.agilespace.backend.domain.GlobalAnnouncement;
 import com.agilespace.backend.domain.PasswordResetRequest;
+import com.agilespace.backend.dto.AnnouncementDto;
+import com.agilespace.backend.dto.AnnouncementRequest;
 import com.agilespace.backend.dto.UnifiedSessionDto;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.AdminService;
+import com.agilespace.backend.service.AnnouncementService;
 import com.agilespace.backend.service.PasswordResetService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,6 +33,9 @@ public class AdminController {
     private PasswordResetService passwordResetService;
 
     @Autowired
+    private AnnouncementService announcementService;
+
+    @Autowired
     private UserRepository userRepository;
 
     @GetMapping("/stats")
@@ -54,24 +59,36 @@ public class AdminController {
     }
 
     @GetMapping("/announcements")
-    public ResponseEntity<List<GlobalAnnouncement>> getAnnouncements() {
-        return ResponseEntity.ok(service.getAnnouncements());
+    public ResponseEntity<List<AnnouncementDto>> getAnnouncements() {
+        return ResponseEntity.ok(announcementService.adminList());
     }
 
     @PostMapping("/announcements")
-    public ResponseEntity<GlobalAnnouncement> createAnnouncement(@RequestBody GlobalAnnouncement announcement,
-                                                                 HttpServletRequest request) {
+    public ResponseEntity<AnnouncementDto> createAnnouncement(@RequestBody AnnouncementRequest announcement,
+                                                              HttpServletRequest request) {
         // Autoria vem do token, nunca do corpo.
-        String email = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_EMAIL);
-        String author = email != null && !email.isBlank() ? email : (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
-        announcement.setCreatedBy(author != null ? author : "ADMIN");
-        return ResponseEntity.ok(service.createAnnouncement(announcement));
+        return ResponseEntity.ok(announcementService.create(announcement, author(request),
+                (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)));
+    }
+
+    @PutMapping("/announcements/{id}")
+    public ResponseEntity<AnnouncementDto> updateAnnouncement(@PathVariable String id, @RequestBody AnnouncementRequest announcement,
+                                                              HttpServletRequest request) {
+        return ResponseEntity.ok(announcementService.update(id, announcement,
+                (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)));
     }
 
     @DeleteMapping("/announcements/{id}")
     public ResponseEntity<Void> deleteAnnouncement(@PathVariable String id) {
-        service.deleteAnnouncement(id);
+        announcementService.delete(id);
         return ResponseEntity.noContent().build();
+    }
+
+    /** E-mail do token (ou userId, sem e-mail): quem publicou, nunca o que veio no corpo. */
+    private static String author(HttpServletRequest request) {
+        String email = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_EMAIL);
+        String author = email != null && !email.isBlank() ? email : (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        return author != null ? author : "ADMIN";
     }
 
     @GetMapping("/audit-logs")

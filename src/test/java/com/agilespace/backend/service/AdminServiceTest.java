@@ -1,10 +1,8 @@
 package com.agilespace.backend.service;
 
 import com.agilespace.backend.domain.AuditLog;
-import com.agilespace.backend.domain.GlobalAnnouncement;
 import com.agilespace.backend.domain.SystemConfig;
 import com.agilespace.backend.repository.AuditLogRepository;
-import com.agilespace.backend.repository.GlobalAnnouncementRepository;
 import com.agilespace.backend.repository.SystemConfigRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -33,9 +31,6 @@ class AdminServiceTest {
 
     @Mock
     private SystemConfigRepository configRepository;
-
-    @Mock
-    private GlobalAnnouncementRepository announcementRepository;
 
     @Mock
     private AuditLogRepository auditLogRepository;
@@ -79,64 +74,6 @@ class AdminServiceTest {
             service.setConfig("maintenance_mode", "true");
 
             verify(configRepository).save(any(SystemConfig.class));
-        }
-    }
-
-    @Nested
-    @DisplayName("Comunicados Globais (Announcements)")
-    class AnnouncementTests {
-
-        @Test
-        @DisplayName("Deve listar comunicados ordenados pela data de criação decrescente")
-        void shouldGetAnnouncements() {
-            when(announcementRepository.findByOrderByCreatedAtDesc())
-                    .thenReturn(Collections.singletonList(new GlobalAnnouncement()));
-
-            List<GlobalAnnouncement> list = service.getAnnouncements();
-
-            assertEquals(1, list.size());
-            verify(announcementRepository).findByOrderByCreatedAtDesc();
-        }
-
-        @Test
-        @DisplayName("Deve criar comunicado gerando ID e data de publicação")
-        void shouldCreateAnnouncementWithGeneratedMetadata() {
-            GlobalAnnouncement announcement = GlobalAnnouncement.builder()
-                    .title("Manutenção Programada")
-                    .content("Atualização de segurança às 22h")
-                    .createdBy("admin")
-                    .build();
-
-            when(announcementRepository.save(any(GlobalAnnouncement.class))).thenAnswer(i -> i.getArgument(0));
-
-            GlobalAnnouncement saved = service.createAnnouncement(announcement);
-
-            assertNotNull(saved.getId());
-            assertNotNull(saved.getCreatedAt());
-            assertEquals("Manutenção Programada", saved.getTitle());
-            verify(announcementRepository).save(announcement);
-        }
-
-        @Test
-        @DisplayName("Comunicado sem título, conteúdo ou autor responde 400 e nada é salvo")
-        void shouldRejectInvalidAnnouncement() {
-            for (GlobalAnnouncement a : List.of(
-                    GlobalAnnouncement.builder().content("c").createdBy("a").build(),
-                    GlobalAnnouncement.builder().title("t").content(" ").createdBy("a").build(),
-                    GlobalAnnouncement.builder().title("t").content("c").build())) {
-                org.springframework.web.server.ResponseStatusException ex = assertThrows(
-                        org.springframework.web.server.ResponseStatusException.class, () -> service.createAnnouncement(a));
-                assertEquals(org.springframework.http.HttpStatus.BAD_REQUEST, ex.getStatusCode());
-            }
-            verify(announcementRepository, never()).save(any());
-        }
-
-        @Test
-        @DisplayName("Deve excluir comunicado pelo identificador")
-        void shouldDeleteAnnouncement() {
-            service.deleteAnnouncement("ann-123");
-
-            verify(announcementRepository).deleteById("ann-123");
         }
     }
 

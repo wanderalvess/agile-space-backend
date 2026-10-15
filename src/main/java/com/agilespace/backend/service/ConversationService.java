@@ -19,7 +19,6 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -91,7 +90,7 @@ public class ConversationService {
             if (!shareSquad(me, role, otherUserId)) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só é possível conversar com pessoas das suas squads.");
             }
-            LocalDateTime now = now();
+            LocalDateTime now = ServerTime.now();
             try {
                 existing = conversationRepository.saveAndFlush(Conversation.builder()
                         .id(UUID.randomUUID().toString()).userAId(a).userBId(b)
@@ -112,7 +111,7 @@ public class ConversationService {
         int size = limit == null || limit <= 0 ? 50 : Math.min(limit, MAX_LIMIT);
         List<DirectMessage> page = before == null
                 ? messageRepository.findLatest(c.getId(), PageRequest.of(0, size))
-                : messageRepository.findLatestBefore(c.getId(), LocalDateTime.ofInstant(before, ZoneOffset.UTC), PageRequest.of(0, size));
+                : messageRepository.findLatestBefore(c.getId(), ServerTime.toLocal(before), PageRequest.of(0, size));
         List<MessageDto> out = new ArrayList<>(page.stream().map(ConversationService::toDto).toList());
         Collections.reverse(out); // contrato: createdAt asc
         return out;
@@ -125,7 +124,7 @@ public class ConversationService {
         if (text.isEmpty() || text.length() > MAX_BODY) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A mensagem deve ter de 1 a " + MAX_BODY + " caracteres.");
         }
-        LocalDateTime now = now();
+        LocalDateTime now = ServerTime.now();
         DirectMessage saved = messageRepository.save(DirectMessage.builder()
                 .id(UUID.randomUUID().toString()).conversationId(c.getId()).senderId(me).body(text).createdAt(now).build());
         c.setUpdatedAt(now);
@@ -138,7 +137,7 @@ public class ConversationService {
     @Transactional
     public void markRead(String me, String conversationId) {
         Conversation c = requireParticipant(me, conversationId);
-        c.markReadBy(me, now());
+        c.markReadBy(me, ServerTime.now());
         conversationRepository.save(c);
         signalService.signal(me, UserSignalService.UNREAD);
     }
@@ -202,7 +201,7 @@ public class ConversationService {
     private static ConversationDto toDto(Conversation c, String me, User other, DirectMessage last, long unread) {
         String otherId = c.otherParticipant(me);
         UserRefDto ref = other != null ? userRef(other) : new UserRefDto(otherId, "Usuário removido", null);
-        return new ConversationDto(c.getId(), ref, last == null ? null : toDto(last), unread, toInstant(c.getUpdatedAt()));
+        return new ConversationDto(c.getId(), ref, last == null ? null : toDto(last), unread, ServerTime.toInstant(c.getUpdatedAt()));
     }
 
     static UserRefDto userRef(User u) {
@@ -210,15 +209,8 @@ public class ConversationService {
     }
 
     private static MessageDto toDto(DirectMessage m) {
-        return new MessageDto(m.getId(), m.getConversationId(), m.getSenderId(), m.getBody(), toInstant(m.getCreatedAt()));
+        return new MessageDto(m.getId(), m.getConversationId(), m.getSenderId(), m.getBody(), ServerTime.toInstant(m.getCreatedAt()));
     }
 
-    static Instant toInstant(LocalDateTime t) {
-        return t == null ? null : t.toInstant(ZoneOffset.UTC);
-    }
 
-    /** Mesmo referencial das demais datas do servidor (LocalDateTime da JVM, UTC em produção; ver JacksonUtcConfig). */
-    private static LocalDateTime now() {
-        return LocalDateTime.now();
-    }
 }

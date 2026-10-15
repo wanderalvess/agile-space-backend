@@ -1,7 +1,6 @@
 package com.agilespace.backend.service;
 
 import com.agilespace.backend.domain.AuditLog;
-import com.agilespace.backend.domain.GlobalAnnouncement;
 import com.agilespace.backend.domain.SystemConfig;
 import com.agilespace.backend.repository.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,9 +20,6 @@ public class AdminService {
 
     @Autowired
     private SystemConfigRepository configRepository;
-
-    @Autowired
-    private GlobalAnnouncementRepository announcementRepository;
 
     @Autowired
     private AuditLogRepository auditLogRepository;
@@ -48,33 +44,7 @@ public class AdminService {
         configRepository.save(config);
     }
 
-    // --- Announcements ---
-    @Transactional(readOnly = true)
-    public List<GlobalAnnouncement> getAnnouncements() {
-        return announcementRepository.findByOrderByCreatedAtDesc();
-    }
-
-    @Transactional
-    public GlobalAnnouncement createAnnouncement(GlobalAnnouncement announcement) {
-        if (announcement.getTitle() == null || announcement.getTitle().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "O título do comunicado é obrigatório.");
-        }
-        if (announcement.getContent() == null || announcement.getContent().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "O conteúdo do comunicado é obrigatório.");
-        }
-        if (announcement.getCreatedBy() == null || announcement.getCreatedBy().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Autor do comunicado não identificado.");
-        }
-        // id sempre novo: um id vindo do cliente sobrescreveria um comunicado existente.
-        announcement.setId(UUID.randomUUID().toString());
-        announcement.setCreatedAt(LocalDateTime.now());
-        return announcementRepository.save(announcement);
-    }
-
-    @Transactional
-    public void deleteAnnouncement(String id) {
-        announcementRepository.deleteById(id);
-    }
+    // Avisos (announcements): AnnouncementService.
 
     // --- Audit Logs ---
     @Transactional(readOnly = true)

@@ -1,7 +1,8 @@
 package com.agilespace.backend.controller;
 
-import com.agilespace.backend.domain.GlobalAnnouncement;
+import com.agilespace.backend.dto.AnnouncementDto;
 import com.agilespace.backend.service.AdminService;
+import com.agilespace.backend.service.AnnouncementService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -21,6 +22,9 @@ public class PublicControllerTest {
 
     @Mock
     private AdminService adminService;
+
+    @Mock
+    private AnnouncementService announcementService;
 
     @InjectMocks
     private PublicController controller;
@@ -67,20 +71,15 @@ public class PublicControllerTest {
     }
 
     @Test
-    public void testGetAnnouncementsDelegates() {
-        GlobalAnnouncement announcement = new GlobalAnnouncement();
-        when(adminService.getAnnouncements()).thenReturn(List.of(announcement));
+    public void testGetAnnouncementsUsesPublicFilter() {
+        AnnouncementDto dto = new AnnouncementDto("a1", "t", "c", "INFO", "ALL", List.of(), List.of(),
+                java.time.Instant.now(), null, null, "adm@x.com", "Adm", java.time.Instant.now(), false);
+        when(announcementService.publicActive()).thenReturn(List.of(dto));
 
-        ResponseEntity<List<GlobalAnnouncement>> response = controller.getAnnouncements();
+        ResponseEntity<List<AnnouncementDto>> response = controller.getAnnouncements();
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals(1, response.getBody().size());
-    }
-
-    @Test
-    public void testGetAnnouncementsEmpty() {
-        when(adminService.getAnnouncements()).thenReturn(List.of());
-
-        assertTrue(controller.getAnnouncements().getBody().isEmpty());
+        verifyNoInteractions(adminService);
     }
 }
