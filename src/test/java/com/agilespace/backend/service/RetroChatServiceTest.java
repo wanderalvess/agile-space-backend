@@ -279,4 +279,68 @@ class RetroChatServiceTest {
         assertStatus(HttpStatus.FORBIDDEN, () -> service.deleteChatMessage(BOARD, "m1", "intruso"));
         verify(chatMessageRepository, never()).delete(any(RetroChatMessage.class));
     }
+
+    private RetroParticipant withRole(String id, String teamRole, String globalRole) {
+        RetroParticipant p = new RetroParticipant();
+        p.setId(id);
+        p.setNickname(id);
+        p.setRole(teamRole);
+        p.setGlobalRole(globalRole);
+        return p;
+    }
+
+    @Test
+    @DisplayName("Canal role-QA: participante de outra função não lê nem posta; o da função sim; criador modera")
+    void roleChannelRestrictedToRole() {
+        when(participantRepository.findByBoardIdAndId(BOARD, "dev1")).thenReturn(Optional.of(withRole("dev1", "DEV", null)));
+        when(participantRepository.findByBoardIdAndId(BOARD, "qa1")).thenReturn(Optional.of(withRole("qa1", "QA", null)));
+        when(chatMessageRepository.save(any(RetroChatMessage.class))).thenAnswer(i -> i.getArgument(0));
+
+        assertStatus(HttpStatus.FORBIDDEN, () -> service.saveChatMessage(BOARD, msg("role-QA", "x"), "dev1"));
+        assertStatus(HttpStatus.FORBIDDEN, () -> service.getChatMessages(BOARD, "role-QA", "dev1"));
+        // participante sem função mapeável (ana/bia do setUp) também fica de fora
+        assertStatus(HttpStatus.FORBIDDEN, () -> service.getChatMessages(BOARD, "role-Developer", "ana"));
+
+        assertEquals("qa1", service.saveChatMessage(BOARD, msg("role-QA", "x"), "qa1").getSenderId());
+        service.getChatMessages(BOARD, "role-QA", "qa1");
+        service.getChatMessages(BOARD, "role-QA", "creator");
+    }
+
+    @Test
+    @DisplayName("Categoria da função segue a regra do frontend (perfil global tem prioridade)")
+    void roleCategoryMatchesFrontend() {
+        assertEquals("Developer", RetroChatCategory.of(withRole("a", "DEV", null)));
+        assertEquals("Management", RetroChatCategory.of(withRole("a", "PO", null)));
+        assertEquals("Management", RetroChatCategory.of(withRole("a", "OUTRO", "Tech Lead")));
+        assertEquals("UX", RetroChatCategory.of(withRole("a", "DEV", "UX")));
+        assertNull(RetroChatCategory.of(withRole("a", "OUTRO", null)));
+        assertNull(RetroChatCategory.of(withRole("a", null, null)));
+    }
+
+    @Test
+    @DisplayName("Evento de role-QA vai só ao criador e aos participantes de QA")
+    void roleChannelEventOnlyToRoleMembers() {
+        RetroParticipant qa1 = withRole("qa1", "QA", null);
+        RetroParticipant dev1 = withRole("dev1", "DEV", null);
+        when(participantRepository.findByBoardIdAndId(BOARD, "qa1")).thenReturn(Optional.of(qa1));
+        when(participantRepository.findByBoardId(BOARD)).thenReturn(List.of(qa1, dev1, withRole("qa2", "QA", null)));
+        when(chatMessageRepository.save(any(RetroChatMessage.class))).thenAnswer(i -> i.getArgument(0));
+
+        RetroChatMessage saved = service.saveChatMessage(BOARD, msg("role-QA", "segredo"), "qa1");
+
+        verify(webSocketHandler).broadcastEventToUsers(BOARD, "CHAT_MESSAGE_SAVED", saved,
+                java.util.Set.of("creator", "qa1", "qa2"));
+        verify(webSocketHandler, never()).broadcastEvent(eq(BOARD), eq("CHAT_MESSAGE_SAVED"), any());
+    }
+
+    @Test
+    @DisplayName("Handshake do WebSocket: só criador, participante ou ADMIN; autenticado qualquer não entra")
+    void handshakeOnlyMembers() {
+        assertTrue(service.canAccessBoard(BOARD, new RetroCaller("creator", "USER")));
+        assertTrue(service.canAccessBoard(BOARD, new RetroCaller("ana", "USER")));
+        assertTrue(service.canAccessBoard(BOARD, new RetroCaller("admin", "ADMIN")));
+        assertFalse(service.canAccessBoard(BOARD, new RetroCaller("intruso", "USER")));
+        assertFalse(service.canAccessBoard("nope", new RetroCaller("ana", "USER")));
+        assertFalse(service.canAccessBoard(BOARD, null));
+    }
 }

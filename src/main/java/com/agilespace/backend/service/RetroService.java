@@ -176,10 +176,14 @@ public class RetroService {
         }
     }
 
-    /** Usado no handshake do WebSocket: o board existe e o usuário pode lê-lo. */
+    /**
+     * Usado no handshake do WebSocket: o board existe e o usuário é criador, participante ou ADMIN. Diferente
+     * de {@link #canRead} (REST), o canal em tempo real carrega o chat e eventos do quadro, então só quem já
+     * entrou (POST /participants) o recebe; o link continua abrindo a página e a entrada é pelo join REST.
+     */
     @Transactional(readOnly = true)
     public boolean canAccessBoard(String boardId, RetroCaller caller) {
-        return boardRepository.findById(boardId).map(b -> canRead(b, caller)).orElse(false);
+        return boardRepository.findById(boardId).map(b -> isMember(b, caller)).orElse(false);
     }
 
     private RetroBoard requireBoard(String boardId) {
@@ -1096,6 +1100,18 @@ public class RetroService {
             users.add(callerId);
             if (peer != null) users.add(peer);
             publishToUsers(boardId, eventType, payload, users);
+        } else if (channelId != null && channelId.startsWith("role-")) {
+            // Canal por função: só criador (modera) e participantes daquela função recebem o texto.
+            String category = channelId.substring("role-".length());
+            Set<String> users = new java.util.HashSet<>();
+            if (board.getCreatorId() != null) users.add(board.getCreatorId());
+            List<RetroParticipant> all = participantRepository.findByBoardId(boardId);
+            if (all != null) {
+                for (RetroParticipant p : all) {
+                    if (category.equals(RetroChatCategory.of(p))) users.add(p.getId());
+                }
+            }
+            publishToUsers(boardId, eventType, payload, users);
         } else {
             publish(boardId, eventType, payload);
         }
@@ -1120,6 +1136,9 @@ public class RetroService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Canal inválido.");
         }
         if (CHAT_PUBLIC_CHANNEL.matcher(channelId).matches()) {
+            if (channelId.startsWith("role-")) {
+                requireRoleChannelAccess(board, channelId.substring("role-".length()), callerId);
+            }
             return;
         }
         if (channelId.startsWith("dm_")) {
@@ -1129,5 +1148,15 @@ public class RetroService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Sem acesso a esta conversa privada.");
         }
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Canal inválido.");
+    }
+
+    /** Canal role-X: o criador (modera) ou o participante cuja função é X. */
+    private void requireRoleChannelAccess(RetroBoard board, String category, String callerId) {
+        if (callerId != null && callerId.equals(board.getCreatorId())) return;
+        Optional<RetroParticipant> me = callerId == null ? Optional.empty()
+                : participantRepository.findByBoardIdAndId(board.getId(), callerId);
+        if (me == null || me.isEmpty() || !category.equals(RetroChatCategory.of(me.get()))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Sem acesso a este canal.");
+        }
     }
 }
