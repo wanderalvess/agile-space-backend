@@ -10,6 +10,7 @@ import com.agilespace.backend.websocket.HealthCheckWebSocketHandler;
 import com.agilespace.backend.websocket.PokerWebSocketHandler;
 import com.agilespace.backend.websocket.RetroWebSocketHandler;
 import com.agilespace.backend.websocket.ShowcaseWebSocketHandler;
+import com.agilespace.backend.websocket.UserWebSocketHandler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
@@ -29,6 +30,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
     private final HealthCheckWebSocketHandler healthCheckWebSocketHandler;
     private final BrainstormingWebSocketHandler brainstormingWebSocketHandler;
     private final ShowcaseWebSocketHandler showcaseWebSocketHandler;
+    private final UserWebSocketHandler userWebSocketHandler;
     private final JwtHandshakeInterceptor jwtHandshakeInterceptor;
     private final RetroBoardHandshakeInterceptor retroBoardHandshakeInterceptor;
     private final HealthCheckService healthCheckService;
@@ -56,6 +58,10 @@ public class WebSocketConfig implements WebSocketConfigurer {
                 .addInterceptors(jwtHandshakeInterceptor, new BoardExistsHandshakeInterceptor(brainstormingService::boardExists))
                 .setAllowedOrigins(origins);
         registry.addHandler(showcaseWebSocketHandler, "/ws/showcase/*")
+                .addInterceptors(jwtHandshakeInterceptor)
+                .setAllowedOrigins(origins);
+        // Canal do usuário (sinais de notificação/mensagem/aviso). Sem sala: o escopo é o userId do próprio JWT.
+        registry.addHandler(userWebSocketHandler, "/ws/user")
                 .addInterceptors(jwtHandshakeInterceptor)
                 .setAllowedOrigins(origins);
     }
