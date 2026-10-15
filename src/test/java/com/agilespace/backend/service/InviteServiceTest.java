@@ -125,11 +125,64 @@ class InviteServiceTest {
         com.agilespace.backend.domain.ProjectConfig project = new com.agilespace.backend.domain.ProjectConfig();
         project.setName("Time da Ana");
         when(projectConfigRepository.findById(invite.getSquadId())).thenReturn(Optional.of(project));
-        assertEquals("Time da Ana", service.getForDisplay("t1").getSquadName());
+        assertEquals("Time da Ana", service.getForDisplay("t1", user()).getSquadName());
 
         Invite semProjeto = pending(null, LocalDateTime.now().plusDays(1));
         when(inviteRepository.findByToken("t2")).thenReturn(Optional.of(semProjeto));
         when(projectConfigRepository.findById(semProjeto.getSquadId())).thenReturn(Optional.empty());
-        assertNull(service.getForDisplay("t2").getSquadName());
+        assertNull(service.getForDisplay("t2", user()).getSquadName());
+    }
+
+    @Test
+    @DisplayName("Convite não concede liderança: Agile Master/Tech Lead (qualquer grafia) é rejeitado na criação")
+    void createInviteRejectsLeadershipRoles() {
+        for (String role : new String[] {"Agile Master", "tech lead", "AGILE_MASTER", "Scrum-Master", "Product Owner", "People Lead", "Tribe Lead", "Agile  Coach"}) {
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                    () -> service.createInvite("SQ", role, null, "lead"), role);
+            assertEquals(org.springframework.http.HttpStatus.BAD_REQUEST, ex.getStatusCode());
+        }
+        verify(inviteRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Convite de liderança antigo (ainda pendente) não é aceito")
+    void acceptRejectsLegacyLeadershipInvite() {
+        Invite legacy = pending(null, LocalDateTime.now().plusDays(1));
+        legacy.setRoleName("Agile Master");
+        when(inviteRepository.findByTokenForUpdate("tok")).thenReturn(Optional.of(legacy));
+        assertThrows(ResponseStatusException.class, () -> service.acceptInvite("tok", user()));
+        verify(squadService, never()).saveMember(anyString(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("Convite com e-mail: outro logado (nem membro) recebe 404; destinatário e membro veem completo")
+    void displayHidesEmailBoundInviteFromStrangers() {
+        Invite invite = pending("ana@totvs.com.br", LocalDateTime.now().plusDays(1));
+        when(inviteRepository.findByToken("t")).thenReturn(Optional.of(invite));
+        lenient().when(projectMemberRoleRepository.findByProjectId("SQ")).thenReturn(java.util.List.of());
+        User stranger = User.builder().id("x").email("intruso@totvs.com.br").build();
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> service.getForDisplay("t", stranger));
+        assertEquals(org.springframework.http.HttpStatus.NOT_FOUND, ex.getStatusCode());
+        assertThrows(ResponseStatusException.class, () -> service.getForDisplay("t", null));
+
+        Invite seen = service.getForDisplay("t", user());
+        assertEquals("ana@totvs.com.br", seen.getEmail());
+        assertEquals("lead@totvs.com.br", seen.getInvitedBy());
+
+        User member = User.builder().id("m").email("m@totvs.com.br").squadId("SQ").build();
+        assertEquals("lead@totvs.com.br", service.getForDisplay("t", member).getInvitedBy());
+    }
+
+    @Test
+    @DisplayName("Convite de link aberto: estranho vê só o necessário (sem e-mail nem quem convidou)")
+    void displayOpenInviteIsSanitizedForStrangers() {
+        Invite invite = pending(null, LocalDateTime.now().plusDays(1));
+        when(inviteRepository.findByToken("t")).thenReturn(Optional.of(invite));
+        when(projectMemberRoleRepository.findByProjectId("SQ")).thenReturn(java.util.List.of());
+        Invite seen = service.getForDisplay("t", User.builder().id("x").email("x@totvs.com.br").build());
+        assertEquals("Developer", seen.getRoleName());
+        assertEquals("SQ", seen.getSquadId());
+        assertNull(seen.getInvitedBy());
+        assertNull(seen.getEmail());
     }
 }

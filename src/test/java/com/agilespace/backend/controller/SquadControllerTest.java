@@ -391,4 +391,39 @@ public class SquadControllerTest {
         assertEquals("DDWMISSI", caller.getSquadId());
         verify(userRepository).save(caller);
     }
+
+    private Squad squadWith(String mode, String ceremoniesJson) throws Exception {
+        Squad sq = new Squad();
+        sq.setCeremonyMode(mode);
+        if (ceremoniesJson != null) sq.setCeremonies(new com.fasterxml.jackson.databind.ObjectMapper().readTree(ceremoniesJson));
+        return sq;
+    }
+
+    @Test
+    void ceremonyConfigAcceptsContractValues() throws Exception {
+        SquadController.requireValidCeremonyConfig(squadWith(null, null));
+        SquadController.requireValidCeremonyConfig(squadWith("google_calendar", null));
+        SquadController.requireValidCeremonyConfig(squadWith("manual",
+                "[{\"id\":\"1\",\"title\":\"Daily\",\"daysOfWeek\":[\"MON\",\"FRI\"],\"startTime\":\"09:00\",\"durationMinutes\":15,\"meetLink\":\"https://meet.google.com/x\"}]"));
+    }
+
+    @Test
+    void ceremonyConfigRejectsUnknownModeAndBadStructure() throws Exception {
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+                () -> SquadController.requireValidCeremonyConfig(squadWith("zoom", null))).getStatusCode());
+        String[] bad = {
+                "{\"title\":\"x\"}",
+                "[\"texto\"]",
+                "[{\"title\":\"\",\"daysOfWeek\":[\"MON\"],\"startTime\":\"09:00\",\"durationMinutes\":15}]",
+                "[{\"title\":\"D\",\"daysOfWeek\":[],\"startTime\":\"09:00\",\"durationMinutes\":15}]",
+                "[{\"title\":\"D\",\"daysOfWeek\":[\"XXX\"],\"startTime\":\"09:00\",\"durationMinutes\":15}]",
+                "[{\"title\":\"D\",\"daysOfWeek\":[\"MON\"],\"startTime\":\"25:00\",\"durationMinutes\":15}]",
+                "[{\"title\":\"D\",\"daysOfWeek\":[\"MON\"],\"startTime\":\"09:00\",\"durationMinutes\":0}]",
+                "[{\"title\":\"D\",\"daysOfWeek\":[\"MON\"],\"startTime\":\"09:00\",\"durationMinutes\":99999}]",
+        };
+        for (String json : bad) {
+            assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+                    () -> SquadController.requireValidCeremonyConfig(squadWith("manual", json)), json).getStatusCode());
+        }
+    }
 }

@@ -79,6 +79,26 @@ public class OnboardingService {
     }
 
     /**
+     * Regra de identidade do "sou eu" (a mais conservadora que preserva o fluxo):
+     * 1. e-mail do usuário = e-mail da linha, ou conta do Jira do usuário = conta da linha → pode;
+     * 2. linha COM e-mail/conta diferente da do usuário → nunca (é outra pessoa; o caminho é o convite);
+     * 3. linha sem e-mail nem conta (só nome) → só se o nome completo normalizado for igual E o usuário já estiver
+     *    aprovado no projeto (já tem vínculo nele, ex.: aceitou convite). Nome sozinho não prova nada: User.name é editável.
+     */
+    static boolean identityAllowsClaim(ProjectMemberRole row, User user, List<ProjectMemberRole> projectRows) {
+        boolean rowHasEmail = row.getEmail() != null && !row.getEmail().isBlank();
+        boolean rowHasAccount = row.getJiraAccountId() != null && !row.getJiraAccountId().isBlank();
+        if (rowHasEmail && user.getEmail() != null && row.getEmail().trim().equalsIgnoreCase(user.getEmail().trim())) return true;
+        if (rowHasAccount && user.getJiraAccountId() != null && row.getJiraAccountId().trim().equals(user.getJiraAccountId().trim())) return true;
+        if (rowHasEmail) return false;
+        if (rowHasAccount) return false;
+        String rowName = normalize(row.getDisplayName());
+        if (rowName.isBlank() || !rowName.equals(normalize(user.getName()))) return false;
+        return projectRows != null && projectRows.stream()
+                .anyMatch(m -> user.getId() != null && user.getId().equals(m.getUserId()));
+    }
+
+    /**
      * Candidatos a "é você?": linhas do roster cujo nome bate com o nome da conta
      * logada e que ainda não pertencem a outra conta.
      */
@@ -99,6 +119,8 @@ public class OnboardingService {
                 // ser autovinculada, e oferecer um "sim, sou eu" que depois nega seria pior
                 // do que não oferecer.
                 .filter(r -> !r.isLeadership())
+                // Só oferece "sim, sou eu" quando o claim seria aceito (mesma regra de identidade).
+                .filter(r -> identityAllowsClaim(r, user, projectMemberRoleRepository.findByProjectId(r.getProjectId())))
                 .sorted(Comparator.comparing(ProjectMemberRole::getProjectId))
                 .limit(MAX_SUGGESTIONS)
                 .toList();
@@ -181,6 +203,15 @@ public class OnboardingService {
                     "Papel de liderança não pode ser autovinculado. Peça um link de convite a quem já lidera o time.");
         }
 
+        boolean alreadyMine = user.getId() != null && user.getId().equals(row.getUserId());
+        if (!alreadyMine && !identityAllowsClaim(row, user, projectMemberRoleRepository.findByProjectId(row.getProjectId()))) {
+            log.warn("Onboarding: claim negado — usuário {} não comprova identidade para a linha {} do projeto {}",
+                    user.getId(), row.getId(), row.getProjectId());
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Não foi possível confirmar que essa linha é você: o e-mail ou a conta do Jira não bate com o seu login. "
+                            + "Peça um link de convite a quem lidera o time.");
+        }
+
         row.setUserId(user.getId());
         projectMemberRoleRepository.save(row);
 
@@ -219,17 +250,18 @@ public class OnboardingService {
 
     private OnboardingRosterDto toDto(String projectId, List<ProjectMemberRole> members, int total, User user) {
         Optional<ProjectConfig> project = projectConfigRepository.findById(projectId);
+        List<ProjectMemberRole> projectRows = projectMemberRoleRepository.findByProjectId(projectId);
         return OnboardingRosterDto.builder()
                 .projectId(projectId)
                 .projectName(project.map(ProjectConfig::getName).orElse(projectId))
                 .segmentName(project.map(ProjectConfig::getSegmentName).orElse(""))
                 .tribeName(project.map(ProjectConfig::getTribeName).orElse(""))
                 .memberCount(total)
-                .members(members.stream().map(r -> toCandidate(r, user)).toList())
+                .members(members.stream().map(r -> toCandidate(r, user, projectRows)).toList())
                 .build();
     }
 
-    private OnboardingRosterDto.Candidate toCandidate(ProjectMemberRole r, User user) {
+    private OnboardingRosterDto.Candidate toCandidate(ProjectMemberRole r, User user, List<ProjectMemberRole> projectRows) {
         boolean claimedByMe = r.getUserId() != null && r.getUserId().equals(user.getId());
         boolean claimed = r.getUserId() != null && !r.getUserId().isBlank();
         return OnboardingRosterDto.Candidate.builder()
@@ -241,7 +273,7 @@ public class OnboardingService {
                 .leadership(r.isLeadership())
                 .claimed(claimed)
                 .claimedByMe(claimedByMe)
-                .claimable(!r.isLeadership() && (!claimed || claimedByMe))
+                .claimable(!r.isLeadership() && (!claimed || claimedByMe) && (claimedByMe || identityAllowsClaim(r, user, projectRows)))
                 .emailHint(maskEmail(r.getEmail()))
                 .build();
     }

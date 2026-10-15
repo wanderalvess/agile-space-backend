@@ -200,6 +200,7 @@ public class SquadController {
         if (owner != null && !owner.isBlank() && !owner.trim().equals(callerId(request)) && !isAdmin(request)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "O sincronismo agendado só pode usar o token do Jira de quem o ativa.");
         }
+        requireValidCeremonyConfig(squad);
         requireSafeCeremonyLinks(squad);
         squad.setId(squadId);
         return ResponseEntity.ok(squadService.saveSquad(squad));
@@ -322,6 +323,60 @@ public class SquadController {
         // O papel na equipe só muda por POST/PATCH /team/members (Agile Master/People Lead, validado e com auditoria).
         member.setRole(null);
         return ResponseEntity.ok(squadService.saveMember(squadId, jiraAccountId, member));
+    }
+
+    private static final java.util.Set<String> CEREMONY_MODES = java.util.Set.of("google_calendar", "manual");
+    private static final java.util.Set<String> CEREMONY_DAYS = java.util.Set.of("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN");
+    private static final java.util.regex.Pattern CEREMONY_TIME = java.util.regex.Pattern.compile("^([01]?\\d|2[0-3]):[0-5]\\d$");
+    private static final int MAX_CEREMONIES = 20;
+
+    /**
+     * Valida ceremonyMode e a estrutura de ceremonies contra o contrato do frontend (SquadConfig em types.ts /
+     * ceremony-schedule.ts). ceremonyMode ausente = não alterar (merge parcial). Modo "manual" exige cada cerimônia
+     * completa (título, dias MON..SUN, startTime HH:mm, duração 1..1440 min); nos demais modos só a forma é checada,
+     * pra não travar o salvamento de rascunhos antigos que o modo google_calendar apenas preserva.
+     */
+    static void requireValidCeremonyConfig(Squad sq) {
+        String mode = sq.getCeremonyMode();
+        boolean hasMode = mode != null && !mode.isBlank();
+        if (hasMode && !CEREMONY_MODES.contains(mode.trim())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Modo de cerimônia inválido: use google_calendar ou manual.");
+        }
+        com.fasterxml.jackson.databind.JsonNode list = sq.getCeremonies();
+        if (list == null || list.isNull()) return;
+        if (!list.isArray()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "As cerimônias devem ser uma lista.");
+        }
+        if (list.size() > MAX_CEREMONIES) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Máximo de " + MAX_CEREMONIES + " cerimônias por squad.");
+        }
+        boolean strict = hasMode && "manual".equals(mode.trim());
+        for (com.fasterxml.jackson.databind.JsonNode c : list) {
+            if (!c.isObject()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cerimônia inválida: formato inesperado.");
+            }
+            if (!strict) continue;
+            String title = c.path("title").asText("").trim();
+            if (title.isEmpty() || title.length() > 120) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cerimônia inválida: informe o título (até 120 caracteres).");
+            }
+            com.fasterxml.jackson.databind.JsonNode days = c.path("daysOfWeek");
+            if (!days.isArray() || days.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cerimônia \"" + title + "\": escolha ao menos um dia da semana.");
+            }
+            for (com.fasterxml.jackson.databind.JsonNode d : days) {
+                if (!d.isTextual() || !CEREMONY_DAYS.contains(d.asText())) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cerimônia \"" + title + "\": dia da semana inválido.");
+                }
+            }
+            if (!c.path("startTime").isTextual() || !CEREMONY_TIME.matcher(c.path("startTime").asText()).matches()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cerimônia \"" + title + "\": horário inválido (use HH:mm).");
+            }
+            com.fasterxml.jackson.databind.JsonNode dur = c.path("durationMinutes");
+            if (!dur.isIntegralNumber() || dur.asInt() < 1 || dur.asInt() > 1440) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cerimônia \"" + title + "\": duração inválida (1 a 1440 minutos).");
+            }
+        }
     }
 
     /** meetLink vira href no Painel: só http(s) (javascript:, data: etc. executam código ao clicar). */

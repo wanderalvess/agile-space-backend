@@ -65,6 +65,13 @@ class WorkItemControllerTest {
         return requestAs("u1", "MEMBER");
     }
 
+    /** Liderança da squad SQ1 (cargo de liderança + pertence à squad). */
+    private HttpServletRequest leaderOfSq1() {
+        User caller = User.builder().id("u5").email("lider@empresa.com.br").squadId("SQ1").jobTitle("tech lead").build();
+        lenient().when(userRepository.findById("u5")).thenReturn(Optional.of(caller));
+        return requestAs("u5", "MEMBER");
+    }
+
     /** Membro de outra squad: deve ser barrado ao mexer em work_items da SQ1. */
     private HttpServletRequest memberOfAnotherSquad() {
         User caller = User.builder().id("u2").email("outro@empresa.com.br").squadId("SQ-OUTRA").build();
@@ -117,10 +124,30 @@ class WorkItemControllerTest {
         @DisplayName("Deve delegar decisão de aceite/rejeição no showcase com feedback")
         void shouldRecordShowcaseDecisionWithFeedback() {
             ResponseEntity<Void> response = controller.showcaseDecision(
-                    "SQ1", "DDW-1", new WorkItemController.ShowcaseDecisionRequest("delivered", "Aceito pelo PO"), memberOfSq1());
+                    "SQ1", "DDW-1", new WorkItemController.ShowcaseDecisionRequest("delivered", "Aceito pelo PO"), leaderOfSq1());
 
             assertEquals(HttpStatus.OK, response.getStatusCode());
             verify(workItemService).showcaseDecision("SQ1", "DDW-1", "delivered", "Aceito pelo PO");
+        }
+
+        @Test
+        @DisplayName("Membro comum da squad decide showcase: Showcase/Review é colaborativo")
+        void shouldAllowShowcaseDecisionFromPlainMember() {
+            ResponseEntity<Void> response = controller.showcaseDecision(
+                    "SQ1", "DDW-1", new WorkItemController.ShowcaseDecisionRequest("delivered", "ok"), memberOfSq1());
+
+            assertEquals(HttpStatus.OK, response.getStatusCode());
+            verify(workItemService).showcaseDecision("SQ1", "DDW-1", "delivered", "ok");
+        }
+
+        @Test
+        @DisplayName("Admin decide showcase de qualquer squad")
+        void shouldAllowAdminShowcaseDecision() {
+            ResponseEntity<Void> response = controller.showcaseDecision(
+                    "SQ1", "DDW-1", new WorkItemController.ShowcaseDecisionRequest("delivered", "ok"), requestAs("admin1", "ADMIN"));
+
+            assertEquals(HttpStatus.OK, response.getStatusCode());
+            verify(workItemService).showcaseDecision("SQ1", "DDW-1", "delivered", "ok");
         }
 
         @Test

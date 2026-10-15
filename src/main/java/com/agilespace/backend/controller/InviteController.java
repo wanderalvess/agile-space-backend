@@ -125,8 +125,10 @@ public class InviteController {
     }
 
     @GetMapping("/api/invites/{token}")
-    public ResponseEntity<Invite> getInvite(@PathVariable String token) {
-        return ResponseEntity.ok(inviteService.getForDisplay(token));
+    public ResponseEntity<Invite> getInvite(@PathVariable String token, HttpServletRequest request) {
+        String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
+        return ResponseEntity.ok(inviteService.getForDisplay(token, caller));
     }
 
     @PostMapping("/api/invites/{token}/accept")

@@ -178,7 +178,16 @@ public class JiraProfieldsService {
         List<ProjectMemberRole> rows = new ArrayList<>();
         if (user.getId() != null) rows.addAll(projectMemberRoleRepository.findByUserId(user.getId()));
         if (notBlank(user.getEmail())) rows.addAll(projectMemberRoleRepository.findByEmailIgnoreCase(user.getEmail().trim()));
-        return rows.stream().anyMatch(JiraProfieldsService::isTeamManagerRow);
+        return rows.stream().anyMatch(JiraProfieldsService::isTeamManagerLeadershipRow);
+    }
+
+    /**
+     * Mesmo critério de liderança do gating de squad (SquadAccessService/UserProjectResolverService): a linha precisa
+     * ter isLeadership=true, não só uma roleKey de AM/PL. Linhas criadas por convite/join nunca são liderança, então
+     * um nome de papel "Agile Master" digitado num convite não vira poder de gerir equipes.
+     */
+    static boolean isTeamManagerLeadershipRow(ProjectMemberRole row) {
+        return isTeamManagerRow(row) && row.isLeadership();
     }
 
     /** Papel {nome, chave} com que o fundador de uma equipe manual entra: o que ele já tem como AM/PL. */
@@ -186,9 +195,9 @@ public class JiraProfieldsService {
         List<ProjectMemberRole> rows = new ArrayList<>();
         if (user.getId() != null) rows.addAll(projectMemberRoleRepository.findByUserId(user.getId()));
         if (notBlank(user.getEmail())) rows.addAll(projectMemberRoleRepository.findByEmailIgnoreCase(user.getEmail().trim()));
-        boolean agile = rows.stream().anyMatch(r -> r.getRoleKey() != null
+        boolean agile = rows.stream().anyMatch(r -> r.isLeadership() && r.getRoleKey() != null
                 && ("AGILE_MASTER".equalsIgnoreCase(r.getRoleKey()) || "SCRUM_MASTER".equalsIgnoreCase(r.getRoleKey())));
-        boolean people = rows.stream().anyMatch(r -> "PEOPLE_LEAD".equalsIgnoreCase(r.getRoleKey()));
+        boolean people = rows.stream().anyMatch(r -> r.isLeadership() && "PEOPLE_LEAD".equalsIgnoreCase(r.getRoleKey()));
         String title = notBlank(user.getJobTitle()) ? user.getJobTitle().trim().toLowerCase(java.util.Locale.ROOT) : "";
         if (agile || "agile master".equals(title) || "scrum master".equals(title)) return new String[] {"Agile Master", "AGILE_MASTER"};
         if (people || "people lead".equals(title)) return new String[] {"People Lead", "PEOPLE_LEAD"};
@@ -1199,6 +1208,14 @@ public class JiraProfieldsService {
             return;
         }
 
+        // Sem aprovação ninguém entra num time: só ADMIN, ou quem já consta no roster/Jira do projeto (e-mail ou conta
+        // do Jira batendo com uma linha ainda não vinculada a outra conta). Convite aceito já cria o vínculo e cai no
+        // "alreadyMember" acima.
+        if (!"ADMIN".equalsIgnoreCase(user.getRole()) && !isListedInRoster(key, user)) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Você não consta na lista deste time. Peça um link de convite a quem lidera o time ou fale com um administrador.");
+        }
+
         String cleanRoleName = roleName.trim();
         if (!SELF_SERVICE_JOIN_ROLE_NAMES.contains(cleanRoleName.toUpperCase())) {
             throw new org.springframework.web.server.ResponseStatusException(
@@ -1218,6 +1235,16 @@ public class JiraProfieldsService {
                 .isLeadership(false)
                 .build();
         projectMemberRoleRepository.save(member);
+    }
+
+    /** O usuário consta no roster do projeto por e-mail ou conta do Jira, numa linha livre (ou já dele)? */
+    private boolean isListedInRoster(String projectKey, User user) {
+        List<ProjectMemberRole> rows = projectMemberRoleRepository.findByProjectId(projectKey);
+        if (rows == null) return false;
+        return rows.stream().anyMatch(r ->
+                (r.getUserId() == null || r.getUserId().isBlank() || r.getUserId().equals(user.getId()))
+                && ((notBlank(user.getEmail()) && notBlank(r.getEmail()) && user.getEmail().trim().equalsIgnoreCase(r.getEmail().trim()))
+                    || (notBlank(user.getJiraAccountId()) && notBlank(r.getJiraAccountId()) && user.getJiraAccountId().trim().equals(r.getJiraAccountId().trim()))));
     }
 
     private String blankToNull(String value) {

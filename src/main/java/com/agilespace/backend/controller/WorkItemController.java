@@ -53,7 +53,11 @@ public class WorkItemController {
         squadAccessService.requireSquadReadAccess(squadId, request);
     }
 
-    private void requireSquadWriteAccess(String squadId, HttpServletRequest request) {
+    /**
+     * Estimar e comitar item é trabalho de qualquer membro da squad (Poker, planning) — por isso a regra é a
+     * mesma de leitura. O nome deixa explícito que NÃO é checagem de liderança.
+     */
+    private void requireSquadMemberAccess(String squadId, HttpServletRequest request) {
         squadAccessService.requireSquadReadAccess(squadId, request);
     }
 
@@ -67,7 +71,7 @@ public class WorkItemController {
             HttpServletRequest httpRequest) {
         requireJiraKey(jiraKey);
         String resolvedSquad = resolveSquad(squadId, jiraKey);
-        requireSquadWriteAccess(resolvedSquad, httpRequest);
+        requireSquadMemberAccess(resolvedSquad, httpRequest);
         workItemService.estimateWorkItem(resolvedSquad, jiraKey, request.points_estimated());
         return ResponseEntity.ok().build();
     }
@@ -93,7 +97,7 @@ public class WorkItemController {
             HttpServletRequest httpRequest) {
         requireJiraKey(jiraKey);
         String resolvedSquad = resolveSquad(squadId, jiraKey);
-        requireSquadWriteAccess(resolvedSquad, httpRequest);
+        requireSquadMemberAccess(resolvedSquad, httpRequest);
         workItemService.commitWorkItem(resolvedSquad, jiraKey, request.sprint_id());
         return ResponseEntity.ok().build();
     }
@@ -108,7 +112,8 @@ public class WorkItemController {
             HttpServletRequest httpRequest) {
         requireJiraKey(jiraKey);
         String resolvedSquad = resolveSquad(squadId, jiraKey);
-        requireSquadWriteAccess(resolvedSquad, httpRequest);
+        // Showcase/Review é colaborativo (decisão de produto): qualquer membro da squad registra a decisão.
+        requireSquadMemberAccess(resolvedSquad, httpRequest);
         workItemService.showcaseDecision(resolvedSquad, jiraKey, request.status(), request.feedback());
         return ResponseEntity.ok().build();
     }

@@ -10,6 +10,7 @@ import com.agilespace.backend.repository.InviteRepository;
 import com.agilespace.backend.repository.ProjectConfigRepository;
 import com.agilespace.backend.repository.ProjectMemberRoleRepository;
 import com.agilespace.backend.repository.UserRepository;
+import com.agilespace.backend.security.SquadLeadership;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -47,6 +48,12 @@ public class InviteService {
         if (roleName.isEmpty() || roleName.length() > MAX_ROLE_NAME) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe o papel do convite (até " + MAX_ROLE_NAME + " caracteres).");
         }
+        // Convite vincula contribuidor. Papel de liderança (Agile Master, Tech Lead...) vem do Jira ou de um admin:
+        // a roleKey derivada do nome decide quem gerencia equipes, então aceitar o nome aqui seria escalada de privilégio.
+        if (SquadLeadership.isLeadershipRoleName(roleName)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Convite não concede papel de liderança. Convide como Developer, QA, UX/Designer ou SME; liderança vem do Jira ou de um administrador.");
+        }
         if (email != null && !email.isBlank() && (email.length() > 254 || !email.contains("@"))) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "E-mail do convite inválido.");
         }
@@ -79,14 +86,52 @@ public class InviteService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Convite não encontrado"));
     }
 
-    /** Para a página do convite: o convite com o nome da squad (a chave fica se a squad não tiver projeto). */
-    public Invite getForDisplay(String token) {
+    /**
+     * Para a página do convite. Quem vê o quê:
+     * - destinatário (e-mail do convite = e-mail do logado), membro/liderança da squad ou admin: o convite completo;
+     * - qualquer outro logado, convite de link aberto (sem e-mail): só o necessário pra aceitar (squad, papel, status,
+     *   validade) — o token é a credencial de um link aberto. E-mail do convite e quem convidou ficam ocultos;
+     * - qualquer outro logado, convite endereçado a um e-mail: 404 genérico, sem confirmar que o convite existe.
+     */
+    @Transactional(readOnly = true)
+    public Invite getForDisplay(String token, User caller) {
         Invite invite = getByToken(token);
-        projectConfigRepository.findById(invite.getSquadId())
+        boolean privileged = caller != null && (isRecipient(invite, caller) || isSquadMemberOrAdmin(invite.getSquadId(), caller));
+        if (!privileged && invite.getEmail() != null && !invite.getEmail().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Convite não encontrado");
+        }
+        String squadName = projectConfigRepository.findById(invite.getSquadId())
                 .map(p -> p.getName())
                 .filter(n -> n != null && !n.isBlank())
-                .ifPresent(invite::setSquadName);
-        return invite;
+                .orElse(null);
+        Invite view = Invite.builder()
+                .id(invite.getId())
+                .token(invite.getToken())
+                .squadId(invite.getSquadId())
+                .roleName(invite.getRoleName())
+                .email(privileged ? invite.getEmail() : null)
+                .invitedBy(privileged ? invite.getInvitedBy() : null)
+                .status(invite.getStatus())
+                .createdAt(invite.getCreatedAt())
+                .expiresAt(invite.getExpiresAt())
+                .acceptedAt(privileged ? invite.getAcceptedAt() : null)
+                .acceptedByUserId(privileged ? invite.getAcceptedByUserId() : null)
+                .build();
+        view.setSquadName(squadName);
+        return view;
+    }
+
+    private static boolean isRecipient(Invite invite, User caller) {
+        return invite.getEmail() != null && caller.getEmail() != null && invite.getEmail().trim().equalsIgnoreCase(caller.getEmail().trim());
+    }
+
+    private boolean isSquadMemberOrAdmin(String squadId, User caller) {
+        if ("ADMIN".equalsIgnoreCase(caller.getRole()) || "LEAD".equalsIgnoreCase(caller.getRole())) return true;
+        if (squadId.equalsIgnoreCase(caller.getSquadId()) || squadId.equalsIgnoreCase(caller.getDefaultProjectId())) return true;
+        List<ProjectMemberRole> rows = projectMemberRoleRepository.findByProjectId(squadId);
+        return rows != null && rows.stream().anyMatch(m ->
+                (caller.getId() != null && caller.getId().equals(m.getUserId()))
+                || (caller.getEmail() != null && m.getEmail() != null && caller.getEmail().trim().equalsIgnoreCase(m.getEmail().trim())));
     }
 
     @Transactional
@@ -118,6 +163,11 @@ public class InviteService {
         }
         if (invite.getEmail() != null && !invite.getEmail().equalsIgnoreCase(acceptingUser.getEmail())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Este convite foi endereçado a outro e-mail");
+        }
+        // Convites criados antes da regra "convite não concede liderança" ainda podem existir pendentes.
+        if (SquadLeadership.isLeadershipRoleName(invite.getRoleName())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Este convite é de um papel de liderança, que não é mais concedido por convite. Peça um novo link a quem te convidou.");
         }
 
         // NUNCA grava em user.role a partir daqui: esse campo é o tier de autorização do

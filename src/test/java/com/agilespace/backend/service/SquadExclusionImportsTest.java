@@ -85,7 +85,7 @@ class SquadExclusionImportsTest {
         assertThrows(ResponseStatusException.class, () -> service.joinProject("DDW", "Developer", removed));
         verify(projectMemberRoleRepository, never()).save(any());
 
-        when(projectMemberRoleRepository.findByProjectId("DDW")).thenReturn(List.of());
+        when(projectMemberRoleRepository.findByProjectId("DDW")).thenReturn(List.of(row("outro", "outro@x.com")));
         when(projectMemberRoleRepository.save(any(ProjectMemberRole.class))).thenAnswer(i -> i.getArgument(0));
         service.joinProject("DDW", "Developer", User.builder().id("u2").name("Outro").email("outro@x.com").jiraAccountId("outro").build());
         verify(projectMemberRoleRepository).save(any(ProjectMemberRole.class));

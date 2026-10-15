@@ -236,10 +236,66 @@ class JiraProfieldsServiceTest {
         }
 
         @Test
+        @DisplayName("Join sem estar no roster (nem admin) é recusado com 403 e não grava nada")
+        void joinProjectRejectsUnlistedUser() {
+            when(projectConfigRepository.existsById("PROJ1")).thenReturn(true);
+            when(projectMemberRoleRepository.findByProjectId("PROJ1")).thenReturn(List.of(
+                    ProjectMemberRole.builder().projectId("PROJ1").email("outra@empresa.com").jiraAccountId("outra.acc").build()));
+            User user = User.builder().id("u1").name("User").email("user@empresa.com").jiraAccountId("user.acc").build();
+
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                    () -> service.joinProject("proj1", "Developer", user));
+            assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+            verify(projectMemberRoleRepository, never()).save(any(ProjectMemberRole.class));
+        }
+
+        @Test
+        @DisplayName("Join com linha do roster já vinculada a outra conta é recusado")
+        void joinProjectRejectsRowClaimedByAnotherAccount() {
+            when(projectConfigRepository.existsById("PROJ1")).thenReturn(true);
+            when(projectMemberRoleRepository.findByProjectId("PROJ1")).thenReturn(List.of(
+                    ProjectMemberRole.builder().projectId("PROJ1").email("user@empresa.com").userId("outro-uid").build()));
+            User user = User.builder().id("u1").name("User").email("user@empresa.com").build();
+
+            assertThrows(ResponseStatusException.class, () -> service.joinProject("proj1", "Developer", user));
+            verify(projectMemberRoleRepository, never()).save(any(ProjectMemberRole.class));
+        }
+
+        @Test
+        @DisplayName("ADMIN entra em qualquer projeto; quem já é membro é no-op idempotente")
+        void joinProjectAllowsAdminAndIsIdempotentForMembers() {
+            when(projectConfigRepository.existsById("PROJ1")).thenReturn(true);
+            when(projectMemberRoleRepository.findByProjectId("PROJ1")).thenReturn(Collections.emptyList());
+            when(projectMemberRoleRepository.save(any(ProjectMemberRole.class))).thenAnswer(i -> i.getArgument(0));
+            service.joinProject("proj1", "Developer", User.builder().id("a1").name("Adm").role("ADMIN").build());
+            verify(projectMemberRoleRepository, times(1)).save(any(ProjectMemberRole.class));
+
+            when(projectMemberRoleRepository.findByProjectId("PROJ1")).thenReturn(List.of(
+                    ProjectMemberRole.builder().projectId("PROJ1").userId("m1").build()));
+            service.joinProject("proj1", "Developer", User.builder().id("m1").name("Membro").build());
+            verify(projectMemberRoleRepository, times(1)).save(any(ProjectMemberRole.class));
+        }
+
+        @Test
+        @DisplayName("canManageTeams exige linha de liderança: roleKey AGILE_MASTER sem isLeadership (vinda de convite) não vale")
+        void canManageTeamsRequiresLeadershipFlag() {
+            User user = User.builder().id("u1").email("user@empresa.com").build();
+            when(projectMemberRoleRepository.findByUserId("u1")).thenReturn(List.of(
+                    ProjectMemberRole.builder().roleKey("AGILE_MASTER").roleName("Agile Master").isLeadership(false).build()));
+            when(projectMemberRoleRepository.findByEmailIgnoreCase("user@empresa.com")).thenReturn(List.of());
+            assertFalse(service.canManageTeams(user));
+
+            when(projectMemberRoleRepository.findByUserId("u1")).thenReturn(List.of(
+                    ProjectMemberRole.builder().roleKey("AGILE_MASTER").roleName("Agile Master").isLeadership(true).build()));
+            assertTrue(service.canManageTeams(user));
+        }
+
+        @Test
         @DisplayName("Deve aceitar papel de desenvolvedor sem flag de liderança")
         void joinProjectAcceptsContributorRoleWithoutLeadership() {
             when(projectConfigRepository.existsById("PROJ1")).thenReturn(true);
-            when(projectMemberRoleRepository.findByProjectId("PROJ1")).thenReturn(Collections.emptyList());
+            when(projectMemberRoleRepository.findByProjectId("PROJ1")).thenReturn(List.of(
+                    ProjectMemberRole.builder().projectId("PROJ1").email("USER@empresa.com").displayName("User").roleName("Developer").build()));
             when(projectMemberRoleRepository.save(any(ProjectMemberRole.class))).thenAnswer(i -> i.getArgument(0));
 
             User user = User.builder().id("u1").name("User").email("user@empresa.com").jiraAccountId("user.acc").build();
