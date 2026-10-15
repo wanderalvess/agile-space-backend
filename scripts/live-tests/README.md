@@ -17,6 +17,17 @@ Variáveis opcionais: `API_BASE` (padrão `http://localhost:8002/api`), `WS_BASE
 `TEST_DB` (padrão `portal_test`, nome do banco usado pelo `psql` via `docker exec agile-space-db`).
 O contêiner do Postgres precisa se chamar `agile-space-db` (é o nome do `docker-compose.yml`).
 
+## Várias contas de teste (carga, muitos usuários)
+
+`criar_contas_teste.py` cria N contas `carga.NN@totvs.com.br` e grava e-mail, id e token em `contas-teste.json` (fora do git; tokens valem 24 h). A senha vem de `CARGA_SENHA` ou é perguntada na hora; nunca vai para a linha de comando nem para o arquivo. Rodar de novo só renova os tokens. Respeita o limite de 10 cadastros/logins por minuto por IP (30 contas ≈ 3 min). Servidor que não é local exige `--sim`.
+
+```bash
+python criar_contas_teste.py --qtd 30                                                 # backend local (API_BASE)
+python criar_contas_teste.py --base https://app.espacoagil.com.br/api --qtd 30 --sim   # homologação
+```
+
+Para apagar depois: `delete from users where email like 'carga.%@totvs.com.br'` no banco (veja o cabeçalho do script).
+
 ## Ordem e resultado esperado (HEAD de 2026-10-10, antes das mudanças de 2026-10-13)
 
 | Ordem | Comando | Esperado |
