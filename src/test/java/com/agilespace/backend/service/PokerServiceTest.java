@@ -46,6 +46,8 @@ class PokerServiceTest {
     private PokerRoundRepository roundRepository;
     @Mock
     private PokerWebSocketHandler webSocketHandler;
+    @Mock
+    private com.agilespace.backend.repository.PokerChatMessageRepository chatMessageRepository;
 
     @InjectMocks
     private PokerService service;
@@ -533,6 +535,33 @@ class PokerServiceTest {
 
             verify(roundRepository).deleteByRoomId("room-123");
             verify(webSocketHandler).broadcastEvent(eq("room-123"), eq("ROUNDS_CLEARED"), any());
+        }
+
+        @Test
+        @DisplayName("Quem criou a sala a exclui com tudo dela e avisa quem está dentro")
+        void creatorDeletesRoom() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+
+            service.deleteRoom("room-123", "user-creator", "MEMBER");
+
+            verify(voteRepository).deleteByRoomId("room-123");
+            verify(roundRepository).deleteByRoomId("room-123");
+            verify(chatMessageRepository).deleteByRoomId("room-123");
+            verify(participantRepository).deleteByRoomId("room-123");
+            verify(roomRepository).delete(sampleRoom);
+            verify(webSocketHandler).broadcastEvent(eq("room-123"), eq("ROOM_DELETED"), any());
+        }
+
+        @Test
+        @DisplayName("Facilitador que não criou a sala não a exclui; ADMIN exclui")
+        void onlyCreatorOrAdminDeletesRoom() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+
+            assertThrows(ResponseStatusException.class, () -> service.deleteRoom("room-123", "user-dev", "MEMBER"));
+            verify(roomRepository, never()).delete(any(PokerRoom.class));
+
+            service.deleteRoom("room-123", "adm", "ADMIN");
+            verify(roomRepository).delete(sampleRoom);
         }
 
         @Test

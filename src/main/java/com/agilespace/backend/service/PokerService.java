@@ -589,6 +589,27 @@ public class PokerService {
         return roundRepository.searchByTopicOrNote(query, pageable);
     }
 
+    /**
+     * Exclui a sala inteira (votos, rodadas, chat, participantes). Mais restrito que as ações de facilitação:
+     * só quem criou a sala ou ADMIN/LEAD, igual à exclusão de quadro da Retro. Quem estiver na sala recebe
+     * ROOM_DELETED para sair dela.
+     */
+    @Transactional
+    public void deleteRoom(String roomId, String callerId, String callerRole) {
+        PokerRoom room = roomRepository.findById(roomId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sala não encontrada"));
+        boolean owner = callerId != null && callerId.equals(room.getCreatorId());
+        if (!owner && !isPrivilegedRole(callerRole)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só quem criou a sala pode excluí-la.");
+        }
+        voteRepository.deleteByRoomId(roomId);
+        roundRepository.deleteByRoomId(roomId);
+        chatMessageRepository.deleteByRoomId(roomId);
+        participantRepository.deleteByRoomId(roomId);
+        roomRepository.delete(room);
+        publish(roomId, "ROOM_DELETED", Map.of("roomId", roomId));
+    }
+
     @Transactional
     public void clearRounds(String roomId, String callerId, String callerRole) {
         PokerRoom room = roomRepository.findById(roomId)
