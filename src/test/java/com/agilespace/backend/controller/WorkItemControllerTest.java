@@ -131,7 +131,7 @@ class WorkItemControllerTest {
         }
 
         @Test
-        @DisplayName("Membro comum da squad decide showcase: Showcase/Review é colaborativo")
+        @DisplayName("Membro comum decide showcase (sem gate de liderança): Showcase/Review é colaborativo")
         void shouldAllowShowcaseDecisionFromPlainMember() {
             ResponseEntity<Void> response = controller.showcaseDecision(
                     "SQ1", "DDW-1", new WorkItemController.ShowcaseDecisionRequest("delivered", "ok"), memberOfSq1());

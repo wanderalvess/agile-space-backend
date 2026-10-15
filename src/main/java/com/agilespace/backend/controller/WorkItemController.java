@@ -112,7 +112,7 @@ public class WorkItemController {
             HttpServletRequest httpRequest) {
         requireJiraKey(jiraKey);
         String resolvedSquad = resolveSquad(squadId, jiraKey);
-        // Showcase/Review é colaborativo (decisão de produto): qualquer membro da squad registra a decisão.
+        // Mantém a regra que já existia (acesso à squad); este PR não restringe nem documenta restrição nova. Showcase/Review é colaborativo por decisão de produto.
         requireSquadMemberAccess(resolvedSquad, httpRequest);
         workItemService.showcaseDecision(resolvedSquad, jiraKey, request.status(), request.feedback());
         return ResponseEntity.ok().build();
