@@ -300,7 +300,7 @@ class SquadControllerManageAccessTest {
         when(service.getRollup("SQ1", "43")).thenReturn(Optional.empty());
 
         assertSame(r, controller.getRollup("SQ1", "42", as("dev1", "MEMBER")).getBody());
-        assertEquals(HttpStatus.NOT_FOUND, controller.getRollup("SQ1", "43", as("dev1", "MEMBER")).getStatusCode());
+        assertEquals(HttpStatus.NO_CONTENT, controller.getRollup("SQ1", "43", as("dev1", "MEMBER")).getStatusCode());
         verify(service, never()).getRollup("SQ1");
     }
 

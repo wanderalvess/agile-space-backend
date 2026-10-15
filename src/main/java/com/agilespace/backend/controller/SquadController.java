@@ -168,9 +168,10 @@ public class SquadController {
     @GetMapping("/{squadId}")
     public ResponseEntity<Squad> getSquad(@PathVariable String squadId, HttpServletRequest request) {
         requireSquadReadAccess(squadId, request);
+        // Squad ainda sem sincronização (só o projeto existe): 204, estado normal e não erro no console.
         return squadService.getSquad(squadId)
                 .map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
+                .orElse(ResponseEntity.noContent().build());
     }
 
     @PostMapping("/{squadId}")
@@ -207,7 +208,7 @@ public class SquadController {
     }
 
     // ----- Metrics Rollup -----
-    /** Sem sprintId: o rollup da sprint ativa (ou o mais recente). Com sprintId: o daquela sprint, ou 404. */
+    /** Sem sprintId: o rollup da sprint ativa (ou o mais recente). Com sprintId: o daquela sprint. Sem rollup ainda: 204. */
     @GetMapping("/{squadId}/rollup")
     public ResponseEntity<SquadMetricsRollup> getRollup(
             @PathVariable String squadId,
@@ -217,7 +218,7 @@ public class SquadController {
         java.util.Optional<SquadMetricsRollup> rollup = (sprintId != null && !sprintId.isBlank())
                 ? squadService.getRollup(squadId, sprintId)
                 : squadService.getRollup(squadId);
-        return rollup.map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());
+        return rollup.map(ResponseEntity::ok).orElse(ResponseEntity.noContent().build());
     }
 
     @PostMapping("/{squadId}/rollup")

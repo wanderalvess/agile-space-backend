@@ -83,7 +83,7 @@ public class SquadControllerTest {
 
         ResponseEntity<Squad> response = controller.getSquad("sq-1", adminRequest());
         
-        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
     }
 
     @Test
@@ -127,7 +127,7 @@ public class SquadControllerTest {
     public void testGetSquad_admin_neverConsultsUserRepository() {
         ResponseEntity<Squad> response = controller.getSquad("sq-1", adminRequest());
 
-        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
         verifyNoInteractions(userRepository);
     }
 
