@@ -212,4 +212,16 @@ class ApiKeyExpiryTest {
         assertEquals(403, controller.saveTdnConfig("u2", new UserTdnConfig(), as("adm", "ADMIN")).getStatusCode().value());
         assertEquals(204, controller.deleteJiraConfig("u2", as("adm", "ADMIN")).getStatusCode().value());
     }
+
+    @Test
+    @DisplayName("Sem configuração ainda: 204 (estado normal), não 404; outra pessoa continua 403")
+    void notConfiguredIsNoContent() {
+        UserService service = mock(UserService.class);
+        UserController controller = controllerWith(service);
+
+        assertEquals(204, controller.getJiraConfig("u2", as("u2", "MEMBER")).getStatusCode().value());
+        assertEquals(204, controller.getTdnConfig("u2", as("u2", "MEMBER")).getStatusCode().value());
+        assertEquals(403, controller.getJiraConfig("u2", as("u3", "MEMBER")).getStatusCode().value());
+        assertEquals(403, controller.getTdnConfig("u2", as("u3", "MEMBER")).getStatusCode().value());
+    }
 }

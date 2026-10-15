@@ -133,7 +133,8 @@ public class UserController {
         }
         UserJiraConfig config = service.getJiraConfig(userId);
         if (config == null) {
-            return ResponseEntity.notFound().build();
+            // Ainda não configurou: estado normal, não erro (404 aparecia vermelho no console de toda conta nova).
+            return ResponseEntity.noContent().build();
         }
         if (!isOwner(userId, request)) {
             return ResponseEntity.ok(Map.of("configured", true, "domain", config.getDomain() == null ? "" : config.getDomain()));
@@ -173,7 +174,7 @@ public class UserController {
         }
         UserTdnConfig config = service.getTdnConfig(userId);
         if (config == null) {
-            return ResponseEntity.notFound().build();
+            return ResponseEntity.noContent().build();
         }
         if (!isOwner(userId, request)) {
             Map<String, Object> masked = new java.util.LinkedHashMap<>();
