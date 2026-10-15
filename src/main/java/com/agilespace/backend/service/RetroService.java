@@ -47,6 +47,25 @@ public class RetroService {
     private final RetroWebSocketHandler webSocketHandler;
     private final SquadAccessService squadAccessService;
 
+    /** Gatilhos de notificação (opcional: testes que montam o serviço à mão seguem sem eles). */
+    private NotificationTriggers notificationTriggers;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setNotificationTriggers(NotificationTriggers notificationTriggers) {
+        this.notificationTriggers = notificationTriggers;
+    }
+
+    /** Responsável novo/alterado numa ação: notifica a pessoa (resolvida pelo nome) depois do commit. */
+    private void notifyAssignee(RetroBoard board, RetroCard card, String previousAssignee, RetroCaller caller) {
+        String assignee = card.getAssignee();
+        if (notificationTriggers == null || assignee == null || assignee.isBlank()
+                || assignee.trim().equalsIgnoreCase(previousAssignee == null ? "" : previousAssignee.trim())) {
+            return;
+        }
+        notificationTriggers.retroActionAssigned(board.getId(), board.getTitle(), board.getSquadId(), card.getId(),
+                card.getContent(), assignee, caller == null ? null : caller.id());
+    }
+
     /** Resultado de um upsert: {@code created} decide 201 (criou) x 200 (atualizou) no controller. */
     public record Saved<T>(T value, boolean created) { }
 
@@ -733,10 +752,12 @@ public class RetroService {
             if (card.getOrder() == null) card.setOrder(0L);
             RetroCard saved = cardRepository.save(card);
             publishCards(board, "CARD_SAVED", saved);
+            notifyAssignee(board, saved, null, caller);
             return new Saved<>(viewFor(board, saved, caller), true);
         }
 
         boolean fullEdit = caller.id().equals(existing.getAuthorId()) || isCreatorOrAdmin(board, caller);
+        String previousAssignee = existing.getAssignee();
         validateCardFields(board, card, fullEdit);
         if (card.getColumnKey() != null) existing.setColumnKey(card.getColumnKey());
         if (card.getOrder() != null) existing.setOrder(card.getOrder());
@@ -760,6 +781,7 @@ public class RetroService {
         }
         RetroCard saved = cardRepository.save(existing);
         publishCards(board, "CARD_SAVED", saved);
+        notifyAssignee(board, saved, previousAssignee, caller);
         return new Saved<>(viewFor(board, saved, caller), false);
     }
 

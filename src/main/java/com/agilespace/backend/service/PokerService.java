@@ -44,6 +44,14 @@ public class PokerService {
     private final PokerChatMessageRepository chatMessageRepository;
     private final PokerWebSocketHandler webSocketHandler;
 
+    /** Gatilhos de notificação (opcional: testes que montam o serviço à mão seguem sem eles). */
+    private NotificationTriggers notificationTriggers;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setNotificationTriggers(NotificationTriggers notificationTriggers) {
+        this.notificationTriggers = notificationTriggers;
+    }
+
     static final int CHAT_MAX_TEXT = 8000;
     static final int CHAT_MAX_SENDER_NAME = 120;
     static final int CHAT_MAX_SENDER_CATEGORY = 255;
@@ -91,6 +99,7 @@ public class PokerService {
     @Transactional
     public PokerRoom saveOrUpdateRoom(PokerRoom room, String callerId, String callerRole) {
         Optional<PokerRoom> existing = room.getId() != null ? roomRepository.findById(room.getId()) : Optional.empty();
+        boolean wasAsync = existing.map(PokerService::isAsync).orElse(false);
         if (existing.isPresent()) {
             PokerRoom current = existing.get();
             requireRoomParticipant(current, callerId, callerRole);
@@ -109,6 +118,10 @@ public class PokerService {
         // 409 na ação seguinte.
         PokerRoom saved = roomRepository.saveAndFlush(room);
         publish(saved.getId(), "ROOM_UPDATED", saved);
+        // Sala assíncrona aberta (criada assim ou trocada para assíncrona): lembrete de voto à squad, 1 por sala.
+        if (notificationTriggers != null && isAsync(saved) && !wasAsync && saved.getSessionEndedAt() == null) {
+            notificationTriggers.asyncPokerOpened(saved.getId(), saved.getTitle(), saved.getTeam(), callerId);
+        }
         return saved;
     }
 

@@ -42,6 +42,14 @@ public class InviteService {
     private final ProjectMemberRoleRepository projectMemberRoleRepository;
     private final UserRepository userRepository;
 
+    /** Gatilhos de notificação (opcional: testes que montam o serviço à mão seguem sem eles). */
+    private NotificationTriggers notificationTriggers;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setNotificationTriggers(NotificationTriggers notificationTriggers) {
+        this.notificationTriggers = notificationTriggers;
+    }
+
     @Transactional
     public Invite createInvite(String squadId, String roleName, String email, String invitedByUserId) {
         roleName = roleName == null ? "" : roleName.trim();
@@ -68,6 +76,9 @@ public class InviteService {
                 .expiresAt(LocalDateTime.now().plusDays(EXPIRATION_DAYS))
                 .build();
         invite = inviteRepository.save(invite);
+        if (notificationTriggers != null) {
+            notificationTriggers.inviteCreated(invite.getToken(), squadId, invite.getSquadName(), invite.getEmail(), invitedByUserId);
+        }
 
         audit("INVITE_CREATED", invitedByUserId, "Convite criado para squad " + squadId + " (papel: " + roleName + ")"
                 + (invite.getEmail() != null ? ", e-mail: " + invite.getEmail() : ""));
