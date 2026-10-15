@@ -28,6 +28,12 @@ python criar_contas_teste.py --base https://app.espacoagil.com.br/api --qtd 30 -
 
 Para apagar depois: `delete from users where email like 'carga.%@totvs.com.br'` no banco (veja o cabeçalho do script).
 
+Carga numa sala do Poker com essas contas: `node t_carga_poker.js` (precisa de `npm install ws`). A primeira conta cria a sala, revela e abre a rodada seguinte; as outras entram aos poucos, abrem o WebSocket, mandam heartbeat a cada 25 s como a tela e votam em toda rodada. No fim mostra p50/p95 por chamada, quanto o voto e a revelação levam para chegar aos outros e quantos WebSocket caíram; exclui a sala (use `--manter` para guardar). Opções: `--pessoas`, `--duracao` (s), `--rodada` (s), `--rampa` (s), `--squad`, `--contas`. De uma só máquina o servidor aceita 300 chamadas/min por IP; o script alonga a rodada para caber e avisa se não couber.
+
+```bash
+node t_carga_poker.js --pessoas 30 --duracao 300
+```
+
 ## Ordem e resultado esperado (HEAD de 2026-10-10, antes das mudanças de 2026-10-13)
 
 | Ordem | Comando | Esperado |
