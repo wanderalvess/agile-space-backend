@@ -111,8 +111,9 @@ public class AdminController {
 
     /**
      * Redefinição de senha iniciada pelo admin, para a pessoa que não consegue (ou não quer) usar o
-     * "Esqueci a senha": gera e aprova o pedido de uma vez e devolve a senha temporária, que o admin repassa
-     * fora do sistema. Passa pelo mesmo caminho do fluxo normal (auditoria, senha temporária apagada após 1 h).
+     * "Esqueci a senha": gera e aprova o pedido de uma vez e devolve o link de redefinição (resetToken, uma vez só),
+     * que o admin repassa fora do sistema. Mesmo caminho do fluxo normal: auditoria, link vale 2 h e um uso, e a
+     * senha atual só muda quando a pessoa define a nova pelo link.
      */
     @PostMapping("/users/{id}/reset-password")
     public ResponseEntity<PasswordResetRequest> resetUserPassword(@PathVariable String id, HttpServletRequest request) {
