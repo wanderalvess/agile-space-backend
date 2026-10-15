@@ -58,7 +58,9 @@ public class HomeService {
         List<AnnouncementDto> announcements = announcementService.active(userId, role);
         UnreadCountDto unread = notificationService.unreadCount(userId);
 
-        boolean multi = ctx.multiSquad() && !explicit;
+        // Liderança que escolhe uma das próprias squads continua vendo todas (o filtro da home só muda os fatos dos
+        // rituais); squad alcançada por outra via (ex.: tribo) volta ao modo de uma squad só.
+        boolean multi = ctx.multiSquad() && (!explicit || ctx.hasSquad(current));
         List<String> scope = new ArrayList<>();
         if (multi) {
             scope.addAll(ctx.squadIds().stream().limit(MAX_SQUADS).toList());

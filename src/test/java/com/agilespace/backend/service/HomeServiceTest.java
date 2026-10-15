@@ -141,6 +141,19 @@ class HomeServiceTest {
     }
 
     @Test
+    @DisplayName("Liderança escolhe uma das próprias squads: continua multiSquad com todas, fatos da escolhida")
+    void explicitOwnSquadKeepsMultiSquad() {
+        ctx(true, "SQA", "SQA", "SQB");
+        when(ritualSessionService.live(List.of("SQA", "SQB"), NOW)).thenReturn(List.of());
+
+        HomeDto home = service.home("ana", "MEMBER", "SQB", NOW);
+
+        assertTrue(home.multiSquad());
+        assertEquals(2, home.squads().size());
+        verify(ritualSessionService, times(5)).history(any(), eq("SQB"), anyInt(), any());
+    }
+
+    @Test
     @DisplayName("Sem squad: avisos e não lidas continuam, o resto vem vazio")
     void withoutSquad() {
         ctx(false, null);
