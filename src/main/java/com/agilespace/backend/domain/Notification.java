@@ -20,6 +20,8 @@ public class Notification {
     public static final String ACTION_ASSIGNED = "ACTION_ASSIGNED";
     public static final String MESSAGE = "MESSAGE";
     public static final String ANNOUNCEMENT = "ANNOUNCEMENT";
+    /** Pedido de vínculo criado (para admins) ou decidido (para quem pediu). */
+    public static final String LINK_REQUEST = "LINK_REQUEST";
 
     @Id
     @Column(length = 36)
