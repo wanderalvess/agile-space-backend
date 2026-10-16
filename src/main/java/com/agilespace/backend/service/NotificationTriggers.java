@@ -162,6 +162,41 @@ public class NotificationTriggers {
         });
     }
 
+    // --- LINK_REQUEST ---
+
+    /** Pedido de vínculo novo: avisa todos os ADMINs ativos (link para /admin). O solicitante nunca é notificado. */
+    public void linkRequestCreated(String requestId, String requesterId, String requesterName, String projectKey) {
+        if (requestId == null) return;
+        fire("LINK_REQUEST_CREATED", () -> {
+            Collection<String> admins = userRepository.findActiveIdsByRoles(Set.of("ADMIN"));
+            String who = requesterName == null || requesterName.isBlank() ? "Alguém" : requesterName.trim();
+            notificationService.notifyUsers(admins,
+                    new NotificationService.Draft(Notification.LINK_REQUEST, "Pedido de vínculo",
+                            who + " pediu para ser vinculado(a) à squad " + projectKey + ".", "/admin", requesterId, null,
+                            "LINK_REQUEST_CREATED:" + requestId),
+                    UserSignalService.NOTIFICATION);
+        });
+    }
+
+    /**
+     * Pedido decidido: avisa quem pediu. Aprovado leva ao /painel; recusado leva ao /onboarding (outra tentativa), com
+     * o motivo quando houver.
+     */
+    public void linkRequestDecided(String requestId, String requesterId, boolean approved, String projectKey,
+                                   String decisionNote, String actorId) {
+        if (requestId == null || requesterId == null) return;
+        fire("LINK_REQUEST_DECIDED", () -> {
+            String text = approved
+                    ? "Seu pedido de vínculo à squad " + projectKey + " foi aprovado."
+                    : "Seu pedido de vínculo à squad " + projectKey + " foi recusado."
+                    + (decisionNote == null || decisionNote.isBlank() ? "" : " Motivo: " + oneLine(decisionNote));
+            notificationService.notifyUsers(List.of(requesterId),
+                    new NotificationService.Draft(Notification.LINK_REQUEST, "Pedido de vínculo", text,
+                            approved ? "/painel" : "/onboarding", actorId, null, "LINK_REQUEST_DECIDED:" + requestId),
+                    UserSignalService.NOTIFICATION);
+        });
+    }
+
     // --- internos ---
 
     record Candidate(String userId, String name, String email) { }

@@ -212,6 +212,32 @@ public class OnboardingService {
                             + "Peça um link de convite a quem lidera o time.");
         }
 
+        applyLink(row, user);
+
+        log.info("Onboarding: usuário {} reivindicou a linha {} ({}) no projeto {}",
+                user.getId(), row.getId(), row.getRoleName(), row.getProjectId());
+
+        return row.getProjectId();
+    }
+
+    /**
+     * Vínculo decidido por um admin (pedido de vínculo aprovado): mesma gravação do {@link #claim}, mas SEM a checagem de
+     * identidade (o admin é quem a confirma) e permitindo linha de liderança (a trava de "liderança nunca é autodeclarada"
+     * vale só para o self-service). Linha já vinculada a outra conta continua sendo 409. Idempotente para a mesma conta.
+     */
+    @Transactional
+    public void linkApproved(ProjectMemberRole row, User user) {
+        if (row.getUserId() != null && !row.getUserId().isBlank() && !row.getUserId().equals(user.getId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Essa pessoa já está vinculada a outra conta. Peça pra quem administra o projeto desfazer o vínculo antes.");
+        }
+        applyLink(row, user);
+        log.info("Vínculo aprovado por admin: usuário {} ligado à linha {} ({}) no projeto {}",
+                user.getId(), row.getId(), row.getRoleName(), row.getProjectId());
+    }
+
+    /** Grava o vínculo: userId na linha, accountId do Jira herdado e roster da squad apontando para a conta. */
+    private void applyLink(ProjectMemberRole row, User user) {
         row.setUserId(user.getId());
         projectMemberRoleRepository.save(row);
 
@@ -237,11 +263,6 @@ public class OnboardingService {
                 }
             }
         }
-
-        log.info("Onboarding: usuário {} reivindicou a linha {} ({}) no projeto {}",
-                user.getId(), row.getId(), row.getRoleName(), row.getProjectId());
-
-        return row.getProjectId();
     }
 
     private int countMembers(String projectId) {
