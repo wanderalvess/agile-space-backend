@@ -125,4 +125,43 @@ class NotificationTriggersTest {
         triggers.announcementPublished("a4", "Para AMs", "ROLES", List.of(), List.of("AGILE_MASTER"), null, null, null, "adm");
         verify(notificationService).notifyUsers(eq(Set.of("am")), argThat(d -> "ANNOUNCEMENT:a4".equals(d.dedupeKey())), any());
     }
+
+    @Test
+    @DisplayName("Pedido de vínculo criado: avisa os ADMINs ativos com link /admin, 1 por pedido")
+    void linkRequestCreatedNotifiesAdmins() {
+        when(userRepository.findActiveIdsByRoles(Set.of("ADMIN"))).thenReturn(List.of("adm1", "adm2"));
+        triggers.linkRequestCreated("lr1", "ana", "Ana Paula", "DDWMISSI");
+        verify(notificationService).notifyUsers(eq(List.of("adm1", "adm2")),
+                argThat(d -> "LINK_REQUEST".equals(d.kind()) && "/admin".equals(d.link()) && "ana".equals(d.actorId())
+                        && "LINK_REQUEST_CREATED:lr1".equals(d.dedupeKey()) && d.text().contains("Ana Paula")
+                        && d.text().contains("DDWMISSI")),
+                eq(UserSignalService.NOTIFICATION));
+
+        triggers.linkRequestCreated(null, "ana", "Ana", "X");
+        verify(notificationService, times(1)).notifyUsers(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("Pedido de vínculo decidido: aprovado leva ao /painel, recusado ao /onboarding com o motivo")
+    void linkRequestDecidedNotifiesRequester() {
+        triggers.linkRequestDecided("lr1", "ana", true, "DDWMISSI", null, "adm");
+        verify(notificationService).notifyUsers(eq(List.of("ana")),
+                argThat(d -> "LINK_REQUEST".equals(d.kind()) && "/painel".equals(d.link()) && "adm".equals(d.actorId())
+                        && "LINK_REQUEST_DECIDED:lr1".equals(d.dedupeKey()) && d.text().contains("aprovado")),
+                eq(UserSignalService.NOTIFICATION));
+
+        triggers.linkRequestDecided("lr2", "ana", false, "DDWMISSI", "  e-mail\nnão confere ", "adm");
+        verify(notificationService).notifyUsers(eq(List.of("ana")),
+                argThat(d -> "/onboarding".equals(d.link()) && "LINK_REQUEST_DECIDED:lr2".equals(d.dedupeKey())
+                        && d.text().contains("recusado") && d.text().contains("Motivo: e-mail não confere")),
+                eq(UserSignalService.NOTIFICATION));
+
+        triggers.linkRequestDecided("lr3", "ana", false, "DDWMISSI", null, "adm");
+        verify(notificationService).notifyUsers(eq(List.of("ana")),
+                argThat(d -> "LINK_REQUEST_DECIDED:lr3".equals(d.dedupeKey()) && !d.text().contains("Motivo")), any());
+
+        triggers.linkRequestDecided(null, "ana", true, "X", null, "adm");
+        triggers.linkRequestDecided("lr4", null, true, "X", null, "adm");
+        verify(notificationService, times(3)).notifyUsers(any(), any(), any());
+    }
 }

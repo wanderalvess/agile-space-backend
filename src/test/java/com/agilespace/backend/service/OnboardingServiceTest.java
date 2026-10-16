@@ -138,4 +138,40 @@ class OnboardingServiceTest {
         assertEquals("P1", result.get(0).getProjectId());
         assertTrue(result.get(0).getMembers().get(0).isClaimable());
     }
+
+    @Test
+    @DisplayName("linkApproved (admin): vincula sem checar identidade, aceita liderança e herda o accountId")
+    void linkApprovedSkipsIdentityAndAllowsLeadership() {
+        ProjectMemberRole lead = row("r1", "outra.pessoa@totvs.com.br", "acc-lead", "Fulana");
+        lead.setLeadership(true);
+        User u = user();
+
+        service.linkApproved(lead, u);
+
+        assertEquals("u1", lead.getUserId());
+        assertEquals("acc-lead", u.getJiraAccountId());
+        verify(projectMemberRoleRepository).save(lead);
+        verify(userRepository).save(u);
+
+        // o self-service continua barrando a mesma linha
+        lead.setUserId(null);
+        stubClaim(lead, List.of(lead));
+        assertEquals(HttpStatus.FORBIDDEN,
+                assertThrows(ResponseStatusException.class, () -> service.claim("r1", user())).getStatusCode());
+    }
+
+    @Test
+    @DisplayName("linkApproved: linha de outra conta é 409; a mesma conta é idempotente")
+    void linkApprovedConflictAndIdempotent() {
+        ProjectMemberRole taken = row("r1", "x@y.com", null, "Fulano");
+        taken.setUserId("outro");
+        assertEquals(HttpStatus.CONFLICT,
+                assertThrows(ResponseStatusException.class, () -> service.linkApproved(taken, user())).getStatusCode());
+        verify(projectMemberRoleRepository, never()).save(any());
+
+        ProjectMemberRole mine = row("r2", "x@y.com", null, "Fulano");
+        mine.setUserId("u1");
+        assertDoesNotThrow(() -> service.linkApproved(mine, user()));
+        assertEquals("u1", mine.getUserId());
+    }
 }

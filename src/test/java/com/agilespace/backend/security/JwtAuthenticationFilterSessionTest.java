@@ -117,4 +117,19 @@ class JwtAuthenticationFilterSessionTest {
     void missingTokenIs401() throws Exception {
         assertEquals(401, call("/api/projects", null, null).getStatus());
     }
+
+    @Test
+    @DisplayName("Fila de pedidos de vínculo é só de admin; a criação e o /mine são de qualquer sessão")
+    void linkRequestsAdminOnly() throws Exception {
+        tokenFor("u1", "MEMBER");
+        when(guard.lookup("u1")).thenReturn(Optional.of(new UserSessionGuard.State(true, "MEMBER")));
+        assertEquals(403, call("/api/admin/link-requests", "t", null).getStatus());
+        assertEquals(403, call("/api/admin/link-requests/abc/approve", "t", null).getStatus());
+        assertEquals(403, call("/api/admin/link-requests/abc/reject", "t", null).getStatus());
+        assertEquals(200, call("/api/link-requests/mine", "t", null).getStatus());
+        assertEquals(401, call("/api/link-requests/mine", null, null).getStatus());
+
+        when(guard.lookup("u1")).thenReturn(Optional.of(new UserSessionGuard.State(true, "ADMIN")));
+        assertEquals(200, call("/api/admin/link-requests", "t", null).getStatus());
+    }
 }
