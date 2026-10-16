@@ -67,6 +67,8 @@ public class PokerService {
     private static final Set<String> FIBONACCI_DECK = Set.of("0", "1", "2", "3", "5", "8", "13", "21", "?", "☕");
     private static final Set<String> HOURS_DECK = Set.of("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12", "14",
             "16", "18", "20", "25", "30", "35", "40", "45", "50", "?", "☕");
+    /** Maior carta aceita no baralho de horas (limite do campo "horas máximas" da sala). */
+    private static final int HOURS_MAX_CARD = 100;
     private static final Set<String> TSHIRT_DECK = Set.of("PP", "P", "M", "G", "GG", "?", "☕");
 
     /**
@@ -483,7 +485,7 @@ public class PokerService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Apenas participantes da sala podem votar.");
         }
         Set<String> deck = deckValues(room.getDeckType());
-        if (deck != null && !deck.contains(value)) {
+        if (deck != null && !deck.contains(value) && !isCustomHoursCard(room.getDeckType(), value)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Esta carta não existe no baralho da sala.");
         }
 
@@ -525,6 +527,17 @@ public class PokerService {
             publish(vote.getRoomId(), "VOTE_SAVED", saved);
         }
         return saved;
+    }
+
+    /**
+     * No baralho de horas o facilitador escolhe as "horas máximas" (1 a 100) e, se o limite não for uma
+     * das cartas fixas (ex.: 24 ou 60), a carta do limite passa a existir. Por isso aceita qualquer
+     * inteiro de 0 a 100, sem zeros à esquerda; o recorte do baralho é decisão da tela.
+     */
+    private static boolean isCustomHoursCard(String deckType, String value) {
+        if (deckType == null || !"hours".equalsIgnoreCase(deckType)) return false;
+        if (!value.matches("0|[1-9][0-9]{0,2}")) return false;
+        return Integer.parseInt(value) <= HOURS_MAX_CARD;
     }
 
     private static Set<String> deckValues(String deckType) {

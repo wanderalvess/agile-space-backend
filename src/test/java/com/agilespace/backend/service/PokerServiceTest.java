@@ -392,6 +392,33 @@ class PokerServiceTest {
         }
 
         @Test
+        @DisplayName("Baralho de horas aceita a carta do limite escolhido (24, 60, 100) e rejeita o que passa de 100 ou não é inteiro")
+        void shouldAcceptCustomHoursCard() {
+            PokerRoom hours = PokerRoom.builder().id("room-123").creatorId("user-creator").title("t").deckType("hours")
+                    .votesRevealed(false).build();
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(hours));
+            when(participantRepository.existsById("room-123_u1")).thenReturn(true);
+            when(voteRepository.save(any(PokerVote.class))).thenAnswer(i -> i.getArgument(0));
+
+            for (String card : new String[]{"24", "60", "100", "40", "?"}) {
+                assertEquals(card, service.saveVote(vote("u1", card, null), "u1").getValue());
+            }
+            for (String card : new String[]{"101", "007", "-1", "2.5", "abc", "1000"}) {
+                assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+                        () -> service.saveVote(vote("u1", card, null), "u1")).getStatusCode(), card);
+            }
+        }
+
+        @Test
+        @DisplayName("Fibonacci continua só com as cartas do baralho (24 é rejeitado)")
+        void shouldKeepFibonacciStrict() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+            when(participantRepository.existsById("room-123_u1")).thenReturn(true);
+            assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+                    () -> service.saveVote(vote("u1", "24", null), "u1")).getStatusCode());
+        }
+
+        @Test
         @DisplayName("Sala assíncrona guarda um voto por tarefa e exige a tarefa")
         void shouldKeepOneVotePerIssueInAsyncRoom() {
             sampleRoom.setMode("async");
