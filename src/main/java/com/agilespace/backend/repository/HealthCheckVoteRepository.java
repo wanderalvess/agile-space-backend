@@ -20,4 +20,9 @@ public interface HealthCheckVoteRepository extends JpaRepository<HealthCheckVote
     /** [boardId, pessoas que responderam]. */
     @Query("SELECT v.boardId, COUNT(DISTINCT v.participantId) FROM HealthCheckVote v WHERE v.boardId IN :boardIds GROUP BY v.boardId")
     List<Object[]> countRespondentsByBoard(@Param("boardIds") Collection<String> boardIds);
+
+    /** [boardId, participantId, quantas dimensões distintas a pessoa votou]. Só contagem: nunca o valor nem o comentário. */
+    @Query("SELECT v.boardId, v.participantId, COUNT(DISTINCT v.dimensionKey) FROM HealthCheckVote v "
+            + "WHERE v.boardId IN :boardIds GROUP BY v.boardId, v.participantId")
+    List<Object[]> countDimensionsByParticipant(@Param("boardIds") Collection<String> boardIds);
 }

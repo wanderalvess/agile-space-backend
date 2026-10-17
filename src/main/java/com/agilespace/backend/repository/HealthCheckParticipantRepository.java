@@ -18,6 +18,7 @@ public interface HealthCheckParticipantRepository extends JpaRepository<HealthCh
     Optional<HealthCheckParticipant> findByBoardIdAndId(String boardId, String id);
     void deleteByBoardIdAndId(String boardId, String id);
     void deleteByBoardId(String boardId);
+    List<HealthCheckParticipant> findByBoardIdIn(Collection<String> boardIds);
 
     @Query("SELECT p.boardId, COUNT(p) FROM HealthCheckParticipant p WHERE p.boardId IN :boardIds GROUP BY p.boardId")
     List<Object[]> countByBoard(@Param("boardIds") Collection<String> boardIds);

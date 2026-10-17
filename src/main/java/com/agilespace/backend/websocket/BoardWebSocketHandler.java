@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BiFunction;
+import java.util.function.Predicate;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.stream.Collectors;
@@ -115,6 +116,33 @@ public abstract class BoardWebSocketHandler extends TextWebSocketHandler impleme
             TextMessage textMessage = new TextMessage(objectMapper.writeValueAsString(messageMap));
             for (WebSocketSession session : sessions) {
                 if (session.isOpen()) {
+                    try {
+                        session.sendMessage(textMessage);
+                    } catch (IOException e) {
+                        log.error("Failed to send message to session {}", session.getId(), e);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to serialize or broadcast event '{}' for board {}", eventType, boardId, e);
+        }
+    }
+
+    /** Só às sessões da sala que satisfazem o filtro (ex.: quem fez opt-in em {@code ?presentation=1}). */
+    protected void broadcastEventToSessions(String boardId, String eventType, Object payload, Predicate<WebSocketSession> filter) {
+        Set<WebSocketSession> sessions = boardSessions.get(boardId);
+        if (sessions == null || sessions.isEmpty()) {
+            return;
+        }
+        try {
+            Map<String, Object> messageMap = new HashMap<>();
+            messageMap.put("type", eventType);
+            messageMap.put("boardId", boardId);
+            messageMap.put("payload", payload);
+            messageMap.put("timestamp", System.currentTimeMillis());
+            TextMessage textMessage = new TextMessage(objectMapper.writeValueAsString(messageMap));
+            for (WebSocketSession session : sessions) {
+                if (session.isOpen() && filter.test(session)) {
                     try {
                         session.sendMessage(textMessage);
                     } catch (IOException e) {

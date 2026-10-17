@@ -20,6 +20,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -28,6 +29,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * Regras do Radar de Saúde. Decisões:
@@ -52,6 +54,7 @@ public class HealthCheckService {
     static final Set<String> TEAM_ROLES = Set.of("AM", "PO", "PL", "DEV", "QA", "UX", "SME", "OUTRO");
     static final String STATUS_COLLECTING = "collecting";
     static final String STATUS_FINISHED = "finished";
+    static final Pattern STAGE_FORMAT = Pattern.compile("[A-Za-z0-9_.-]{1,40}");
 
     private final HealthCheckBoardRepository boardRepository;
     private final HealthCheckParticipantRepository participantRepository;
@@ -125,7 +128,7 @@ public class HealthCheckService {
 
     @Transactional(readOnly = true)
     public Optional<HealthCheckBoard> getBoard(String id) {
-        return boardRepository.findById(id);
+        return boardRepository.findById(id).map(this::withProgress);
     }
 
     @Transactional(readOnly = true)
@@ -135,7 +138,102 @@ public class HealthCheckService {
 
     @Transactional(readOnly = true)
     public List<HealthCheckBoard> listBoards(String squadId) {
-        return boardRepository.findByTeamIgnoreCaseOrderByCreatedAtDesc(squadId);
+        List<HealthCheckBoard> boards = boardRepository.findByTeamIgnoreCaseOrderByCreatedAtDesc(squadId);
+        applyProgress(boards, progressFor(boards));
+        return boards;
+    }
+
+    // --- Progresso de respostas (só contagens; nunca o voto de ninguém) ---
+
+    /**
+     * Fotografia de quem respondeu um radar. {@code pending} = pessoas na sala sem nenhum voto (só vai ao facilitador).
+     * Conta apenas quem ainda está na sala: quem saiu deixa de contar, mas os votos dele seguem no resultado.
+     */
+    record Progress(int participants, int responded, int completed, List<String> pending) {
+    }
+
+    private Map<String, Progress> progressFor(Collection<HealthCheckBoard> boards) {
+        if (boards == null || boards.isEmpty()) {
+            return Map.of();
+        }
+        List<String> ids = boards.stream().map(HealthCheckBoard::getId).toList();
+        Map<String, List<String>> participantsByBoard = new LinkedHashMap<>();
+        List<HealthCheckParticipant> participants = participantRepository.findByBoardIdIn(ids);
+        if (participants != null) {
+            for (HealthCheckParticipant p : participants) {
+                participantsByBoard.computeIfAbsent(p.getBoardId(), k -> new ArrayList<>()).add(p.getId());
+            }
+        }
+        Map<String, Map<String, Integer>> dimsByBoard = new LinkedHashMap<>();
+        List<Object[]> rows = voteRepository.countDimensionsByParticipant(ids);
+        if (rows != null) {
+            for (Object[] row : rows) {
+                dimsByBoard.computeIfAbsent((String) row[0], k -> new LinkedHashMap<>())
+                        .put((String) row[1], ((Number) row[2]).intValue());
+            }
+        }
+        Map<String, Progress> result = new LinkedHashMap<>();
+        for (HealthCheckBoard board : boards) {
+            List<String> inRoom = participantsByBoard.getOrDefault(board.getId(), List.of());
+            Map<String, Integer> dims = dimsByBoard.getOrDefault(board.getId(), Map.of());
+            int total = dimensionCount(board);
+            int responded = 0;
+            int completed = 0;
+            List<String> pending = new ArrayList<>();
+            for (String userId : inRoom) {
+                int voted = dims.getOrDefault(userId, 0);
+                if (voted > 0) {
+                    responded++;
+                    if (total > 0 && voted >= total) {
+                        completed++;
+                    }
+                } else {
+                    pending.add(userId);
+                }
+            }
+            result.put(board.getId(), new Progress(inRoom.size(), responded, completed, pending));
+        }
+        return result;
+    }
+
+    private static int dimensionCount(HealthCheckBoard board) {
+        return board.getDimensions() != null && board.getDimensions().isArray() ? board.getDimensions().size() : 0;
+    }
+
+    private static void applyProgress(Collection<HealthCheckBoard> boards, Map<String, Progress> progress) {
+        for (HealthCheckBoard board : boards) {
+            Progress p = progress.get(board.getId());
+            if (p != null) {
+                board.setParticipantsCount(p.participants());
+                board.setRespondedCount(p.responded());
+                board.setCompletedCount(p.completed());
+            }
+        }
+    }
+
+    /** Preenche as contagens (campos transitórios) do próprio objeto e o devolve. */
+    private HealthCheckBoard withProgress(HealthCheckBoard board) {
+        applyProgress(List.of(board), progressFor(List.of(board)));
+        return board;
+    }
+
+    /**
+     * GET /api/health-checks/{id}/progress. Contagens para qualquer pessoa autenticada; a lista de quem ainda não votou
+     * (só ids) apenas para o facilitador (criador ou ADMIN).
+     */
+    @Transactional(readOnly = true)
+    public HealthCheckProgress getProgress(String boardId, CeremonyCaller caller) {
+        requireAuthenticated(caller);
+        HealthCheckBoard board = requireBoard(boardId);
+        Progress p = progressFor(List.of(board)).get(boardId);
+        return new HealthCheckProgress(boardId, dimensionCount(board), p.participants(), p.responded(), p.completed(),
+                isFacilitator(board, caller) ? p.pending() : null);
+    }
+
+    /** Resposta de {@code GET /{id}/progress}; {@code pendingParticipantIds} só existe para o facilitador. */
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public record HealthCheckProgress(String boardId, int dimensionsCount, int participantsCount, int respondedCount,
+                                      int completedCount, List<String> pendingParticipantIds) {
     }
 
     /**
@@ -181,7 +279,7 @@ public class HealthCheckService {
                 .dimensions(validDimensions(body.getDimensions()))
                 .participantIds(JsonNodeFactory.instance.arrayNode().add(caller.id()))
                 .build();
-        HealthCheckBoard saved = boardRepository.save(board);
+        HealthCheckBoard saved = withProgress(boardRepository.save(board));
         publish(saved.getId(), "BOARD_UPDATED", saved);
         return new Saved<>(saved, true);
     }
@@ -328,7 +426,9 @@ public class HealthCheckService {
         String comment = clean(body.getComment(), MAX_COMMENT, "O comentário", false);
 
         String id = boardId + "_" + caller.id() + "_" + dimensionKey;
-        HealthCheckVote vote = voteRepository.findById(id).orElseGet(() -> HealthCheckVote.builder()
+        Optional<HealthCheckVote> existingVote = voteRepository.findById(id);
+        int votedBefore = existingVote.isPresent() ? -1 : distinctDimensionsVoted(boardId, caller.id());
+        HealthCheckVote vote = existingVote.orElseGet(() -> HealthCheckVote.builder()
                 .id(id)
                 .boardId(boardId)
                 .participantId(caller.id())
@@ -340,7 +440,31 @@ public class HealthCheckService {
         vote.setTimestamp(now());
         HealthCheckVote saved = voteRepository.save(vote);
         publishToUser(boardId, "VOTE_SAVED", saved, caller.id());
+        publishProgressIfChanged(board, votedBefore);
         return saved;
+    }
+
+    private int distinctDimensionsVoted(String boardId, String userId) {
+        List<HealthCheckVote> own = voteRepository.findByBoardIdAndParticipantId(boardId, userId);
+        return own == null ? 0 : (int) own.stream().map(HealthCheckVote::getDimensionKey).distinct().count();
+    }
+
+    /**
+     * Reaproveita o BOARD_UPDATED: avisa a sala só quando este voto muda "quantos responderam" (a primeira resposta da
+     * pessoa) ou "quantos completaram" (a última dimensão). Trocar um voto já dado ou votar em mais uma dimensão não
+     * gera evento. {@code votedBefore} = dimensões já votadas pela pessoa antes deste voto, ou -1 se ele só reescreveu
+     * um voto existente.
+     */
+    private void publishProgressIfChanged(HealthCheckBoard board, int votedBefore) {
+        if (votedBefore < 0) {
+            return;
+        }
+        int total = dimensionCount(board);
+        boolean firstAnswer = votedBefore == 0;
+        boolean completes = total > 0 && votedBefore + 1 == total;
+        if (firstAnswer || completes) {
+            publish(board.getId(), "BOARD_UPDATED", withProgress(board));
+        }
     }
 
     private static boolean dimensionExists(HealthCheckBoard board, String key) {
@@ -390,9 +514,60 @@ public class HealthCheckService {
         }
         board.setSummary(buildSummary(board, votes));
         board.setStatus(STATUS_FINISHED);
-        HealthCheckBoard saved = boardRepository.save(board);
+        board.setFinishedAt(now());
+        boolean hadStage = board.getPresentationStage() != null;
+        board.setPresentationStage(null);
+        HealthCheckBoard saved = withProgress(boardRepository.save(board));
         publish(saved.getId(), "BOARD_UPDATED", saved);
+        if (hadStage) {
+            publishStage(saved.getId(), null);
+        }
         return saved;
+    }
+
+    // --- Apresentação sincronizada ---
+
+    /** PUT /{id}/presentation: o facilitador publica a etapa atual. Só depois de encerrado (a apresentação mostra o resultado). */
+    @Transactional
+    public HealthCheckBoard setPresentationStage(String boardId, String stage, CeremonyCaller caller) {
+        requireAuthenticated(caller);
+        String clean = stage == null ? "" : stage.strip();
+        if (!STAGE_FORMAT.matcher(clean).matches()) {
+            throw badRequest("Etapa inválida: use de 1 a 40 caracteres (letras, números, _ - .).");
+        }
+        HealthCheckBoard board = requireBoardForUpdate(boardId);
+        if (!isFacilitator(board, caller)) {
+            throw forbidden("Apenas o organizador pode conduzir a apresentação.");
+        }
+        if (!STATUS_FINISHED.equals(board.getStatus())) {
+            throw conflict("A apresentação só começa depois que o radar for encerrado.");
+        }
+        return storeStage(board, clean);
+    }
+
+    /** DELETE /{id}/presentation: o facilitador encerra a apresentação. */
+    @Transactional
+    public HealthCheckBoard clearPresentationStage(String boardId, CeremonyCaller caller) {
+        requireAuthenticated(caller);
+        HealthCheckBoard board = requireBoardForUpdate(boardId);
+        if (!isFacilitator(board, caller)) {
+            throw forbidden("Apenas o organizador pode conduzir a apresentação.");
+        }
+        return storeStage(board, null);
+    }
+
+    private HealthCheckBoard storeStage(HealthCheckBoard board, String stage) {
+        board.setPresentationStage(stage);
+        HealthCheckBoard saved = withProgress(boardRepository.save(board));
+        publishStage(saved.getId(), stage);
+        return saved;
+    }
+
+    /** Evento opt-in (?presentation=1): estado completo da etapa. Não usa o BOARD_UPDATED para não acordar clientes antigos a cada clique. */
+    private void publishStage(String boardId, String stage) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("stage", stage);
+        AfterCommit.run(() -> webSocketHandler.broadcastPresentationStage(boardId, payload));
     }
 
     /** Nota numérica de um voto: verde/feliz = 3, amarelo/neutro = 2, vermelho/triste = 1, ou o próprio número (1..5). */

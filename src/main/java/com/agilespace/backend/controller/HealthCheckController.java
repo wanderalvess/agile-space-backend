@@ -55,6 +55,35 @@ public class HealthCheckController {
         return ResponseEntity.ok(healthCheckService.finish(id, caller(request)));
     }
 
+    /**
+     * Quantas pessoas já responderam. Contagens para qualquer autenticado; {@code pendingParticipantIds} (quem ainda não
+     * votou) só para o facilitador. Nunca devolve voto.
+     */
+    @GetMapping("/{id}/progress")
+    public ResponseEntity<HealthCheckService.HealthCheckProgress> getProgress(@PathVariable("id") String id, HttpServletRequest request) {
+        return ResponseEntity.ok()
+                .header("Cache-Control", "no-store")
+                .body(healthCheckService.getProgress(id, caller(request)));
+    }
+
+    public record PresentationRequest(String stage) {
+    }
+
+    /** O facilitador publica a etapa da apresentação (só depois de encerrado). */
+    @PutMapping("/{id}/presentation")
+    public ResponseEntity<HealthCheckBoard> setPresentation(
+            @PathVariable("id") String id,
+            @RequestBody(required = false) PresentationRequest body,
+            HttpServletRequest request) {
+        return ResponseEntity.ok(healthCheckService.setPresentationStage(id, body == null ? null : body.stage(), caller(request)));
+    }
+
+    /** O facilitador encerra a apresentação (limpa a etapa). */
+    @DeleteMapping("/{id}/presentation")
+    public ResponseEntity<HealthCheckBoard> clearPresentation(@PathVariable("id") String id, HttpServletRequest request) {
+        return ResponseEntity.ok(healthCheckService.clearPresentationStage(id, caller(request)));
+    }
+
     @GetMapping
     public ResponseEntity<List<HealthCheckBoard>> listBoards(@RequestParam("squadId") String squadId, HttpServletRequest request) {
         squadAccessService.requireSquadReadAccess(squadId, request);
