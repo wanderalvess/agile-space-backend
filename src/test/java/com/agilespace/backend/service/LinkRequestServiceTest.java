@@ -469,4 +469,85 @@ class LinkRequestServiceTest {
         assertEquals("ADMIN", savedAudit("LINK_REQUEST_REJECTED").getPerformedBy());
         verify(notificationTriggers).linkRequestDecided(eq("p1"), eq("u1"), eq(false), eq("DDWMISSI"), isNull(), isNull());
     }
+
+    // --- cancelar o próprio pedido ---
+
+    @Test
+    @DisplayName("cancel: o solicitante cancela o pendente -> CANCELLED, audita só ids e retira o aviso dos aprovadores")
+    void cancelOwnPending() {
+        LinkRequest request = pending("p1", "m1");
+        when(linkRequestRepository.findByIdForUpdate("p1")).thenReturn(Optional.of(request));
+        when(projectMemberRoleRepository.findAllById(Set.of("m1"))).thenReturn(List.of(row("m1", null, false)));
+
+        LinkRequestDto out = service.cancel("p1", "u1");
+
+        assertEquals("CANCELLED", out.status());
+        assertEquals("p1", out.id());
+        assertEquals("Ana Paula Nogueira", out.memberName());
+        assertNotNull(out.decidedAt());
+        assertEquals("CANCELLED", request.getStatus());
+        assertNotNull(request.getDecidedAt());
+        assertNull(request.getDecidedBy());
+        verify(linkRequestRepository).save(request);
+        AuditLog log = savedAudit("LINK_REQUEST_CANCELLED");
+        assertEquals("u1", log.getPerformedBy());
+        assertEquals("pedido=p1 squad=DDWMISSI solicitante=u1 tipo=CONTRIBUTOR", log.getDetails());
+        assertFalse(log.getDetails().contains("@"));
+        verify(notificationTriggers).linkRequestCancelled("p1");
+        verify(notificationTriggers, never()).linkRequestDecided(any(), any(), anyBoolean(), any(), any(), any());
+        verifyNoInteractions(userRepository); // cancelar nunca toca na conta nem no roster
+    }
+
+    @Test
+    @DisplayName("cancel: pedido inexistente 404; de outra conta 403 (e continua PENDING); sem sessão 401")
+    void cancelNotFoundAndNotOwner() {
+        when(linkRequestRepository.findByIdForUpdate("nada")).thenReturn(Optional.empty());
+        assertStatus(HttpStatus.NOT_FOUND, () -> service.cancel("nada", "u1"));
+
+        LinkRequest request = pending("p1", null);
+        when(linkRequestRepository.findByIdForUpdate("p1")).thenReturn(Optional.of(request));
+        assertStatus(HttpStatus.FORBIDDEN, () -> service.cancel("p1", "outra"));
+        assertEquals("PENDING", request.getStatus());
+
+        assertStatus(HttpStatus.UNAUTHORIZED, () -> service.cancel("p1", " "));
+        verify(linkRequestRepository, never()).save(any());
+        verify(auditLogRepository, never()).save(any());
+        verifyNoInteractions(notificationTriggers);
+    }
+
+    @Test
+    @DisplayName("cancel: pedido já aprovado ou recusado é 409 e não muda")
+    void cancelAlreadyDecided() {
+        for (String status : List.of(LinkRequest.APPROVED, LinkRequest.REJECTED)) {
+            LinkRequest request = pending("p-" + status, null);
+            request.setStatus(status);
+            when(linkRequestRepository.findByIdForUpdate("p-" + status)).thenReturn(Optional.of(request));
+            assertStatus(HttpStatus.CONFLICT, () -> service.cancel("p-" + status, "u1"));
+            assertEquals(status, request.getStatus());
+        }
+        verify(linkRequestRepository, never()).save(any());
+        verifyNoInteractions(notificationTriggers);
+    }
+
+    @Test
+    @DisplayName("cancel é idempotente: repetir num pedido já cancelado devolve 200 sem nova auditoria nem aviso")
+    void cancelTwiceIsIdempotent() {
+        LinkRequest request = pending("p1", null);
+        when(linkRequestRepository.findByIdForUpdate("p1")).thenReturn(Optional.of(request));
+
+        service.cancel("p1", "u1");
+        LinkRequestDto again = service.cancel("p1", "u1");
+
+        assertEquals("CANCELLED", again.status());
+        verify(linkRequestRepository, times(1)).save(request);
+        verify(auditLogRepository, times(1)).save(any());
+        verify(notificationTriggers, times(1)).linkRequestCancelled("p1");
+    }
+
+    @Test
+    @DisplayName("Filtro de status aceita CANCELLED (admin e lista por squad)")
+    void cancelledIsAValidStatusFilter() {
+        when(linkRequestRepository.findByStatusOrderByCreatedAtDesc("CANCELLED")).thenReturn(List.of());
+        assertTrue(service.adminList("cancelled").isEmpty());
+    }
 }

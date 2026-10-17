@@ -179,4 +179,14 @@ class NotificationTriggersTest {
         triggers.linkRequestDecided("lr4", null, true, "X", null, "adm");
         verify(notificationService, times(3)).notifyUsers(any(), any(), any());
     }
+
+    @Test
+    @DisplayName("Pedido de vínculo cancelado: retira o aviso de pedido novo pela chave do pedido")
+    void linkRequestCancelledRetiresCreatedNotice() {
+        triggers.linkRequestCancelled("lr9");
+        verify(notificationService).retireByDedupeKey("LINK_REQUEST_CREATED:lr9");
+
+        triggers.linkRequestCancelled(null);
+        verify(notificationService, times(1)).retireByDedupeKey(any());
+    }
 }
