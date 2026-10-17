@@ -87,7 +87,7 @@ liderança do roster.
 | POST | `/api/link-requests` | qualquer sessão | `201 { id, status: 'PENDING' }` |
 | GET | `/api/link-requests/mine` | qualquer sessão | `LinkRequestDto[]` |
 | GET | `/api/squads/{id}/link-requests/can-approve` | qualquer sessão | `200 { canApprove, canApproveLeadership }` |
-| GET | `/api/squads/{id}/link-requests?status=&limit=&offset=` | quem `canApprove` na squad | `200 AdminLinkRequestDto[]` |
+| GET | `/api/squads/{id}/link-requests?status=&page=&size=` | quem `canApprove` na squad | `200 AdminLinkRequestDto[]` |
 | POST | `/api/squads/{id}/link-requests/{reqId}/approve` | quem pode decidir o pedido | corpo opcional `{ memberId?: string }`; `200 AdminLinkRequestDto` (APPROVED) |
 | POST | `/api/squads/{id}/link-requests/{reqId}/reject` | quem pode decidir o pedido | corpo opcional `{ reason?: string }` (até 500); `200 AdminLinkRequestDto` (REJECTED) |
 | GET | `/api/admin/link-requests?status=` | ADMIN | como hoje (+ `kind`, `requestedRoleName`) |

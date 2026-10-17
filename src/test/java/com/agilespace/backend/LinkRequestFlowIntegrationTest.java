@@ -119,7 +119,7 @@ public class LinkRequestFlowIntegrationTest {
 
         // Os admins foram avisados do pedido novo
         assertEquals(1, notificationRepository.findAll().stream()
-                .filter(n -> "LINK_REQUEST".equals(n.getKind()) && "lr-admin".equals(n.getUserId()) && "/admin".equals(n.getLink())).count());
+                .filter(n -> "LINK_REQUEST".equals(n.getKind()) && "lr-admin".equals(n.getUserId()) && "/admin?tab=aprovacoes".equals(n.getLink())).count());
 
         // Aprovar vincula a conta à linha de liderança e herda o accountId
         mockMvc.perform(post("/api/admin/link-requests/" + requestId + "/approve").header("Authorization", token(admin)))
