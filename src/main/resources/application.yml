@@ -107,6 +107,18 @@ app:
     mode: ${APP_MEMBERSHIP_MODE:shadow}
     # TTL do cache de vínculos por usuário (segundos; 0 desliga). Toda gravação de pmr/projeto o invalida.
     cache-ttl-seconds: ${APP_MEMBERSHIP_CACHE_TTL_SECONDS:60}
+    # AUTORIZAÇÃO por squad (docs/vinculo-auditoria-e-plano.md, Etapa 2). ALTO RISCO: quem hoje acessa só por roster
+    # (squad_members), por users.squad_id solto ou por cargo (jobTitle) perde o acesso quando virar new.
+    #   legacy = decisão exatamente como antes (padrão; valor desconhecido também cai aqui, nunca em new).
+    #   shadow = a decisão continua a do legado; a regra nova roda em paralelo e cada divergência vira o log
+    #            authz_divergence e o contador authz.divergence{check,direction}.
+    #   new    = decide a regra nova: ADMIN, LEAD (até a Etapa 4) e vínculos de project_member_roles.
+    # Antes de virar new: GET /api/admin/membership/authz-diff e a categoria WOULD_LOSE_ACCESS de /report. Reverter =
+    # APP_MEMBERSHIP_AUTHZ=legacy e reiniciar; não há migração de banco.
+    authz: ${APP_MEMBERSHIP_AUTHZ:legacy}
+    # Repetição do MESMO log authz_divergence (conta, ponto, squad, sentido): no máximo a cada N segundos (0 = toda vez).
+    # O contador authz.divergence conta todas.
+    authz-log-dedupe-seconds: ${APP_MEMBERSHIP_AUTHZ_LOG_DEDUPE_SECONDS:60}
   squad:
     scheduled-sync:
       # Desligado por padrão: ligar isso é uma mudança de comportamento real (um processo

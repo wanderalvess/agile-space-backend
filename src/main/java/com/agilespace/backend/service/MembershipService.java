@@ -121,6 +121,53 @@ public class MembershipService {
         cache.evict(userId);
     }
 
+    // ---------- leitura para a autorização (Etapa 2) ----------
+
+    /**
+     * Só a lista de vínculos (com cache), sem o cálculo de squad ativa/legacyOnly de {@link #forUser}: é o que a
+     * autorização por squad precisa e evita as consultas de rastro legado quando a lista é vazia.
+     */
+    @Transactional(readOnly = true)
+    public List<MembershipDto> membershipsOf(User user) {
+        String fingerprint = fingerprint(user);
+        MembershipCache.Snapshot snapshot = cache.get(user.getId(), fingerprint).orElse(null);
+        if (snapshot == null) {
+            snapshot = load(user);
+            cache.put(user.getId(), fingerprint, snapshot);
+        }
+        return snapshot.memberships();
+    }
+
+    /** Vínculo da pessoa nesta squad (sem caixa, com o alias DDWMISSI/MISSI), ou null. */
+    public MembershipDto membershipIn(User user, String squadId) {
+        if (user == null || squadId == null || squadId.isBlank()) return null;
+        return findIn(membershipsOf(user), squadId);
+    }
+
+    /** Squad ativa validada contra os vínculos (preferência em users.default_project_id); null sem vínculo nenhum. */
+    public String activeProjectOf(User user) {
+        return resolveActive(user.getDefaultProjectId(), membershipsOf(user));
+    }
+
+    static MembershipDto findIn(List<MembershipDto> memberships, String squadId) {
+        if (memberships == null || squadId == null) return null;
+        for (MembershipDto m : memberships) {
+            if (sameSquad(m.projectId(), squadId)) return m;
+        }
+        return null;
+    }
+
+    /** Mesma squad: igualdade sem caixa, com DDWMISSI e MISSI tratados como a mesma squad (alias histórico). */
+    static boolean sameSquad(String a, String b) {
+        if (a == null || b == null) return false;
+        if (a.trim().equalsIgnoreCase(b.trim())) return true;
+        return isMissiAlias(a) && isMissiAlias(b);
+    }
+
+    static boolean isMissiAlias(String squadId) {
+        return squadId != null && ("DDWMISSI".equalsIgnoreCase(squadId.trim()) || "MISSI".equalsIgnoreCase(squadId.trim()));
+    }
+
     /**
      * A preferência (users.default_project_id) só vale se está nos vínculos (comparação sem caixa; devolve o id
      * canônico do vínculo). Fora deles, a primeira squad por precedência; sem vínculo nenhum, null.

@@ -62,6 +62,8 @@ services:
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
       # Migração do vínculo (docs/membership-api.md): legacy | shadow (padrão) | new. Reverter = legacy.
       APP_MEMBERSHIP_MODE: ${APP_MEMBERSHIP_MODE:-shadow}
+      # Autorização por squad (Etapa 2, ALTO RISCO): legacy (padrão) | shadow | new. Reverter = legacy. Ver docs/membership-api.md.
+      APP_MEMBERSHIP_AUTHZ: ${APP_MEMBERSHIP_AUTHZ:-legacy}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
       # OpenTelemetry: agente sempre presente na imagem (ver Dockerfile), inerte até
       # OTEL_JAVAAGENT_ENABLED=true. Vendor-neutro (OTLP) — funciona com SigNoz ou qualquer
