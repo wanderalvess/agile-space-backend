@@ -11,7 +11,8 @@ import java.time.LocalDateTime;
 @Table(name = "project_member_roles", indexes = {
     @Index(name = "idx_pmr_project", columnList = "project_id"),
     @Index(name = "idx_pmr_email", columnList = "email"),
-    @Index(name = "idx_pmr_jira_account", columnList = "jira_account_id")
+    @Index(name = "idx_pmr_jira_account", columnList = "jira_account_id"),
+    @Index(name = "idx_pmr_user_id", columnList = "user_id")
 })
 @Getter
 @Setter
@@ -50,6 +51,13 @@ public class ProjectMemberRole {
 
     @Column(name = "is_leadership", nullable = false)
     private boolean isLeadership; // Indica se é papel de liderança ou transversal
+
+    /**
+     * Origem da linha (ver {@link MembershipSource}): JIRA, MANUAL, INVITE, CLAIM, APPROVED, BACKFILL, MIGRATION.
+     * Nulo = legado (criada antes da V75; origem desconhecida, nunca se presume).
+     */
+    @Column(name = "source", length = 20)
+    private String source;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
