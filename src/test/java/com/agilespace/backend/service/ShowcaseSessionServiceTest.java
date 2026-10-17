@@ -283,6 +283,9 @@ class ShowcaseSessionServiceTest {
             assertEquals("PO Original", kept.getDecidedByName());
             assertEquals("caller-1", fresh.getDecidedBy());
             assertNotNull(fresh.getDecidedAt());
+            // Instante com fuso (termina em Z): sem ele o navegador lê a hora do servidor como hora local e mostra adiantada.
+            assertTrue(fresh.getDecidedAt().endsWith("Z"), fresh.getDecidedAt());
+            assertDoesNotThrow(() -> java.time.Instant.parse(fresh.getDecidedAt()));
             assertNull(open.getDecidedBy());
         }
 

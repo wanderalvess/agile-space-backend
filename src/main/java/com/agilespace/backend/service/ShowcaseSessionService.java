@@ -32,6 +32,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -304,7 +305,7 @@ public class ShowcaseSessionService {
             return;
         }
         // Decisão nova ou trocada: quem decidiu é quem está autenticado, não o que o cliente escreveu.
-        String now = LocalDateTime.now().toString();
+        String now = Instant.now().toString();
         task.setDecidedBy(callerId);
         String name = callerName(callerId);
         if (name != null) {
