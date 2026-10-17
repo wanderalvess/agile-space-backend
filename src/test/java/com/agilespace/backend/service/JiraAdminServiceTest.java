@@ -95,6 +95,7 @@ class JiraAdminServiceTest {
             verify(squadMetricsRollupRepository).save(rollupCaptor.capture());
             assertEquals(0, rollupCaptor.getValue().getTotalIssues());
             assertEquals(10, rollupCaptor.getValue().getWorkdaysTotal());
+            assertEquals("PROJ1", rollupCaptor.getValue().getDbId(), "PK atribuída à mão: sem ela o save falha no Postgres");
 
             assertEquals("PROJ1", result.getSquadId());
             assertEquals(0, result.getMembersFound());

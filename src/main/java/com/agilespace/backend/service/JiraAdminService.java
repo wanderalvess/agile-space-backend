@@ -249,6 +249,9 @@ public class JiraAdminService {
         // 1.1 Salva ou atualiza o Rollup de Métricas da Squad
         SquadMetricsRollup rollup = squadMetricsRollupRepository.findById(projectKey).orElse(new SquadMetricsRollup());
         rollup.setSquadId(projectKey);
+        // A PK é atribuída à mão: sem ela o save falha no Postgres ("Identifier ... must be manually assigned").
+        // O rollup provisório da importação usa a chave da squad, o que também o faz ser achado pelo findById acima.
+        if (rollup.getDbId() == null || rollup.getDbId().isBlank()) rollup.setDbId(projectKey);
         if (rollup.getSprintName() == null || rollup.getSprintName().isBlank()) {
             rollup.setSprintName("Sprint Ativa (" + projectKey + ")");
         }
