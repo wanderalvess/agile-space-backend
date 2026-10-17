@@ -31,4 +31,12 @@ public interface NotificationRepository extends JpaRepository<Notification, Stri
     /** Quem já recebeu a notificação com esta chave (lembrete 1 por sala, aviso 1 por pessoa). */
     @Query("SELECT n.userId FROM Notification n WHERE n.dedupeKey = :key AND n.userId IN :userIds")
     List<String> findUserIdsWithDedupeKey(@Param("key") String key, @Param("userIds") Collection<String> userIds);
+
+    /** Quem ainda tem não lida a notificação desta chave (para retirar o aviso de um pedido cancelado). */
+    @Query("SELECT DISTINCT n.userId FROM Notification n WHERE n.dedupeKey = :key AND n.readAt IS NULL")
+    List<String> findUnreadUserIdsByDedupeKey(@Param("key") String key);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("UPDATE Notification n SET n.readAt = :now WHERE n.dedupeKey = :key AND n.readAt IS NULL")
+    int markReadByDedupeKey(@Param("key") String key, @Param("now") LocalDateTime now);
 }

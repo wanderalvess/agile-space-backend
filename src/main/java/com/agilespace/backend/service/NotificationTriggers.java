@@ -206,6 +206,12 @@ public class NotificationTriggers {
         });
     }
 
+    /** Pedido cancelado pelo solicitante: retira (marca como lido) o aviso de pedido novo que os aprovadores tinham. */
+    public void linkRequestCancelled(String requestId) {
+        if (requestId == null) return;
+        fire("LINK_REQUEST_CANCELLED", () -> notificationService.retireByDedupeKey("LINK_REQUEST_CREATED:" + requestId));
+    }
+
     // --- internos ---
 
     record Candidate(String userId, String name, String email) { }

@@ -25,6 +25,8 @@ public class LinkRequest {
     public static final String PENDING = "PENDING";
     public static final String APPROVED = "APPROVED";
     public static final String REJECTED = "REJECTED";
+    /** O próprio solicitante desistiu do pedido ainda pendente (status final; a coluna é VARCHAR(20) sem CHECK, sem migração). */
+    public static final String CANCELLED = "CANCELLED";
 
     /** Pedido de contribuidor: aprovado por AM/SM/PO/People Lead da squad (ou People/Tribe Lead da tribo, ou ADMIN). */
     public static final String KIND_CONTRIBUTOR = "CONTRIBUTOR";
