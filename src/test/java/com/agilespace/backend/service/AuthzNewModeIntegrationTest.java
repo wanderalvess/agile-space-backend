@@ -128,7 +128,7 @@ class AuthzNewModeIntegrationTest {
     }
 
     @Nested
-    @SpringBootTest(properties = "app.membership.authz=new")
+    @SpringBootTest(properties = {"app.membership.authz=new", "app.membership.lead-level=legacy"})
     @AutoConfigureMockMvc
     class ModoNew extends Base {
 
@@ -170,8 +170,55 @@ class AuthzNewModeIntegrationTest {
         }
     }
 
+    /**
+     * Etapa 4: o mesmo cenário com {@code app.membership.lead-level=off} (o padrão do application.yml): o nível LEAD não concede
+     * nada; só o vínculo de liderança dá poder, e só na squad do vínculo.
+     */
     @Nested
-    @SpringBootTest(properties = "app.membership.authz=shadow")
+    @SpringBootTest(properties = {"app.membership.authz=new", "app.membership.lead-level=off"})
+    @AutoConfigureMockMvc
+    class ModoNewLeadOff extends Base {
+
+        @Override
+        void scenario() {
+            super.scenario();
+            user("leadlink", "LEAD", null, null);
+            pmr("r-leadlink", "SQ1", "AGILE_MASTER", "Agile Master", true, "leadlink");
+        }
+
+        @Test
+        void leadSemVinculoNaoTemNada_comVinculoSoNaSquadDele() throws Exception {
+            // LEAD sem vínculo: nenhuma leitura, gestão ou convite, em nenhuma squad
+            assertEquals(403, read("SQ1", "lead", "LEAD"));
+            assertEquals(403, read("SQ2", "lead", "LEAD"));
+            assertEquals(403, manage("SQ2", "lead", "LEAD"));
+            assertEquals(403, invite("SQ1", "lead", "LEAD"));
+            assertEquals(403, read("SQ1", "lead", "MEMBER"), "token velho de MEMBER, conta LEAD: mesma decisão");
+
+            // LEAD com vínculo de liderança em SQ1: poder só em SQ1, pelo vínculo
+            assertEquals(200, read("SQ1", "leadlink", "LEAD"));
+            assertEquals(200, manage("SQ1", "leadlink", "LEAD"));
+            assertEquals(201, invite("SQ1", "leadlink", "LEAD"));
+            assertEquals(403, read("SQ2", "leadlink", "LEAD"));
+            assertEquals(403, manage("SQ2", "leadlink", "LEAD"));
+            assertEquals(403, invite("SQ2", "leadlink", "LEAD"));
+
+            // ADMIN e o resto do cenário não mudam
+            assertEquals(200, read("SQ2", "admin", "ADMIN"));
+            assertEquals(200, manage("SQ1", "am", "MEMBER"));
+            assertEquals(403, manage("SQ1", "dev", "MEMBER"));
+        }
+
+        @Test
+        void authzDiffTrataLeadComoMember() throws Exception {
+            mockMvc.perform(get("/api/admin/membership/authz-diff").header("Authorization", token("admin", "ADMIN")))
+                    .andExpect(status().isOk())
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.usersSkippedPrivileged").value(1));
+        }
+    }
+
+    @Nested
+    @SpringBootTest(properties = {"app.membership.authz=shadow", "app.membership.lead-level=legacy"})
     @AutoConfigureMockMvc
     class ModoShadow extends Base {
 
