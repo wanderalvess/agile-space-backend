@@ -36,4 +36,11 @@ public class AuthResponseDto {
     private boolean isTransversalLeader;
 
     private List<UserProjectAccessDto.ProjectAccessItem> accessibleProjects;
+
+    /**
+     * Aditivo e opcional: só vem (true) quando app.membership.mode=new e a conta não tem nenhuma linha em
+     * project_member_roles, só rastros do modelo antigo (users.squad_id / roster). Ausente em qualquer outro caso.
+     */
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private Boolean legacyOnly;
 }

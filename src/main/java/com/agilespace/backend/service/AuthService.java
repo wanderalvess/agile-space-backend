@@ -38,6 +38,16 @@ public class AuthService {
     private final JwtTokenUtil jwtTokenUtil;
     private final JiraAccountIdGuard jiraAccountIdGuard;
 
+    /**
+     * Modelo novo de vínculo (opcionais, fora do construtor: o modo decide se entram em jogo; ausentes = legacy).
+     * Ver app.membership.mode em application.yml e docs/membership-api.md.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private MembershipService membershipService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private MembershipShadowService membershipShadowService;
+
     /** Opcional (não entra no construtor): só serve para o logout limpar o cache de estado da conta. */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.agilespace.backend.security.UserSessionGuard sessionGuard;
@@ -127,22 +137,24 @@ public class AuthService {
         userRepository.save(user);
 
         // Resolve projetos e lideranças
-        UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(user);
+        Resolved resolved = resolveAccess(user);
+        boolean rosterFallback = false;
 
         // Se o usuário ainda não tiver um defaultProjectId e possuir projetos associados, define o primeiro
-        if (user.getDefaultProjectId() == null && !access.getProjects().isEmpty()) {
-            user.setDefaultProjectId(access.getProjects().get(0).getProjectId());
+        if (user.getDefaultProjectId() == null && !resolved.access().getProjects().isEmpty()) {
+            user.setDefaultProjectId(resolved.access().getProjects().get(0).getProjectId());
             if (user.getSquadId() == null || user.getSquadId().isBlank()) {
-                user.setSquadId(access.getProjects().get(0).getProjectId());
+                user.setSquadId(resolved.access().getProjects().get(0).getProjectId());
             }
             userRepository.save(user);
-            access = userProjectResolverService.resolveUserAccess(user);
+            resolved = resolveAccess(user);
         } else if ((user.getSquadId() == null || user.getSquadId().isBlank()) && user.getDefaultProjectId() != null) {
             user.setSquadId(user.getDefaultProjectId());
             userRepository.save(user);
         } else if (user.getSquadId() == null || user.getSquadId().isBlank()) {
             List<SquadMember> matchedMembers = squadMemberRepository.findByUserIdentifier(cleanEmail);
             if (!matchedMembers.isEmpty()) {
+                rosterFallback = true;
                 user.setDefaultProjectId(matchedMembers.get(0).getSquadId());
                 user.setSquadId(matchedMembers.get(0).getSquadId());
                 userRepository.save(user);
@@ -152,11 +164,30 @@ public class AuthService {
                         squadMemberRepository.save(sm);
                     }
                 }
-                access = userProjectResolverService.resolveUserAccess(user);
+                resolved = resolveAccess(user);
             }
         }
 
-        return buildAuthResponse(user, access);
+        if (resolved.access().getProjects().isEmpty()) {
+            // Sessão sem nenhuma linha em project_member_roles. Antes isso passava em silêncio (principalmente o fallback
+            // por roster acima, que grava squad_id/default_project_id sem criar vínculo). Não bloqueia o login: fica
+            // registrado e, no modelo novo, /me/memberships e a sessão trazem legacyOnly=true. Conta nova, sem rastro
+            // nenhum, só vai para o onboarding (não é "legado").
+            boolean traces = rosterFallback || hasSquadTrace(user.getSquadId()) || hasSquadTrace(user.getDefaultProjectId());
+            if (traces) {
+                log.warn("Login sem vínculo em project_member_roles (só roster/squad_id antigo): user={} roster_fallback={}",
+                        user.getId(), rosterFallback);
+            } else {
+                log.debug("Login de conta sem vínculo e sem rastro do modelo antigo: user={}", user.getId());
+            }
+        }
+
+        return buildAuthResponse(user, resolved);
+    }
+
+    private static boolean hasSquadTrace(String squad) {
+        return squad != null && !squad.isBlank()
+                && !"Sem Time".equalsIgnoreCase(squad.trim()) && !"Sem Squad".equalsIgnoreCase(squad.trim());
     }
 
     /**
@@ -291,8 +322,7 @@ public class AuthService {
             squadMemberRepository.save(sm);
         }
 
-        UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(user);
-        return buildAuthResponse(user, access);
+        return buildAuthResponse(user, resolveAccess(user));
     }
 
     /**
@@ -303,8 +333,7 @@ public class AuthService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão inválida ou expirada"));
 
-        UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(user);
-        return buildAuthResponse(user, access);
+        return buildAuthResponse(user, resolveAccess(user));
     }
 
     /**
@@ -315,23 +344,57 @@ public class AuthService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado"));
 
-        UserProjectAccessDto currentAccess = userProjectResolverService.resolveUserAccess(user);
-        boolean hasAccess = currentAccess.getProjects().stream()
-                .anyMatch(p -> p.getProjectId().equalsIgnoreCase(newProjectId));
-        if (!hasAccess) {
+        // Valida contra os vínculos do modo ativo (legacy/shadow: resolvedor antigo; new: MembershipService). Nunca afrouxa:
+        // sem vínculo na squad pedida, 403.
+        UserProjectAccessDto currentAccess = resolveAccess(user).access();
+        UserProjectAccessDto.ProjectAccessItem target = currentAccess.getProjects().stream()
+                .filter(p -> p.getProjectId().equalsIgnoreCase(newProjectId))
+                .findFirst().orElse(null);
+        if (target == null) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Usuário não tem acesso a este projeto");
         }
 
-        user.setDefaultProjectId(newProjectId);
-        user.setSquadId(newProjectId);
+        // Dual-write continua (default_project_id e squad_id). No modelo novo grava o id canônico do vínculo (o legado
+        // gravava o texto como veio, inclusive com outra caixa).
+        String toStore = membershipMode() == MembershipMode.NEW ? target.getProjectId() : newProjectId;
+        user.setDefaultProjectId(toStore);
+        user.setSquadId(toStore);
         user = userRepository.save(user);
+        if (membershipService != null) {
+            membershipService.evict(userId);
+        }
 
-        UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(user);
-        return buildAuthResponse(user, access);
+        return buildAuthResponse(user, resolveAccess(user));
     }
 
-    private AuthResponseDto buildAuthResponse(User user, UserProjectAccessDto access) {
-        return buildAuthResponse(user, access, Instant.now().getEpochSecond());
+    private AuthResponseDto buildAuthResponse(User user, Resolved resolved) {
+        return buildAuthResponse(user, resolved, Instant.now().getEpochSecond());
+    }
+
+    /** Vínculos que alimentam a sessão: o access (accessibleProjects), a squad ativa e, no modelo novo, legacyOnly. */
+    private record Resolved(UserProjectAccessDto access, String activeProjectId, Boolean legacyOnly) { }
+
+    private MembershipMode membershipMode() {
+        return membershipService == null ? MembershipMode.LEGACY : membershipService.mode();
+    }
+
+    /**
+     * Resolve os vínculos conforme app.membership.mode. LEGACY e SHADOW devolvem exatamente o que o resolvedor antigo
+     * devolvia (a squad ativa continua sendo users.default_project_id sem validar); SHADOW ainda compara com o modelo
+     * novo e registra as divergências. NEW usa o {@link MembershipService}: squad ativa validada contra os vínculos.
+     */
+    private Resolved resolveAccess(User user) {
+        MembershipMode mode = membershipMode();
+        if (mode == MembershipMode.NEW) {
+            MembershipService.View view = membershipService.forUser(user);
+            return new Resolved(MembershipService.toAccess(user, view), view.activeProjectId(), view.legacyOnly() ? Boolean.TRUE : null);
+        }
+        UserProjectAccessDto legacy = userProjectResolverService.resolveUserAccess(user);
+        String active = user.getDefaultProjectId() != null ? user.getDefaultProjectId() : legacy.getPrimaryProjectId();
+        if (mode == MembershipMode.SHADOW && membershipShadowService != null) {
+            membershipShadowService.record(user, legacy, active);
+        }
+        return new Resolved(legacy, active, null);
     }
 
     /**
@@ -349,8 +412,7 @@ public class AuthService {
         if (!user.isActive()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão inválida: conta inativa");
         }
-        UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(user);
-        return buildAuthResponse(user, access, sessionStartEpochSeconds);
+        return buildAuthResponse(user, resolveAccess(user), sessionStartEpochSeconds);
     }
 
     /**
@@ -373,8 +435,7 @@ public class AuthService {
         if (sessionGuard != null) {
             sessionGuard.evict(userId);
         }
-        UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(user);
-        return buildAuthResponse(user, access);
+        return buildAuthResponse(user, resolveAccess(user));
     }
 
     /** Encerra a sessão no servidor: tokens emitidos até agora (de qualquer aparelho) deixam de valer. */
@@ -389,8 +450,9 @@ public class AuthService {
         });
     }
 
-    private AuthResponseDto buildAuthResponse(User user, UserProjectAccessDto access, long authAt) {
-        String activeProjId = (user.getDefaultProjectId() != null) ? user.getDefaultProjectId() : access.getPrimaryProjectId();
+    private AuthResponseDto buildAuthResponse(User user, Resolved resolved, long authAt) {
+        UserProjectAccessDto access = resolved.access();
+        String activeProjId = resolved.activeProjectId();
         String activeProjName = "";
         String activeProjRole = "Membro";
         String segment = user.getSegmentName() != null ? user.getSegmentName() : "";
@@ -438,6 +500,7 @@ public class AuthService {
                 .tribeName(tribe)
                 .isTransversalLeader(access.isTransversalLeader())
                 .accessibleProjects(access.getProjects())
+                .legacyOnly(resolved.legacyOnly())
                 .build();
     }
 }

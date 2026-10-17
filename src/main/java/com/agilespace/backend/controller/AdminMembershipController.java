@@ -1,8 +1,10 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.dto.MembershipReportDto;
+import com.agilespace.backend.dto.MembershipShadowDiffDto;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.MembershipReportService;
+import com.agilespace.backend.service.MembershipShadowService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +31,7 @@ import java.nio.charset.StandardCharsets;
 public class AdminMembershipController {
 
     private final MembershipReportService reportService;
+    private final MembershipShadowService shadowService;
 
     @GetMapping("/report")
     public ResponseEntity<MembershipReportDto> report(HttpServletRequest request) {
@@ -45,6 +48,16 @@ public class AdminMembershipController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"membership-report.csv\"")
                 .header(HttpHeaders.CACHE_CONTROL, "no-store")
                 .body(csv.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Legado x novo para todos os usuários ativos (docs/membership-api.md). Somente leitura: recalcula do banco, não usa
+     * nem popula o cache e não grava nada.
+     */
+    @GetMapping("/shadow-diff")
+    public ResponseEntity<MembershipShadowDiffDto> shadowDiff(HttpServletRequest request) {
+        requireAdmin(request);
+        return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store").body(shadowService.report());
     }
 
     private static void requireAdmin(HttpServletRequest request) {

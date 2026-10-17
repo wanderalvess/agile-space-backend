@@ -60,6 +60,8 @@ services:
       # Rede do proxy reverso (Caddy) cujo X-Forwarded-For o limitador de login pode ler. Vazio = ignora o cabeçalho.
       # Com o profile "proxy": TRUSTED_PROXIES=172.16.0.0/12 (faixa padrão das redes do Docker; confira com docker network inspect).
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      # Migração do vínculo (docs/membership-api.md): legacy | shadow (padrão) | new. Reverter = legacy.
+      APP_MEMBERSHIP_MODE: ${APP_MEMBERSHIP_MODE:-shadow}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
       # OpenTelemetry: agente sempre presente na imagem (ver Dockerfile), inerte até
       # OTEL_JAVAAGENT_ENABLED=true. Vendor-neutro (OTLP) — funciona com SigNoz ou qualquer
