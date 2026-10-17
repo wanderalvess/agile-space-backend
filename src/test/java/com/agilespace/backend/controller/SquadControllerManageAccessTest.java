@@ -44,7 +44,8 @@ class SquadControllerManageAccessTest {
     @BeforeEach
     void setUp() {
         SquadAccessService access = new SquadAccessService(userRepository, service, resolver);
-        controller = new SquadController(service, squadSyncService, squadSyncGuard, null, userRepository, resolver, access, teamService);
+        controller = new SquadController(service, squadSyncService, squadSyncGuard, null, userRepository, resolver, access, teamService,
+                new com.agilespace.backend.service.SquadBootstrapService(userRepository, service));
     }
 
     private HttpServletRequest as(String userId, String role) {
