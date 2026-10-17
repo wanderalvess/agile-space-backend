@@ -161,7 +161,7 @@ class KnowledgeAccessAndVersionsTest {
     @Test
     @DisplayName("Documento novo ganha a squad do autor (do servidor) e a versão 1")
     void createSetsSquadAndFirstVersion() {
-        when(userRepository.findById("autor")).thenReturn(Optional.of(User.builder().id("autor").squadId("SQ9").build()));
+        when(userRepository.findById("autor")).thenReturn(Optional.of(User.builder().id("autor").defaultProjectId("SQ9").build()));
         when(repository.save(any(KnowledgeDocument.class))).thenAnswer(i -> {
             KnowledgeDocument saved = i.getArgument(0);
             saved.setId(UUID.randomUUID());

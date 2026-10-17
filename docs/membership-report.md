@@ -70,7 +70,7 @@ Datas e contagens vêm como números; campos ausentes vêm `null`.
 | `LEAD_NO_LEADERSHIP_LINK` | **Etapa 4.** Subconjunto de `LEAD_USERS` sem NENHUMA linha de liderança (`is_leadership`) em `project_member_roles`: `POST /api/admin/membership/lead-demotion?apply=true` NÃO as rebaixa (crie o vínculo ou use `userId`+`forceDemote=true`) | `sem_lideranca_por_vinculo` |
 | `TRANSVERSAL_LEADERS` | Linhas TRIBE_LEAD/AGILE_COACH/PEOPLE_LEAD com liderança, que expandem para a tribo/segmento | `squads_alcancadas=N` |
 | `SQUAD_KEY_CASE_VARIANTS` | `users.squad_id` gravado com caixa/espaço diferentes para a mesma squad | `N variantes` |
-| `USER_SQUAD_DEFAULT_DIVERGENT` | `users.squad_id` ≠ `default_project_id` | `default=<chave>` |
+| `USER_SQUAD_DEFAULT_DIVERGENT` | `users.squad_id` ≠ `default_project_id` (**diagnóstico de legado**: desde a Etapa 5 a coluna não é mais gravada, é um retrato do deploy) | `default=<chave>` |
 | `PMR_ORPHAN_PROJECT` | pmr de `project_id` que não existe em `projects` (não há FK) | `N linhas` |
 | `ROSTER_ONLY_SQUAD` | `squad_members` de squad sem linha em `projects` | `N pessoas` |
 | `PROJECT_WITHOUT_TRIBE` | `projects.tribe_name` vazio | `sem_tribo` |

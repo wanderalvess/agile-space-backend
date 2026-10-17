@@ -309,23 +309,18 @@ class LinkRequestServiceTest {
     }
 
     @Test
-    @DisplayName("Aprovar vincula a conta à linha, herda o accountId do Jira e liga o roster da squad")
+    @DisplayName("Aprovar vincula a conta à linha e herda o accountId do Jira; o roster NÃO é mais marcado com claimed_by_uid")
     void approveLinksAccount() {
         User requester = ana();
         ProjectMemberRole row = row("m1", null, false);
         LinkRequest request = stubApproval(pending("p1", "m1"), row, requester);
-        SquadMember sm = new SquadMember();
-        when(squadMemberRepository.findByUserIdentifier("acc-ana")).thenReturn(List.of(sm));
-        when(squadMemberRepository.findByUserIdentifier("ana.nogueira@totvs.com.br")).thenReturn(List.of());
-        when(squadMemberRepository.findByUserIdentifier("Ana Paula Nogueira")).thenReturn(List.of());
 
         AdminLinkRequestDto out = service.approve("p1", null, "adm", "adm@totvs.com.br");
 
         assertEquals("u1", row.getUserId());
         assertEquals("acc-ana", requester.getJiraAccountId());
         verify(userRepository).save(requester);
-        assertEquals("u1", sm.getClaimedByUid());
-        verify(squadMemberRepository).save(sm);
+        verifyNoInteractions(squadMemberRepository);
         assertEquals("APPROVED", request.getStatus());
         assertEquals("APPROVED", out.status());
         assertEquals("adm@totvs.com.br", out.decidedBy());

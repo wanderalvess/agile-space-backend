@@ -165,14 +165,14 @@ public class InviteService {
                 () -> leadPolicy.isPrivileged(caller.getRole())
                         || squadAccessService.isLinkedToSquad(caller, squadId),
                 legacyAllowed -> legacyAllowed
-                        ? (squadId.equalsIgnoreCase(caller.getSquadId()) || squadId.equalsIgnoreCase(caller.getDefaultProjectId())
+                        ? (squadId.equalsIgnoreCase(caller.getDefaultProjectId())
                                 ? "ONLY_SQUAD_ID" : "RESOLVER_ONLY")
                         : "NEW_ONLY_MEMBERSHIP");
     }
 
     private boolean legacyIsSquadMemberOrAdmin(String squadId, User caller) {
         if (leadPolicy.isPrivileged(caller.getRole())) return true;
-        if (squadId.equalsIgnoreCase(caller.getSquadId()) || squadId.equalsIgnoreCase(caller.getDefaultProjectId())) return true;
+        if (squadId.equalsIgnoreCase(caller.getDefaultProjectId())) return true;
         List<ProjectMemberRole> rows = projectMemberRoleRepository.findByProjectId(squadId);
         return rows != null && rows.stream().anyMatch(m ->
                 (caller.getId() != null && caller.getId().equals(m.getUserId()))
@@ -272,7 +272,6 @@ public class InviteService {
         if (user.getDefaultProjectId() == null || user.getDefaultProjectId().isBlank()) {
             user.setDefaultProjectId(projectId);
         }
-        user.setSquadId(projectId);
         userRepository.save(user);
     }
 

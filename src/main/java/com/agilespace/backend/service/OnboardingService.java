@@ -236,7 +236,10 @@ public class OnboardingService {
                 user.getId(), row.getId(), row.getRoleName(), row.getProjectId());
     }
 
-    /** Grava o vínculo: userId na linha, accountId do Jira herdado e roster da squad apontando para a conta. */
+    /**
+     * Grava o vínculo: userId na linha e accountId do Jira herdado. O roster da squad (horas/capacidade) liga à pessoa
+     * pelo jira_account_id herdado aqui; squad_members.claimed_by_uid deixou de ser gravado (Etapa 5 do vínculo).
+     */
     private void applyLink(ProjectMemberRole row, User user, String linkSource) {
         // Registra como a conta entrou na linha. Linha de decisão humana (MANUAL/INVITE/MIGRATION) mantém a origem.
         boolean alreadyMine = user.getId() != null && user.getId().equals(row.getUserId());
@@ -254,17 +257,6 @@ public class OnboardingService {
         }
         if (userChanged) {
             userRepository.save(user);
-        }
-
-        // Mesma pessoa no roster da squad (horas/capacidade) passa a apontar pra conta.
-        for (String identifier : new String[] { row.getJiraAccountId(), row.getEmail(), row.getDisplayName() }) {
-            if (identifier == null || identifier.isBlank()) continue;
-            for (SquadMember sm : squadMemberRepository.findByUserIdentifier(identifier.trim())) {
-                if (sm.getClaimedByUid() == null || sm.getClaimedByUid().isBlank()) {
-                    sm.setClaimedByUid(user.getId());
-                    squadMemberRepository.save(sm);
-                }
-            }
         }
     }
 

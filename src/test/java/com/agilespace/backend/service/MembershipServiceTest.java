@@ -223,7 +223,7 @@ class MembershipServiceTest {
     @Test
     void legacyOnly_quandoSoTemSquadIdOuRoster() {
         User comSquadId = user();
-        comSquadId.setSquadId("DDWMISSI");
+        comSquadId.setDefaultProjectId("DDWMISSI");
         assertTrue(service.forUser(comSquadId).legacyOnly());
 
         User comRoster = User.builder().id("u2").email("bia@empresa.com.br").build();
@@ -240,14 +240,14 @@ class MembershipServiceTest {
         assertFalse(service.forUser(user()).legacyOnly(), "conta nova, sem rastro nenhum: vai para o onboarding");
 
         User sentinela = user();
-        sentinela.setSquadId("Sem Time");
+        sentinela.setDefaultProjectId("Sem Time");
         assertFalse(service.forUser(sentinela).legacyOnly());
 
         project("SQ1", "Squad Um", "Seg", "Tribo");
         row("1", "SQ1", "DEVELOPER", "Developer", false, null);
         cache.evictAll(); // o teste grava pmr por fora do JPA, então faz a evicção que o listener faria
         User comVinculo = user();
-        comVinculo.setSquadId("SQ1");
+        comVinculo.setDefaultProjectId("SQ1");
         assertFalse(service.forUser(comVinculo).legacyOnly());
     }
 

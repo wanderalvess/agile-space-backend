@@ -74,7 +74,7 @@ class AuthzOtherPointsTest {
 
     @ParameterizedTest
     @EnumSource(AuthzMode.class)
-    @DisplayName("contextFor: roster, users.squad_id e cargo só valem no legado; vínculo vale em todos")
+    @DisplayName("contextFor: roster, default_project_id e cargo só valem no legado; vínculo vale em todos")
     void audienceContext(AuthzMode mode) {
         SquadAudienceService audience = world.audience(mode);
 
@@ -87,7 +87,7 @@ class AuthzOtherPointsTest {
         assertEquals(pick(mode, true, false), roster.hasSquad("SQ1"), "roster-only");
 
         SquadAudienceService.UserContext session = audience.contextFor("session", "MEMBER").orElseThrow();
-        assertEquals(pick(mode, true, false), session.hasSquad("SQ1"), "users.squad_id solto");
+        assertEquals(pick(mode, true, false), session.hasSquad("SQ1"), "default_project_id solto");
 
         SquadAudienceService.UserContext title = audience.contextFor("title", "MEMBER").orElseThrow();
         assertEquals(pick(mode, true, false), title.leadership(), "cargo de liderança não é autoridade");
@@ -101,17 +101,17 @@ class AuthzOtherPointsTest {
     }
 
     @Test
-    @DisplayName("contextFor (new): a squad corrente é a ativa validada contra os vínculos, não users.squad_id")
+    @DisplayName("contextFor (new): a squad corrente é a ativa validada contra os vínculos, não default_project_id solto")
     void audienceCurrentSquadIsValidated() {
-        world.user("two", "MEMBER", "SQ3").setDefaultProjectId("SQ2");
+        world.user("two", "MEMBER", "SQ3"); // default_project_id fora dos vínculos
         world.link("r-two1", "two", "SQ1", "DEVELOPER", "Developer", false);
         world.link("r-two2", "two", "SQ2", "DEVELOPER", "Developer", false);
 
         SquadAudienceService.UserContext legacy = world.audience(AuthzMode.LEGACY).contextFor("two", "MEMBER").orElseThrow();
         SquadAudienceService.UserContext neu = world.audience(AuthzMode.NEW).contextFor("two", "MEMBER").orElseThrow();
 
-        assertEquals("SQ2", neu.currentSquadId());
-        assertEquals(List.of("SQ2", "SQ1"), neu.squadIds());
+        assertEquals("SQ1", neu.currentSquadId(), "preferência solta cai na primeira squad por precedência");
+        assertEquals(List.of("SQ1", "SQ2"), neu.squadIds());
         assertTrue(legacy.hasSquad("SQ3"), "o legado enxerga a squad solta SQ3");
         assertFalse(neu.hasSquad("SQ3"));
     }
@@ -141,7 +141,7 @@ class AuthzOtherPointsTest {
 
     @ParameterizedTest
     @EnumSource(AuthzMode.class)
-    @DisplayName("memberUserIds: new = só quem tem linha de vínculo; legado inclui users.squad_id e roster")
+    @DisplayName("memberUserIds: new = só quem tem linha de vínculo; legado inclui default_project_id e roster")
     void audienceMembers(AuthzMode mode) {
         SquadAudienceService audience = world.audience(mode);
 
@@ -149,11 +149,11 @@ class AuthzOtherPointsTest {
 
         assertTrue(members.containsAll(Set.of("am", "dev", "tribe")), "vínculos: sempre");
         assertEquals(pick(mode, true, false), members.contains("roster"), "roster-only");
-        assertEquals(pick(mode, true, false), members.contains("session"), "users.squad_id solto");
-        assertEquals(pick(mode, true, false), members.contains("title"), "cargo + users.squad_id");
+        assertEquals(pick(mode, true, false), members.contains("session"), "default_project_id solto");
+        assertEquals(pick(mode, true, false), members.contains("title"), "cargo + default_project_id");
         assertFalse(members.contains("outsider"));
         if (mode == AuthzMode.NEW) {
-            verify(world.userRepository, never()).findActiveBySquadIds(any());
+            verify(world.userRepository, never()).findActiveByDefaultProjectIds(any());
             verify(world.rosterRepository, never()).findBySquadIdsUpper(any());
         }
     }
@@ -199,7 +199,7 @@ class AuthzOtherPointsTest {
 
     @ParameterizedTest
     @EnumSource(AuthzMode.class)
-    @DisplayName("Convite endereçado: quem vê o e-mail do destinatário - membro por vínculo sempre; só users.squad_id apenas no legado")
+    @DisplayName("Convite endereçado: quem vê o e-mail do destinatário - membro por vínculo sempre; só default_project_id apenas no legado")
     void inviteDisplayPrivilege(AuthzMode mode) {
         InviteService service = inviteService();
         service.setSquadAuthz(world.access(mode), world.shadow(mode));
@@ -211,7 +211,7 @@ class AuthzOtherPointsTest {
             ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> service.getForDisplay("tok", session));
             assertEquals(404, ex.getStatusCode().value());
         } else {
-            assertEquals("alguem@outra.com", service.getForDisplay("tok", session).getEmail(), "legado: users.squad_id basta");
+            assertEquals("alguem@outra.com", service.getForDisplay("tok", session).getEmail(), "legado: default_project_id basta");
         }
         assertThrows(ResponseStatusException.class, () -> service.getForDisplay("tok", world.find("outsider").orElseThrow()));
     }
@@ -239,7 +239,7 @@ class AuthzOtherPointsTest {
 
     @ParameterizedTest
     @EnumSource(AuthzMode.class)
-    @DisplayName("Criar convite: liderança em linha própria cria; dev não; cargo + users.squad_id só no legado; tribo não cria na squad alheia")
+    @DisplayName("Criar convite: liderança em linha própria cria; dev não; cargo + default_project_id só no legado; tribo não cria na squad alheia")
     void inviteAccess(AuthzMode mode) {
         InviteService inviteService = mock(InviteService.class);
         when(inviteService.createInvite(any(), any(), any(), any())).thenReturn(Invite.builder().id("novo").build());
@@ -273,7 +273,7 @@ class AuthzOtherPointsTest {
 
     @ParameterizedTest
     @EnumSource(AuthzMode.class)
-    @DisplayName("Jolt: new compartilha com N squads dos vínculos; legacy/shadow seguem a squad única de users.squad_id")
+    @DisplayName("Jolt: new compartilha com N squads dos vínculos; legacy/shadow seguem a squad única de default_project_id")
     void joltSquads(AuthzMode mode) {
         world.user("multi", "MEMBER", "SQ3");
         world.link("r-m1", "multi", "SQ1", "DEVELOPER", "Developer", false);
@@ -302,7 +302,7 @@ class AuthzOtherPointsTest {
 
         assertFalse(JoltProjectService.canRead(sq2, legacy));
         assertTrue(JoltProjectService.canRead(sq2, neu), "squad do vínculo, sem caixa");
-        assertFalse(JoltProjectService.canRead(sq2, noLinks), "users.squad_id (SQ3) não vale em new");
+        assertFalse(JoltProjectService.canRead(sq2, noLinks), "default_project_id (SQ3) não vale em new");
 
         when(repository.findAccessibleProjects("multi", "SQ3")).thenReturn(List.of());
         when(repository.findAccessibleProjectsInSquads(any(), any())).thenReturn(List.of());
@@ -320,17 +320,17 @@ class AuthzOtherPointsTest {
 
     @ParameterizedTest
     @EnumSource(AuthzMode.class)
-    @DisplayName("activeSquadFor: legado = users.squad_id; new = squad ativa dos vínculos (null sem vínculo)")
+    @DisplayName("activeSquadFor: legado = default_project_id; new = squad ativa dos vínculos (null sem vínculo)")
     void activeSquad(AuthzMode mode) {
-        world.user("two", "MEMBER", "SQ1").setDefaultProjectId("SQ2");
+        world.user("two", "MEMBER", "SQ2");
         world.link("r-t1", "two", "SQ1", "DEVELOPER", "Developer", false);
         world.link("r-t2", "two", "SQ2", "DEVELOPER", "Developer", false);
         SquadAccessService access = world.access(mode);
 
         assertEquals("SQ1", access.activeSquadFor("knowledge", world.find("dev").orElseThrow()));
-        assertEquals(pick(mode, "SQ1", "SQ2"), access.activeSquadFor("knowledge", world.find("two").orElseThrow()),
-                "preferência (default_project_id) válida nos vínculos manda em new");
-        assertEquals(pick(mode, "SQ1", null), access.activeSquadFor("apikey", world.find("session").orElseThrow()), "users.squad_id solto");
+        assertEquals("SQ2", access.activeSquadFor("knowledge", world.find("two").orElseThrow()),
+                "preferência (default_project_id) válida nos vínculos manda em todos os modos");
+        assertEquals(pick(mode, "SQ1", null), access.activeSquadFor("apikey", world.find("session").orElseThrow()), "default_project_id solto");
         assertNull(access.activeSquadFor("apikey", world.find("outsider").orElseThrow()));
         assertNull(access.activeSquadFor("apikey", null));
     }

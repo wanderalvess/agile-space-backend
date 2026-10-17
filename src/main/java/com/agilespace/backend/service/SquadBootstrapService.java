@@ -24,12 +24,12 @@ import java.util.Locale;
  * (o primeiro ADMIN cria a equipe por {@code POST /api/projects}; os demais entram por convite, pedido de vínculo ou
  * importação).
  *
- * <p>Em {@code app.membership.authz=legacy|shadow} o comportamento é o de sempre: grava {@code users.squad_id} (e
- * {@code default_project_id}, se vazio) na pessoa. Em {@code new} isso não bastaria (squad_id solto não é vínculo e a
- * pessoa seria negada na chamada seguinte), então o bootstrap TAMBÉM cria o vínculo: o projeto (se faltar) e a linha de
+ * <p>Em {@code app.membership.authz=legacy|shadow} o comportamento é o de sempre, menos a coluna aposentada (Etapa 5):
+ * grava só {@code default_project_id} na pessoa ("sem squad" = {@code default_project_id} vazio). Em {@code new} isso não
+ * bastaria (preferência solta não é vínculo e a pessoa seria negada na chamada seguinte), então o bootstrap TAMBÉM cria o vínculo: o projeto (se faltar) e a linha de
  * {@code project_member_roles} da pessoa, com {@code source=MANUAL}, {@code is_leadership=true} e o papel do fundador de
  * {@code JiraProfieldsService#createManualProject} (Agile Master, ou People Lead se a pessoa já é). Os dois lados
- * (vínculo e {@code squad_id}) são gravados, o dual-write de sempre; o cache de vínculos é invalidado pelo listener JPA
+ * (vínculo e {@code default_project_id}) são gravados; {@code users.squad_id} não é mais gravada; o cache de vínculos é invalidado pelo listener JPA
  * ({@link MembershipCacheEvictionListener}).
  *
  * <p>Em {@code new}, além da condição legada, só concede quando a squad não tem NENHUM vínculo nem projeto cadastrado e
@@ -93,7 +93,7 @@ public class SquadBootstrapService {
         if (caller == null || squadId == null || squadId.isBlank()) {
             return false;
         }
-        boolean hasNoSquad = isEmptySquadField(caller.getSquadId());
+        boolean hasNoSquad = isEmptySquadField(caller.getDefaultProjectId());
         if (!hasNoSquad) {
             return false;
         }
@@ -109,15 +109,11 @@ public class SquadBootstrapService {
         if (createMembership && !isFirstUseOfEmptySquad(caller, squadId.trim())) {
             return false;
         }
-        boolean hasNoProject = isEmptySquadField(caller.getDefaultProjectId());
 
         if (createMembership) {
             createFounderMembership(caller, squadId.trim());
         }
-        caller.setSquadId(squadId);
-        if (hasNoProject) {
-            caller.setDefaultProjectId(squadId);
-        }
+        caller.setDefaultProjectId(squadId);
         userRepository.save(caller);
         log.info("authz_bootstrap user={} squad={}", AuthzShadow.sanitize(caller.getId()), AuthzShadow.sanitize(squadId));
         return true;

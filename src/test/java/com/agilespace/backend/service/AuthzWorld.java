@@ -67,9 +67,9 @@ public final class AuthzWorld {
     public AuthzWorld() {
         when(userRepository.findById(anyString())).thenAnswer(i -> users.stream().filter(u -> u.getId().equals(i.getArgument(0))).findFirst());
         when(userRepository.findAll()).thenAnswer(i -> List.copyOf(users));
-        when(userRepository.findActiveBySquadIds(anyCollection())).thenAnswer(i -> {
+        when(userRepository.findActiveByDefaultProjectIds(anyCollection())).thenAnswer(i -> {
             Set<String> ids = new HashSet<>((java.util.Collection<String>) i.getArgument(0));
-            return users.stream().filter(User::isActive).filter(u -> inUpper(ids, u.getSquadId()) || inUpper(ids, u.getDefaultProjectId())).toList();
+            return users.stream().filter(User::isActive).filter(u -> inUpper(ids, u.getDefaultProjectId())).toList();
         });
         when(userRepository.findActiveByIds(anyCollection())).thenAnswer(i -> {
             Set<String> ids = new HashSet<>((java.util.Collection<String>) i.getArgument(0));
@@ -154,7 +154,7 @@ public final class AuthzWorld {
 
     /** Usuário ativo com e-mail {@code <id>@totvs.com.br}. */
     public User user(String id, String role, String squadId) {
-        User u = User.builder().id(id).email(id + "@totvs.com.br").name("Pessoa " + id).role(role).active(true).squadId(squadId).build();
+        User u = User.builder().id(id).email(id + "@totvs.com.br").name("Pessoa " + id).role(role).active(true).defaultProjectId(squadId).build();
         users.add(u);
         return u;
     }

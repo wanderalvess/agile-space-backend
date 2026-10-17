@@ -133,7 +133,7 @@ public class ApiKeyLifecycle {
                     && (key.getSquadId() == null || key.getSquadId().isBlank())) {
                 // SQUAD_READ sem restrição é privilégio de ADMIN (e do LEAD em lead-level=legacy): trava na squad atual da pessoa.
                 // Etapa 2 (app.membership.authz): em new a "squad atual" é a ativa validada contra os vínculos.
-                String squad = squadAccessService != null ? squadAccessService.activeSquadFor("apikey", owner) : owner.getSquadId();
+                String squad = squadAccessService != null ? squadAccessService.activeSquadFor("apikey", owner) : owner.getDefaultProjectId();
                 key.setSquadId(squad);
                 boolean authzNew = squadAccessService != null
                         && squadAccessService.authzMode() == com.agilespace.backend.service.AuthzMode.NEW;

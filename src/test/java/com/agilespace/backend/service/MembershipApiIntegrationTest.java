@@ -159,7 +159,7 @@ class MembershipApiIntegrationTest {
     @Test
     void legacyOnly_contaSoComSquadIdAntigo() throws Exception {
         User dani = user("dani", "MEMBER");
-        dani.setSquadId("SQUAD_ANTIGA");
+        dani.setDefaultProjectId("SQUAD_ANTIGA");
         userRepository.save(dani);
 
         mockMvc.perform(get("/api/me/memberships").header("Authorization", token("dani", "MEMBER")))

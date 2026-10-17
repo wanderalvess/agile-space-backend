@@ -75,7 +75,7 @@ class AuthzNewModeIntegrationTest {
 
         User user(String id, String role, String squadId, String jobTitle) {
             return userRepository.save(User.builder().id(id).email(id + "@totvs.com.br").name("Pessoa " + id).role(role).active(true)
-                    .squadId(squadId).jobTitle(jobTitle).build());
+                    .defaultProjectId(squadId).jobTitle(jobTitle).build());
         }
 
         void project(String id, String name, String tribe) {

@@ -148,8 +148,8 @@ class SquadTeamServiceTest {
     void removeMember() {
         SquadMember m = member("jira-dev", "dev@x.com", "dev1");
         when(memberRepository.findBySquadIdAndJiraAccountId("SQ1", "jira-dev")).thenReturn(Optional.of(m));
-        User stored = User.builder().id("dev1").email("dev@x.com").squadId("SQ1").defaultProjectId("SQ1").build();
-        when(userRepository.findById("dev1")).thenReturn(Optional.of(stored));
+        User stored = User.builder().id("dev1").email("dev@x.com").defaultProjectId("SQ1").build();
+        when(userRepository.findByJiraAccountId("jira-dev")).thenReturn(Optional.of(stored));
 
         service.removeMember("SQ1", pl, "jira-dev");
 
@@ -157,8 +157,8 @@ class SquadTeamServiceTest {
         ArgumentCaptor<List<ProjectMemberRole>> deleted = ArgumentCaptor.forClass(List.class);
         verify(projectRoles).deleteAll(deleted.capture());
         assertEquals(List.of("r-dev"), deleted.getValue().stream().map(ProjectMemberRole::getId).toList());
-        assertNull(stored.getSquadId());
         assertNull(stored.getDefaultProjectId());
+        assertNull(stored.getActiveSquadId(), "a resposta não carrega squad derivada de coluna aposentada");
         verify(userRepository).save(stored);
         verify(userRepository, never()).delete(any());
         ArgumentCaptor<SquadMemberExclusion> ex = ArgumentCaptor.forClass(SquadMemberExclusion.class);

@@ -101,7 +101,7 @@ public class SquadAudienceService {
 
     /**
      * Regra NOVA: squads, papéis e liderança vêm só dos vínculos (project_member_roles via {@link MembershipService}):
-     * deixam de contar users.squad_id/default_project_id, o roster (squad_members) e o cargo (jobTitle). A squad
+     * deixam de contar default_project_id (e a antiga users.squad_id), o roster (squad_members) e o cargo (jobTitle). A squad
      * corrente é a ativa validada contra os vínculos; os papéis incluem TODOS os que a pessoa tem em cada squad.
      */
     private UserContext newContext(User user, String tokenRole) {
@@ -159,12 +159,11 @@ public class SquadAudienceService {
         List<UserProjectAccessDto.ProjectAccessItem> projects =
                 access != null && access.getProjects() != null ? access.getProjects() : List.of();
 
-        String current = firstNonBlank(user.getDefaultProjectId(), user.getSquadId(),
+        String current = firstNonBlank(user.getDefaultProjectId(),
                 access != null ? access.getPrimaryProjectId() : null);
 
         Map<String, String> squads = new LinkedHashMap<>();
         addSquad(squads, current);
-        addSquad(squads, user.getSquadId());
         addSquad(squads, user.getDefaultProjectId());
         for (UserProjectAccessDto.ProjectAccessItem p : projects) {
             addSquad(squads, p.getProjectId());
@@ -233,10 +232,8 @@ public class SquadAudienceService {
             viaSession.put(id, new LinkedHashSet<>());
             viaRoster.put(id, new LinkedHashSet<>());
         });
-        for (User u : userRepository.findActiveBySquadIds(ids)) {
-            addIfIn(result, u.getSquadId(), u.getId());
+        for (User u : userRepository.findActiveByDefaultProjectIds(ids)) {
             addIfIn(result, u.getDefaultProjectId(), u.getId());
-            addIfIn(viaSession, u.getSquadId(), u.getId());
             addIfIn(viaSession, u.getDefaultProjectId(), u.getId());
         }
 

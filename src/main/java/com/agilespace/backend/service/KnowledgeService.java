@@ -335,7 +335,7 @@ public class KnowledgeService {
         // Só DE ONDE vem a squad muda com app.membership.authz (a base de conhecimento segue compartilhada: o escopo de leitura não muda).
         return userRepository.findById(userId)
                 .map(u -> squadAccessService != null && squadAccessService.authzMode() != null && squadAccessService.authzMode() != AuthzMode.LEGACY
-                        ? squadAccessService.activeSquadFor("knowledge", u) : u.getSquadId())
+                        ? squadAccessService.activeSquadFor("knowledge", u) : u.getDefaultProjectId())
                 .filter(sq -> !sq.isBlank()).orElse(null);
     }
 

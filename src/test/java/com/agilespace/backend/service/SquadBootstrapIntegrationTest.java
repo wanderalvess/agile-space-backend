@@ -34,7 +34,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * Bootstrap de squad nova em ambiente limpo (HTTP + Postgres real) nos três modos de {@code app.membership.authz}.
  * Em {@code new} (com app.membership.bootstrap=on) o primeiro uso de uma squad vazia cria o vínculo de liderança (a pessoa continua passando na chamada
- * seguinte); em {@code legacy} e {@code shadow} só grava {@code users.squad_id}, como sempre. Sem Docker é ignorado.
+ * seguinte); em {@code legacy} e {@code shadow} só grava {@code default_project_id}, como sempre (a coluna users.squad_id foi aposentada). Sem Docker é ignorado.
  */
 @Testcontainers(disabledWithoutDocker = true)
 class SquadBootstrapIntegrationTest {
@@ -106,6 +106,10 @@ class SquadBootstrapIntegrationTest {
             return jdbc.queryForObject("SELECT squad_id FROM users WHERE id = ?", String.class, user);
         }
 
+        String defaultOf(String user) {
+            return jdbc.queryForObject("SELECT default_project_id FROM users WHERE id = ?", String.class, user);
+        }
+
         int projectsNamed(String squad) {
             return jdbc.queryForObject("SELECT count(*) FROM projects WHERE id = ?", Integer.class, squad);
         }
@@ -131,7 +135,8 @@ class SquadBootstrapIntegrationTest {
             assertEquals(Boolean.TRUE, rows.get(0).get("is_leadership"));
             assertEquals("MANUAL", rows.get(0).get("source"));
             assertEquals(1, projectsNamed("NOVA"));
-            assertEquals("NOVA", squadIdOf("p1"), "dual-write: users.squad_id continua gravado");
+            assertEquals("NOVA", defaultOf("p1"), "grava a preferência default_project_id");
+            assertNull(squadIdOf("p1"), "users.squad_id aposentada (Etapa 5): nunca mais gravada");
             assertEquals(List.of("authz_bootstrap user=p1 squad=NOVA"), bootstrapLogs());
 
             // Segunda chamada: passa pelo VÍNCULO (o cache de vínculos foi invalidado pelo listener JPA, senão a
@@ -234,13 +239,14 @@ class SquadBootstrapIntegrationTest {
     class ModoLegacy extends Base {
 
         @Test
-        void gravaSoOSquadId_semCriarVinculo_comoAntes() throws Exception {
+        void gravaSoAPreferencia_semCriarVinculo_comoAntes() throws Exception {
             assertEquals(200, manage("NOVA", "p1", "MEMBER"));
 
-            assertEquals("NOVA", squadIdOf("p1"));
+            assertEquals("NOVA", defaultOf("p1"));
+            assertNull(squadIdOf("p1"));
             assertTrue(pmrOf("NOVA").isEmpty(), "legacy não cria vínculo");
             assertEquals(0, projectsNamed("NOVA"));
-            assertEquals(200, manage("NOVA", "p1", "MEMBER"), "segue passando por users.squad_id");
+            assertEquals(200, manage("NOVA", "p1", "MEMBER"), "segue passando por default_project_id");
             assertEquals(200, manage("NOVA", "admin", "ADMIN"));
         }
 
@@ -262,7 +268,8 @@ class SquadBootstrapIntegrationTest {
         void identicoAoLegacy_semCriarVinculo() throws Exception {
             assertEquals(200, manage("NOVA", "p1", "MEMBER"));
 
-            assertEquals("NOVA", squadIdOf("p1"));
+            assertEquals("NOVA", defaultOf("p1"));
+            assertNull(squadIdOf("p1"));
             assertTrue(pmrOf("NOVA").isEmpty(), "shadow não grava vínculo: só observa");
             assertEquals(0, projectsNamed("NOVA"));
             assertEquals(200, manage("NOVA", "p1", "MEMBER"));

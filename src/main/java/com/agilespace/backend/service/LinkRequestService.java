@@ -434,13 +434,12 @@ public class LinkRequestService {
     }
 
     /**
-     * Dual-write até a Etapa 5: o vínculo (pmr) é a fonte da verdade, mas {@code users.default_project_id} e
-     * {@code users.squad_id} ainda são lidos por telas legadas. Só preenche o que está vazio ("Sem Time" conta como
-     * vazio): nunca troca a squad ativa de quem já tem uma. Entidade gerenciada na transação: o flush grava.
+     * O vínculo (pmr) é a fonte da verdade; {@code users.default_project_id} é só a preferência de squad ativa
+     * ({@code users.squad_id} foi aposentada na Etapa 5). Só preenche se estiver vazio ("Sem Time" conta como vazio):
+     * nunca troca a squad ativa de quem já tem uma. Entidade gerenciada na transação: o flush grava.
      */
     private void fillLegacySquad(User requester, String projectKey) {
         if (isEmptySquad(requester.getDefaultProjectId())) requester.setDefaultProjectId(projectKey);
-        if (isEmptySquad(requester.getSquadId())) requester.setSquadId(projectKey);
     }
 
     private static boolean isEmptySquad(String value) {

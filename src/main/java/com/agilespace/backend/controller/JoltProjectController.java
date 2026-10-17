@@ -50,10 +50,10 @@ public class JoltProjectController {
         return new Caller(
                 userId,
                 role,
-                user != null ? user.getSquadId() : null,
+                user != null ? user.getDefaultProjectId() : null,
                 user != null ? user.getName() : null,
                 user != null && user.getEmail() != null ? user.getEmail() : email,
-                // Etapa 2 (app.membership.authz): null = legado (squad única de users.squad_id); new = squads dos vínculos.
+                // Etapa 2 (app.membership.authz): null = legado (squad única de users.default_project_id); new = squads dos vínculos.
                 squadAccessService.squadsForSharing("jolt", user));
     }
 

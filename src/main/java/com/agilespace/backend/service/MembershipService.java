@@ -275,12 +275,13 @@ public class MembershipService {
             .thenComparing(MembershipDto::projectId);
 
     /**
-     * True quando a conta não tem nenhuma linha pmr resolvível mas ainda tem rastros do modelo antigo: users.squad_id
-     * ou default_project_id preenchido (fora do sentinela "Sem Time") ou presença no roster (squad_members). Quem não
-     * tem nada disso é conta nova: vai para o onboarding, não é "só legado".
+     * True quando a conta não tem nenhuma linha pmr resolvível mas ainda tem rastros do modelo antigo:
+     * default_project_id preenchido (fora do sentinela "Sem Time") ou presença no roster (squad_members). Quem não
+     * tem nada disso é conta nova: vai para o onboarding, não é "só legado". (Etapa 5: users.squad_id não é mais lida;
+     * a coluna era gravada junto com default_project_id, então o rastro continua visível por ele.)
      */
     boolean hasLegacyTraces(User user) {
-        if (meaningfulSquad(user.getSquadId()) || meaningfulSquad(user.getDefaultProjectId())) {
+        if (meaningfulSquad(user.getDefaultProjectId())) {
             return true;
         }
         if (user.getId() != null && !user.getId().isBlank()) {

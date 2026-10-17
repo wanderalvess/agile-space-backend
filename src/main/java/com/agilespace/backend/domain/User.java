@@ -1,6 +1,7 @@
 package com.agilespace.backend.domain;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDateTime;
@@ -64,8 +65,14 @@ public class User {
     @Column(name = "default_project_id")
     private String defaultProjectId; // FK lógica para ProjectConfig
 
-    @Column(name = "squad_id")
-    private String squadId;
+    /**
+     * Squad ativa para EXIBIÇÃO no JSON ({@code squadId}). Nunca persistida: a coluna {@code users.squad_id} foi
+     * aposentada (Etapa 5 do vínculo; o vínculo vive em project_member_roles). Só leitura na API: o valor que um
+     * cliente antigo enviar em {@code squadId} é descartado. Preenchido por UserService a partir do MembershipService.
+     */
+    @Transient
+    @JsonProperty(value = "squadId", access = JsonProperty.Access.READ_ONLY)
+    private String activeSquadId;
 
     @Column(name = "segment_name")
     private String segmentName; // Ex: "Canal Corporativo"

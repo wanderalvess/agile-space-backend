@@ -513,25 +513,24 @@ class LinkRequestSquadApprovalTest {
         assertEquals("acc-dev", created.getJiraAccountId());
         assertEquals("APPROVED", out.status());
         assertEquals("APPROVED", req.getStatus());
-        // dual-write: conta sem squad ativa passa a ter a squad aprovada
+        // conta sem squad ativa passa a ter a squad aprovada como preferência (users.squad_id aposentada)
         assertEquals("SQ", dev.getDefaultProjectId());
-        assertEquals("SQ", dev.getSquadId());
     }
 
     @Test
-    @DisplayName("Dual-write não troca a squad ativa de quem já tem uma; 'Sem Time' conta como vazio")
-    void dualWriteOnlyFillsEmpty() {
+    @DisplayName("A aprovação só preenche a preferência de squad vazia, nunca troca a ativa; 'Sem Time' conta como vazio")
+    void approvalOnlyFillsEmptyPreference() {
         squadExists("SQ", "Tribo A");
         User am = caller("am", "MEMBER", direct("SQ", "Tribo A", "AGILE_MASTER", true));
-        User dev = User.builder().id("dev1").name("Dev").email("d@x.com").role("MEMBER").squadId("OUTRA").defaultProjectId("Sem Time").build();
+        User dev = User.builder().id("dev1").name("Dev").email("d@x.com").role("MEMBER").defaultProjectId("Sem Time").build();
         when(userRepository.findById("dev1")).thenReturn(Optional.of(dev));
         when(userRepository.findAllById(any())).thenReturn(List.of(dev));
         pendingRequest("r1", "dev1", "SQ", null, "CONTRIBUTOR", "Developer");
 
         service.approveInSquad("SQ", "r1", null, am.getId(), "x");
 
-        assertEquals("OUTRA", dev.getSquadId());
         assertEquals("SQ", dev.getDefaultProjectId());
+        assertNull(dev.getActiveSquadId());
     }
 
     @Test

@@ -13,7 +13,12 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Relatório de inconsistências do vínculo Pessoa x Squad x Papel, SOMENTE LEITURA (transação readOnly: o Postgres
+ * LEGACY-SQUAD-ID-DIAGNOSTIC: este é o ÚNICO ponto do código de produção que ainda consulta a coluna users.squad_id (SQL
+ * nativo de diagnóstico). Desde a Etapa 5 do vínculo (passo 1) nada mais a lê nem a grava: ela é um retrato congelado do
+ * que havia no deploy. Remover estas categorias junto com o DROP COLUMN (passo 2, docs/membership-api.md); o teste
+ * UsersSquadIdColumnRetiredTest trava qualquer outro uso.
+ *
+ * <p>Relatório de inconsistências do vínculo Pessoa x Squad x Papel, SOMENTE LEITURA (transação readOnly: o Postgres
  * recusa qualquer escrita aqui). Executa as consultas da seção 3 de docs/vinculo-auditoria-e-plano.md e devolve contagem
  * por categoria mais uma amostra de até {@value #SAMPLE_LIMIT} linhas (id, e-mail, squad, rótulo). Contrato em
  * docs/membership-report.md.

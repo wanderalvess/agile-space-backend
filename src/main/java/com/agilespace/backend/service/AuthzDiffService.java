@@ -34,11 +34,11 @@ import java.util.TreeMap;
  * {@code GET /api/admin/membership/authz-diff} e a categoria {@code WOULD_LOSE_ACCESS} do relatório.
  *
  * <p>Não chama {@link SquadAccessService} par a par (seriam milhares de consultas): levanta, por usuário, os fatos
- * (users.squad_id, roster, cargo, resolvedor antigo, {@link MembershipService}) uma vez e por squad só a liderança
+ * (default_project_id, roster, cargo, resolvedor antigo, {@link MembershipService}) uma vez e por squad só a liderança
  * cadastrada, e avalia as regras puras de {@link AuthzRules}, as mesmas que explicam as divergências do modo sombra.
  * Um teste cruza essas regras com as decisões reais do {@link SquadAccessService}.
  *
- * <p>Universo: todas as squads que existem em {@code projects} mais as que aparecem para o usuário em users.squad_id,
+ * <p>Universo: todas as squads que existem em {@code projects} mais as que aparecem para o usuário em default_project_id,
  * roster ou vínculos (squads só do roster também perderiam acesso). ADMIN (e LEAD, só com lead-level=legacy) são iguais nos
  * dois modos e ficam de fora; com lead-level=off o LEAD é um MEMBER e entra na comparação.
  */
@@ -179,7 +179,6 @@ public class AuthzDiffService {
 
         // Universo de squads deste usuário.
         Map<String, String> candidates = new LinkedHashMap<>(projectSquads);
-        addCandidate(candidates, user.getSquadId());
         addCandidate(candidates, user.getDefaultProjectId());
         rosterSquads.forEach(s -> addCandidate(candidates, s));
         if (legacy != null && legacy.getProjects() != null) {
