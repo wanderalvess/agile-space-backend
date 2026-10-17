@@ -13,7 +13,7 @@ aprova ou recusa. Todas as rotas exigem o JWT atual; o solicitante e o admin vê
 Erros: `{ "error"|"message": ... }` no formato padrão do projeto (`ResponseStatusException`).
 
 ```ts
-type LinkRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+type LinkRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'; // CANCELLED: link-requests-squad-api.md
 
 // POST /api/link-requests  (corpo)
 interface LinkRequestCreate {

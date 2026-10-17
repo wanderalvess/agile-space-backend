@@ -12,7 +12,7 @@ O `{id}` das rotas por squad é a chave da squad (`projectKey`, ex.: `DDWMISSI`;
 ## Tipos
 
 ```ts
-type LinkRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+type LinkRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';   // CANCELLED: ver "Cancelar o próprio pedido"
 type LinkRequestKind = 'CONTRIBUTOR' | 'LEADERSHIP';
 
 // POST /api/link-requests  (corpo)  ->  campos NOVOS: kind, requestedRoleName
@@ -86,6 +86,7 @@ liderança do roster.
 |---|---|---|---|
 | POST | `/api/link-requests` | qualquer sessão | `201 { id, status: 'PENDING' }` |
 | GET | `/api/link-requests/mine` | qualquer sessão | `LinkRequestDto[]` |
+| POST | `/api/link-requests/{id}/cancel` | só o solicitante | `200 LinkRequestDto` (CANCELLED); ver abaixo |
 | GET | `/api/squads/{id}/link-requests/can-approve` | qualquer sessão | `200 { canApprove, canApproveLeadership }` |
 | GET | `/api/squads/{id}/link-requests?status=&page=&size=` | quem `canApprove` na squad | `200 AdminLinkRequestDto[]` |
 | POST | `/api/squads/{id}/link-requests/{reqId}/approve` | quem pode decidir o pedido | corpo opcional `{ memberId?: string }`; `200 AdminLinkRequestDto` (APPROVED) |
@@ -171,6 +172,51 @@ O poder vem **só** de linha `project_member_roles` com `is_leadership = true` e
 (`LinkRequestApprovalPolicy`); jobTitle, papel autodeclarado e `users.role = LEAD` não contam. O solicitante **nunca**
 decide o próprio pedido (nem aprovar nem recusar, nem o ADMIN): 403.
 
+## Cancelar o próprio pedido (`POST /api/link-requests/{id}/cancel`)
+
+O solicitante desiste de um pedido **ainda pendente**. Sem corpo. O solicitante vem do token; a rota é do próprio usuário e
+**não depende** da flag `app.link-requests.squad-approval` (funciona ligada ou desligada).
+
+```jsonc
+// POST /api/link-requests/9f1c...-uuid/cancel        (sem corpo; Authorization: Bearer <JWT>)
+// 200 OK  ->  LinkRequestDto (o mesmo de GET /mine), já com o status final
+{
+  "id": "9f1c...-uuid",
+  "projectKey": "DDWMISSI",
+  "memberId": "m1",
+  "memberName": "Ana Paula Nogueira",
+  "emailInJira": "ana.nogueira@totvs.com.br",
+  "message": "Sou o AM",
+  "status": "CANCELLED",
+  "createdAt": "2026-10-17T12:00:00Z",
+  "decidedAt": "2026-10-17T12:05:00Z",     // momento do cancelamento
+  "decisionNote": null,
+  "kind": "CONTRIBUTOR",
+  "requestedRoleName": null
+}
+```
+
+| Caso | Status |
+|---|---|
+| pedido do próprio chamador, `PENDING` | `200` (vira `CANCELLED`) |
+| pedido já `CANCELLED` (repetição) | `200` com o mesmo corpo; **idempotente**: sem nova auditoria nem novo aviso |
+| pedido de **outra** conta | `403` `"Só quem fez o pedido pode cancelá-lo."` (o pedido não muda) |
+| pedido inexistente | `404` `"Pedido não encontrado"` |
+| pedido já `APPROVED` ou `REJECTED` | `409` `"Esse pedido já foi decidido."` |
+| sem sessão válida | `401` |
+
+- `CANCELLED` é um **status final** novo: a coluna `link_requests.status` é `VARCHAR(20)` sem `CHECK`, então **não há migração**.
+  `decidedBy` e `decisionNote` ficam `null`; `decidedAt` é o instante do cancelamento. Quem consome `status` deve tratar o valor
+  novo (o filtro `?status=` das listas de admin e de squad também aceita `CANCELLED`; `ALL` o inclui; `canDecide` é `false`).
+- Cancelar **libera** o pedido pendente único da squad: a pessoa pode abrir outro depois (a unicidade é só entre pendentes).
+- A aprovação/recusa concorrente é serializada pelo mesmo `SELECT ... FOR UPDATE` das decisões: ou o cancelamento vence (e
+  approve/reject recebem `409`) ou a decisão vence (e o cancel recebe `409`).
+- Aviso dos aprovadores: a notificação de pedido novo (`LINK_REQUEST_CREATED:<id>`) é **marcada como lida** para todos que a
+  tinham pendente (e o contador de não lidas é sinalizado). A linha continua no histórico do sino, apontando para a aba
+  "Pedidos" onde o pedido já não está pendente; ela **não é apagada**. Ninguém é notificado do cancelamento.
+- Auditoria: `LINK_REQUEST_CANCELLED`, `performedBy` = id do solicitante, `details` =
+  `pedido=<id> squad=<KEY> solicitante=<id> tipo=<CONTRIBUTOR|LEADERSHIP>` (só ids). Tentativa de outra conta vira log `WARN` com ids.
+
 ## Erros
 
 `POST /api/link-requests` (além dos da V74):
@@ -197,7 +243,7 @@ Rotas por squad:
 | linha de outra squad | 422 |
 | linha já ligada a outra conta (pedido continua PENDING) | 409 |
 | linha inexistente / conta do solicitante inexistente | 404 |
-| `status` inválido, `page`/`size` fora do limite na lista / `reason` > 500 | 400 |
+| `status` inválido (aceitos: PENDING, APPROVED, REJECTED, CANCELLED e, na squad, ALL), `page`/`size` fora do limite na lista / `reason` > 500 | 400 |
 
 `/api/admin/link-requests*` continua exigindo `role=ADMIN` e funciona com a flag ligada ou desligada.
 
