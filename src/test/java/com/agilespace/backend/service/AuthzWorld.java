@@ -68,7 +68,7 @@ public final class AuthzWorld {
         when(userRepository.findAll()).thenAnswer(i -> List.copyOf(users));
         when(userRepository.findActiveByDefaultProjectIds(anyCollection())).thenAnswer(i -> {
             Set<String> ids = new HashSet<>((java.util.Collection<String>) i.getArgument(0));
-            return users.stream().filter(User::isActive).filter(u -> inUpper(ids, u.getDefaultProjectId()) || inUpper(ids, u.getDefaultProjectId())).toList();
+            return users.stream().filter(User::isActive).filter(u -> inUpper(ids, u.getDefaultProjectId())).toList();
         });
         when(userRepository.findActiveByIds(anyCollection())).thenAnswer(i -> {
             Set<String> ids = new HashSet<>((java.util.Collection<String>) i.getArgument(0));

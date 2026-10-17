@@ -3,7 +3,10 @@ package com.agilespace.backend.service;
 import com.agilespace.backend.domain.User;
 import com.agilespace.backend.domain.UserJiraConfig;
 import com.agilespace.backend.domain.UserTdnConfig;
-import com.agilespace.backend.dto.UserProjectAccessDto;
+import com.agilespace.backend.domain.SquadMember;
+import com.agilespace.backend.dto.MembershipDto;
+import com.agilespace.backend.repository.SquadMemberRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.agilespace.backend.repository.UserJiraConfigRepository;
 import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.repository.UserTdnConfigRepository;
@@ -38,7 +41,10 @@ class UserServiceTest {
     private UserTdnConfigRepository tdnConfigRepository;
 
     @Mock
-    private UserProjectResolverService userProjectResolverService;
+    private MembershipService membershipService;
+
+    @Mock
+    private SquadMemberRepository squadMemberRepository;
 
     @InjectMocks
     private UserService service;
@@ -125,47 +131,83 @@ class UserServiceTest {
         }
 
         @Test
-        @DisplayName("Deve permitir trocar para uma squad com a qual o usuário já tem vínculo")
-        void shouldAllowSquadChangeToLinkedProject() {
-            User incoming = User.builder().id("user-123").defaultProjectId("SQUAD-NOVA").build();
-
-            when(userRepository.findById("user-123")).thenReturn(Optional.of(sampleUser));
-            when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
-            when(userProjectResolverService.resolveUserAccess(sampleUser)).thenReturn(UserProjectAccessDto.builder()
-                    .projects(List.of(UserProjectAccessDto.ProjectAccessItem.builder().projectId("SQUAD-NOVA").build()))
-                    .build());
-
-            User saved = service.saveUser(incoming, false);
-
-            assertEquals("SQUAD-NOVA", saved.getDefaultProjectId());
-        }
-
-        @Test
-        @DisplayName("Não deve deixar um membro se colocar numa squad sem vínculo editando o perfil")
-        void shouldRejectSquadChangeWithoutLink() {
-            User incoming = User.builder().id("user-123").defaultProjectId("SQUAD-ALHEIA").build();
-
-            when(userRepository.findById("user-123")).thenReturn(Optional.of(sampleUser));
-            when(userProjectResolverService.resolveUserAccess(sampleUser))
-                    .thenReturn(UserProjectAccessDto.builder().projects(List.of()).build());
-
-            assertThrows(ResponseStatusException.class, () -> service.saveUser(incoming, false));
-            verify(userRepository, never()).save(any());
-        }
-
-        @Test
-        @DisplayName("Reenviar a mesma squad não exige checagem de vínculo")
-        void shouldNotCheckAccessWhenSquadUnchanged() {
+        @DisplayName("squadId enviado por cliente antigo é ignorado: sem erro, sem troca de squad (nem de default_project_id)")
+        void shouldIgnoreSquadIdSentByOldClients() throws Exception {
+            // Corpo como o do frontend antigo: squadId (inclusive de uma squad SEM vínculo) junto do nome.
+            User incoming = new ObjectMapper().readValue(
+                    "{\"id\":\"user-123\",\"name\":\"Novo Nome\",\"squadId\":\"SQUAD-ALHEIA\"}", User.class);
+            assertNull(incoming.getActiveSquadId(), "squadId do corpo nem chega a entrar no objeto (somente leitura)");
             sampleUser.setDefaultProjectId("SQUAD-ATUAL");
-            User incoming = User.builder().id("user-123").defaultProjectId("SQUAD-ATUAL").name("Novo Nome").build();
 
             when(userRepository.findById("user-123")).thenReturn(Optional.of(sampleUser));
             when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
+            when(membershipService.activeProjectOf(sampleUser)).thenReturn("SQUAD-ATUAL");
 
-            User saved = service.saveUser(incoming, false);
+            User saved = assertDoesNotThrow(() -> service.saveUser(incoming, false));
 
             assertEquals("Novo Nome", saved.getName());
-            verifyNoInteractions(userProjectResolverService);
+            assertEquals("SQUAD-ATUAL", saved.getDefaultProjectId());
+            assertEquals("SQUAD-ATUAL", saved.getActiveSquadId());
+        }
+
+        @Test
+        @DisplayName("O squadId devolvido no JSON é a squad ativa VALIDADA contra os vínculos, não a coluna")
+        void shouldExposeValidatedActiveSquadInResponse() throws Exception {
+            sampleUser.setDefaultProjectId("SQUAD-SOLTA");
+            when(userRepository.findById("user-123")).thenReturn(Optional.of(sampleUser));
+            when(membershipService.activeProjectOf(sampleUser)).thenReturn("SQUAD-VINCULADA");
+
+            User got = service.getUser("user-123");
+
+            assertEquals("SQUAD-VINCULADA", got.getActiveSquadId());
+            assertTrue(new ObjectMapper().writeValueAsString(got).contains("\"squadId\":\"SQUAD-VINCULADA\""));
+        }
+
+        @Test
+        @DisplayName("Sem nenhum vínculo o squadId não aparece (null)")
+        void shouldHaveNoSquadWithoutLinks() {
+            when(userRepository.findById("user-123")).thenReturn(Optional.of(sampleUser));
+            when(membershipService.activeProjectOf(sampleUser)).thenReturn(null);
+
+            assertNull(service.getUser("user-123").getActiveSquadId());
+        }
+
+        @Test
+        @DisplayName("Lista de usuários (ADMIN): squadId = preferência default_project_id, sem 3 consultas por pessoa")
+        void shouldListUsersWithPreferenceOnly() {
+            sampleUser.setDefaultProjectId("SQ1");
+            User semSquad = User.builder().id("u2").email("u2@x.com").name("U2").build();
+            when(userRepository.findAll()).thenReturn(List.of(sampleUser, semSquad));
+
+            List<User> all = service.getAllUsers();
+
+            assertEquals("SQ1", all.get(0).getActiveSquadId());
+            assertNull(all.get(1).getActiveSquadId());
+            verifyNoInteractions(membershipService);
+        }
+
+        @Test
+        @DisplayName("GET /users/{uid}/squads vem dos vínculos diretos (pmr), não de claimed_by_uid; usa a linha do roster por Jira quando há")
+        void shouldListSquadsFromMembershipsNotClaimedByUid() {
+            sampleUser.setJiraAccountId("jira-1");
+            when(userRepository.findById("user-123")).thenReturn(Optional.of(sampleUser));
+            MembershipDto direct = new MembershipDto("SQ1", "Squad 1", "", "", "Developer", "DEVELOPER", false, true,
+                    MembershipDto.SCOPE_SQUAD, null, List.of());
+            MembershipDto direct2 = new MembershipDto("SQ2", "Squad 2", "", "", "QA", "QA", false, true,
+                    MembershipDto.SCOPE_SQUAD, null, List.of());
+            MembershipDto expanded = new MembershipDto("SQ9", "Squad 9", "", "", "Liderança Transversal da Tribo",
+                    "TRIBE_LEADER_ACCESS", true, false, MembershipDto.SCOPE_TRIBE, null, List.of());
+            when(membershipService.membershipsOf(sampleUser)).thenReturn(List.of(direct, direct2, expanded));
+            SquadMember rosterRow = SquadMember.builder().squadId("SQ1").jiraAccountId("jira-1").displayName("Linha do roster").role("Developer").build();
+            when(squadMemberRepository.findBySquadIdAndJiraAccountId("SQ1", "jira-1")).thenReturn(Optional.of(rosterRow));
+            when(squadMemberRepository.findBySquadIdAndJiraAccountId("SQ2", "jira-1")).thenReturn(Optional.empty());
+
+            List<SquadMember> out = service.getSquadsForUser("user-123");
+
+            assertEquals(List.of("SQ1", "SQ2"), out.stream().map(SquadMember::getSquadId).toList(), "só os vínculos diretos");
+            assertSame(rosterRow, out.get(0));
+            assertEquals("QA", out.get(1).getRole());
+            verify(squadMemberRepository, never()).findByClaimedByUid(any());
         }
 
         @Test

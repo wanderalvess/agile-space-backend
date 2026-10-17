@@ -160,8 +160,8 @@ class JiraAdminServiceTest {
         }
 
         @Test
-        @DisplayName("Deve desvincular membros e usuários antigos ao marcar replaceExisting")
-        void confirmSyncReplaceExistingRemovesUnapprovedMembersAndUnlinksUser() {
+        @DisplayName("replaceExisting remove do roster quem saiu e NÃO mexe na conta (users.squad_id foi aposentada)")
+        void confirmSyncReplaceExistingRemovesUnapprovedMembersWithoutTouchingTheAccount() {
             JiraConfirmSyncRequest request = JiraConfirmSyncRequest.builder()
                     .squadId("proj1")
                     .replaceExisting(true)
@@ -179,7 +179,6 @@ class JiraAdminServiceTest {
             when(squadMetricsRollupRepository.findById("PROJ1")).thenReturn(Optional.empty());
             when(squadMetricsRollupRepository.save(any(SquadMetricsRollup.class))).thenAnswer(i -> i.getArgument(0));
             when(squadMemberRepository.findBySquadIdOrderByDisplayNameAsc("PROJ1")).thenReturn(Arrays.asList(staying, leaving));
-            when(userRepository.findByJiraAccountId("acc2")).thenReturn(Optional.of(leavingUser));
             when(squadMemberRepository.findById(anyString())).thenReturn(Optional.empty());
             when(squadMemberRepository.save(any(SquadMember.class))).thenAnswer(i -> i.getArgument(0));
             when(userRepository.findById("acc1")).thenReturn(Optional.empty());
@@ -194,9 +193,12 @@ class JiraAdminServiceTest {
 
             ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
             verify(userRepository, atLeastOnce()).save(userCaptor.capture());
-            boolean unlinkedLeavingUser = userCaptor.getAllValues().stream()
-                    .anyMatch(u -> "acc2".equals(u.getId()) && u.getDefaultProjectId() == null);
-            assertTrue(unlinkedLeavingUser);
+            assertTrue(userCaptor.getAllValues().stream().noneMatch(u -> "acc2".equals(u.getId())),
+                    "a conta de quem saiu do roster não é regravada");
+            User created = userCaptor.getAllValues().stream().filter(u -> "acc1".equals(u.getId())).findFirst().orElseThrow();
+            assertNull(created.getDefaultProjectId(), "conta criada pela importação nasce sem squad (users.squad_id aposentada)");
+            assertNull(created.getActiveSquadId());
+            assertEquals("PROJ1", leavingUser.getDefaultProjectId(), "a preferência de squad de quem saiu não é tocada aqui");
         }
 
         @Test
@@ -228,7 +230,7 @@ class JiraAdminServiceTest {
             assertEquals("ADMIN", updated.getRole(), "Papel ADMIN não pode ser rebaixado para MEMBER");
             assertEquals("Developer", updated.getJobTitle());
             assertEquals(6, updated.getDailyHours());
-            assertEquals("PROJ1", updated.getDefaultProjectId());
+            assertNull(updated.getDefaultProjectId(), "importar do Jira não grava mais squad na conta (vínculo é project_member_roles)");
         }
     }
 
