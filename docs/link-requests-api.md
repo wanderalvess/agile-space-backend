@@ -1,5 +1,11 @@
 # Pedido de vínculo — contrato (backend `feat/link-requests`, migração V74)
 
+> **Etapa 3 (V76):** a aprovação deixou de ser só do admin. AM/SM/PO/People Lead da squad aprovam contribuidores e
+> People/Tribe Lead aprovam liderança, pelas rotas `/api/squads/{id}/link-requests*`; `kind` e `requestedRoleName` entram
+> nos DTOs; contribuidor sem linha no roster ganha uma linha ao ser aprovado. Contrato e regras novas:
+> [`link-requests-squad-api.md`](./link-requests-squad-api.md). O que está abaixo continua valendo (rotas de admin, erros,
+> efeito da aprovação), com as exceções descritas lá (notificação de pedido novo e quem decide).
+
 Para quem lidera uma squad no Jira com **e-mail diferente** do e-mail da conta no portal (ou cuja linha do roster não é
 reivindicável pelo "sou eu" do onboarding: e-mail diferente, linha de liderança). A pessoa pede o vínculo e um **admin**
 aprova ou recusa. Todas as rotas exigem o JWT atual; o solicitante e o admin vêm sempre do token, nunca do corpo.

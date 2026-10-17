@@ -119,6 +119,13 @@ app:
     # Repetição do MESMO log authz_divergence (conta, ponto, squad, sentido): no máximo a cada N segundos (0 = toda vez).
     # O contador authz.divergence conta todas.
     authz-log-dedupe-seconds: ${APP_MEMBERSHIP_AUTHZ_LOG_DEDUPE_SECONDS:60}
+  link-requests:
+    # Pedido de vínculo (docs/link-requests-squad-api.md, Etapa 3 do vínculo): AM/SM/PO/People Lead da squad aprovam
+    # contribuidores e People/Tribe Lead (ou ADMIN) aprovam liderança, pelas rotas /api/squads/{id}/link-requests*.
+    #   on  = rotas por squad ativas e notificação aos aprovadores da squad (ADMIN só como fallback). Padrão.
+    #   off = as rotas por squad respondem 404; só ADMIN aprova (/api/admin/link-requests) e só ADMIN é notificado.
+    # Valor desconhecido cai em off. Reverter = APP_LINK_REQUESTS_SQUAD_APPROVAL=off e reiniciar; sem migração de banco.
+    squad-approval: ${APP_LINK_REQUESTS_SQUAD_APPROVAL:on}
   squad:
     scheduled-sync:
       # Desligado por padrão: ligar isso é uma mudança de comportamento real (um processo

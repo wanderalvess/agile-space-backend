@@ -127,18 +127,33 @@ class NotificationTriggersTest {
     }
 
     @Test
-    @DisplayName("Pedido de vínculo criado: avisa os ADMINs ativos com link /admin, 1 por pedido")
-    void linkRequestCreatedNotifiesAdmins() {
+    @DisplayName("Pedido de vínculo criado: avisa os aprovadores da squad (sem o solicitante) com link da aba Pedidos; ADMIN não recebe")
+    void linkRequestCreatedNotifiesSquadApprovers() {
+        triggers.linkRequestCreated("lr1", "ana", "Ana Paula", "DDWMISSI", List.of("am1", "po1", "ana"));
+        verify(notificationService).notifyUsers(eq(List.of("am1", "po1")),
+                argThat(d -> "LINK_REQUEST".equals(d.kind()) && "/squad/roster?tab=pedidos&squadId=DDWMISSI".equals(d.link())
+                        && "ana".equals(d.actorId()) && "LINK_REQUEST_CREATED:lr1".equals(d.dedupeKey())
+                        && d.text().contains("Ana Paula") && d.text().contains("DDWMISSI")),
+                eq(UserSignalService.NOTIFICATION));
+        verify(userRepository, never()).findActiveIdsByRoles(any());
+
+        triggers.linkRequestCreated(null, "ana", "Ana", "X", List.of("am1"));
+        verify(notificationService, times(1)).notifyUsers(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("Pedido de vínculo criado sem nenhum aprovador (ou só o próprio solicitante): cai nos ADMINs, link /admin?tab=aprovacoes")
+    void linkRequestCreatedFallsBackToAdmins() {
         when(userRepository.findActiveIdsByRoles(Set.of("ADMIN"))).thenReturn(List.of("adm1", "adm2"));
-        triggers.linkRequestCreated("lr1", "ana", "Ana Paula", "DDWMISSI");
+        triggers.linkRequestCreated("lr1", "ana", "Ana Paula", "DDWMISSI", List.of());
         verify(notificationService).notifyUsers(eq(List.of("adm1", "adm2")),
-                argThat(d -> "LINK_REQUEST".equals(d.kind()) && "/admin".equals(d.link()) && "ana".equals(d.actorId())
-                        && "LINK_REQUEST_CREATED:lr1".equals(d.dedupeKey()) && d.text().contains("Ana Paula")
-                        && d.text().contains("DDWMISSI")),
+                argThat(d -> "LINK_REQUEST".equals(d.kind()) && "/admin?tab=aprovacoes".equals(d.link()) && "ana".equals(d.actorId())
+                        && "LINK_REQUEST_CREATED:lr1".equals(d.dedupeKey())),
                 eq(UserSignalService.NOTIFICATION));
 
-        triggers.linkRequestCreated(null, "ana", "Ana", "X");
-        verify(notificationService, times(1)).notifyUsers(any(), any(), any());
+        triggers.linkRequestCreated("lr2", "ana", "Ana Paula", "DDWMISSI", List.of("ana"));
+        verify(notificationService).notifyUsers(eq(List.of("adm1", "adm2")),
+                argThat(d -> "LINK_REQUEST_CREATED:lr2".equals(d.dedupeKey()) && "/admin?tab=aprovacoes".equals(d.link())), any());
     }
 
     @Test

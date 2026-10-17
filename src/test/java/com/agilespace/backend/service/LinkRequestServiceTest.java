@@ -48,6 +48,7 @@ class LinkRequestServiceTest {
     @Mock private UserRepository userRepository;
     @Mock private AuditLogRepository auditLogRepository;
     @Mock private NotificationTriggers notificationTriggers;
+    @Mock private LinkRequestApprovalPolicy approvalPolicy;
 
     private LinkRequestService service;
 
@@ -57,7 +58,7 @@ class LinkRequestServiceTest {
         OnboardingService onboarding = new OnboardingService(projectMemberRoleRepository, projectConfigRepository,
                 squadMemberRepository, userRepository);
         service = new LinkRequestService(linkRequestRepository, projectConfigRepository, projectMemberRoleRepository,
-                userRepository, onboarding, auditLogRepository, notificationTriggers);
+                userRepository, onboarding, auditLogRepository, notificationTriggers, approvalPolicy);
     }
 
     private static User ana() {
@@ -77,6 +78,14 @@ class LinkRequestServiceTest {
     private static LinkRequest pending(String id, String memberId) {
         return LinkRequest.builder().id(id).requesterUserId("u1").projectKey("DDWMISSI").memberId(memberId)
                 .emailInJira("ana.nogueira@totvs.com.br").status(LinkRequest.PENDING).createdAt(LocalDateTime.now()).build();
+    }
+
+    /** A decisão grava 2 linhas de auditoria (a da V74 com e-mail e a _BY só com ids): pega a da ação pedida. */
+    private AuditLog savedAudit(String action) {
+        ArgumentCaptor<AuditLog> all = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditLogRepository, atLeastOnce()).save(all.capture());
+        return all.getAllValues().stream().filter(a -> action.equals(a.getAction())).findFirst()
+                .orElseThrow(() -> new AssertionError("auditoria " + action + " não gravada"));
     }
 
     private static void assertStatus(HttpStatus expected, Runnable action) {
@@ -111,7 +120,7 @@ class LinkRequestServiceTest {
         assertEquals("LINK_REQUEST_CREATED", audit.getValue().getAction());
         assertEquals("ana@gmail.com", audit.getValue().getPerformedBy());
         assertTrue(audit.getValue().getDetails().contains(created.id()));
-        verify(notificationTriggers).linkRequestCreated(created.id(), "u1", "Ana Paula", "DDWMISSI");
+        verify(notificationTriggers).linkRequestCreated(created.id(), "u1", "Ana Paula", "DDWMISSI", Set.of());
     }
 
     @Test
@@ -324,10 +333,12 @@ class LinkRequestServiceTest {
         assertEquals("m1", out.memberId());
         verify(linkRequestRepository).save(request);
 
-        ArgumentCaptor<AuditLog> audit = ArgumentCaptor.forClass(AuditLog.class);
-        verify(auditLogRepository).save(audit.capture());
-        assertEquals("LINK_REQUEST_APPROVED", audit.getValue().getAction());
-        assertEquals("adm@totvs.com.br", audit.getValue().getPerformedBy());
+        AuditLog audit = savedAudit("LINK_REQUEST_APPROVED");
+        assertEquals("adm@totvs.com.br", audit.getPerformedBy());
+        AuditLog by = savedAudit("LINK_REQUEST_APPROVED_BY");
+        assertEquals("adm", by.getPerformedBy());
+        assertTrue(by.getDetails().contains("via=ADMIN") && by.getDetails().contains("squad=DDWMISSI"));
+        assertFalse(by.getDetails().contains("@"));
         verify(notificationTriggers).linkRequestDecided("p1", "u1", true, "DDWMISSI", null, "adm");
     }
 
@@ -346,9 +357,7 @@ class LinkRequestServiceTest {
         assertEquals("conta-propria", requester.getJiraAccountId());
         verify(userRepository, never()).save(requester);
 
-        ArgumentCaptor<AuditLog> audit = ArgumentCaptor.forClass(AuditLog.class);
-        verify(auditLogRepository).save(audit.capture());
-        assertTrue(audit.getValue().getDetails().contains("liderança"));
+        assertTrue(savedAudit("LINK_REQUEST_APPROVED").getDetails().contains("liderança"));
     }
 
     @Test
@@ -446,10 +455,8 @@ class LinkRequestServiceTest {
         verify(projectMemberRoleRepository, never()).save(any());
         verifyNoInteractions(squadMemberRepository);
 
-        ArgumentCaptor<AuditLog> audit = ArgumentCaptor.forClass(AuditLog.class);
-        verify(auditLogRepository).save(audit.capture());
-        assertEquals("LINK_REQUEST_REJECTED", audit.getValue().getAction());
-        assertTrue(audit.getValue().getDetails().contains("e-mail não confere"));
+        assertTrue(savedAudit("LINK_REQUEST_REJECTED").getDetails().contains("e-mail não confere"));
+        assertEquals("adm", savedAudit("LINK_REQUEST_REJECTED_BY").getPerformedBy());
         verify(notificationTriggers).linkRequestDecided("p1", "u1", false, "DDWMISSI", "e-mail não confere", "adm");
     }
 
@@ -464,9 +471,7 @@ class LinkRequestServiceTest {
         AdminLinkRequestDto out = service.reject("p1", null, null, null);
         assertEquals("REJECTED", out.status());
         assertNull(out.decisionNote());
-        ArgumentCaptor<AuditLog> audit = ArgumentCaptor.forClass(AuditLog.class);
-        verify(auditLogRepository).save(audit.capture());
-        assertEquals("ADMIN", audit.getValue().getPerformedBy());
+        assertEquals("ADMIN", savedAudit("LINK_REQUEST_REJECTED").getPerformedBy());
         verify(notificationTriggers).linkRequestDecided(eq("p1"), eq("u1"), eq(false), eq("DDWMISSI"), isNull(), isNull());
     }
 }

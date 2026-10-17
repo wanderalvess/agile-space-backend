@@ -1153,7 +1153,7 @@ public class JiraProfieldsService {
      * UserProjectResolverService. Allowlist (não blocklist) de propósito: uma variante de grafia
      * de um papel de liderança que escapasse de um blocklist ainda cai fora daqui.
      */
-    private static final Set<String> SELF_SERVICE_JOIN_ROLE_NAMES = Set.of(
+    static final Set<String> SELF_SERVICE_JOIN_ROLE_NAMES = Set.of(
             "DEVELOPER", "DESENVOLVEDOR(A)",
             "QA", "ANALISTA DE QA",
             "DESIGNER",
@@ -1161,6 +1161,16 @@ public class JiraProfieldsService {
             "SME",
             "STAKEHOLDER / OBSERVADOR"
     );
+
+    /** O nome do papel está na allowlist de contribuidor (sem caixa)? Usada também pelo pedido de vínculo (V76). */
+    static boolean isSelfServiceRoleName(String roleName) {
+        return roleName != null && SELF_SERVICE_JOIN_ROLE_NAMES.contains(roleName.trim().toUpperCase());
+    }
+
+    /** Chave do papel a partir do nome (mesma regra do join/convite): "Analista de QA" -> "ANALISTA_DE_QA". */
+    static String roleKeyOf(String roleName) {
+        return roleName.trim().toUpperCase().replace(" ", "_").replaceAll("[^A-Z_]", "");
+    }
 
     /**
      * Vincula o usuário autenticado a um projeto já existente, com um papel de contribuidor —
@@ -1200,7 +1210,7 @@ public class JiraProfieldsService {
                     org.springframework.http.HttpStatus.FORBIDDEN,
                     "Papéis de liderança não podem ser autodeclarados. Sincronize com o Jira ou peça pra um administrador vincular seu papel.");
         }
-        String roleKey = cleanRoleName.toUpperCase().replace(" ", "_").replaceAll("[^A-Z_]", "");
+        String roleKey = roleKeyOf(cleanRoleName);
 
         ProjectMemberRole member = ProjectMemberRole.builder()
                 .projectId(key)
