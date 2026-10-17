@@ -10,7 +10,7 @@ import java.util.Locale;
  *   <li>{@link #LEGACY} (padrão): a decisão é exatamente a de antes (users.squad_id, roster squad_members, cargo).</li>
  *   <li>{@link #SHADOW}: a decisão continua a do legado; a nova é calculada em paralelo e cada divergência vira o log
  *       {@code authz_divergence} e o contador {@code authz.divergence}.</li>
- *   <li>{@link #NEW}: a decisão é a nova (só vínculos de project_member_roles, ADMIN e, até a Etapa 4, LEAD).</li>
+ *   <li>{@link #NEW}: a decisão é a nova (só vínculos de project_member_roles e ADMIN; LEAD só com app.membership.lead-level=legacy, Etapa 4).</li>
  * </ul>
  *
  * Diferente de {@link MembershipMode} (cujo padrão é SHADOW), aqui o padrão é LEGACY e qualquer valor desconhecido também
