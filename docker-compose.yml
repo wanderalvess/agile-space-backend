@@ -64,6 +64,8 @@ services:
       APP_MEMBERSHIP_MODE: ${APP_MEMBERSHIP_MODE:-shadow}
       # Autorização por squad (Etapa 2, ALTO RISCO): legacy (padrão) | shadow | new. Reverter = legacy. Ver docs/membership-api.md.
       APP_MEMBERSHIP_AUTHZ: ${APP_MEMBERSHIP_AUTHZ:-legacy}
+      # Review (docs/ceremony-review-api.md): trava de decisão do PO/SME no servidor. enforce (padrão) | off (desliga a trava).
+      APP_SHOWCASE_DECISION_LOCK: ${APP_SHOWCASE_DECISION_LOCK:-enforce}
       # Pedido de vínculo aprovado pela liderança da squad (Etapa 3): on (padrão) | off (só ADMIN aprova; rotas por squad 404).
       # Ver docs/link-requests-squad-api.md.
       APP_LINK_REQUESTS_SQUAD_APPROVAL: ${APP_LINK_REQUESTS_SQUAD_APPROVAL:-on}

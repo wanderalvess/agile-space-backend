@@ -136,6 +136,14 @@ app:
     #         ATENÇÃO: qualquer conta sem vínculo pode inventar uma chave de squad e ganhar poder de gerir equipes.
     # Em authz=legacy|shadow o bootstrap segue como sempre (grava users.squad_id), independente desta chave.
     bootstrap: ${APP_MEMBERSHIP_BOOTSTRAP:off}
+  showcase:
+    # Review (docs/ceremony-review-api.md). Trava de decisão: só ADMIN, liderança da squad (vínculo) e PO/SME da squad mudam o
+    # veredito e o feedback de um card; os demais recebem 403.
+    #   enforce = trava ligada. Padrão (qualquer valor diferente de off também).
+    #   off     = trava desligada (comportamento anterior). Reverter a trava sem redeploy = APP_SHOWCASE_DECISION_LOCK=off e reiniciar.
+    decision-lock: ${APP_SHOWCASE_DECISION_LOCK:enforce}
+    # Minutos sem renovar até o apresentador (estado em memória) deixar de valer.
+    presenter-ttl-minutes: ${APP_SHOWCASE_PRESENTER_TTL_MINUTES:240}
   link-requests:
     # Pedido de vínculo (docs/link-requests-squad-api.md, Etapa 3 do vínculo): AM/SM/PO/People Lead da squad aprovam
     # contribuidores e People/Tribe Lead (ou ADMIN) aprovam liderança, pelas rotas /api/squads/{id}/link-requests*.
