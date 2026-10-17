@@ -13,6 +13,7 @@ import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.repository.UserJiraConfigRepository;
 import com.agilespace.backend.repository.UserTdnConfigRepository;
 import com.agilespace.backend.security.JiraAccountIdGuard;
+import com.agilespace.backend.security.LeadPolicy;
 import com.agilespace.backend.security.UserSessionGuard;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -48,6 +49,14 @@ public class UserService {
 
     @Autowired(required = false)
     private AuditLogRepository auditLogRepository;
+
+    /** Etapa 4 (app.membership.lead-level): com off o nível LEAD deixa de ser atribuível. Montagem manual: legacy. */
+    private LeadPolicy leadPolicy = LeadPolicy.LEGACY;
+
+    @Autowired(required = false)
+    public void setLeadPolicy(LeadPolicy leadPolicy) {
+        if (leadPolicy != null) this.leadPolicy = leadPolicy;
+    }
 
     @Transactional(readOnly = true)
     public List<User> getAllUsers() {
@@ -117,10 +126,14 @@ public class UserService {
                 audit(actorId, "USER_JOBTITLE_CHANGED", existing, "cargo: " + existing.getJobTitle() + " -> " + incoming.getJobTitle());
                 existing.setJobTitle(incoming.getJobTitle());
             }
-            if (incoming.isRoleExplicit() && incoming.getRole() != null) {
-                if (!UserRole.isValid(incoming.getRole())) {
+            // LEAD reenviado sem mudança (o painel devolve o valor atual) não é erro nem altera nada, mesmo com lead-level=off.
+            boolean leadUnchanged = UserRole.isLegacyLead(incoming.getRole()) && UserRole.isLegacyLead(existing.getRole());
+            if (incoming.isRoleExplicit() && incoming.getRole() != null && !leadUnchanged) {
+                boolean legacyLead = leadPolicy.isLegacy() && UserRole.isLegacyLead(incoming.getRole());
+                if (!UserRole.isValid(incoming.getRole()) && !legacyLead) {
                     throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                            "role inválida: use ADMIN, LEAD ou MEMBER");
+                            leadPolicy.isLegacy() ? "role inválida: use ADMIN, LEAD ou MEMBER"
+                                    : "role inválida: use ADMIN ou MEMBER (liderança de squad é um vínculo, não um nível de conta)");
                 }
                 String newRole = incoming.getRole().toUpperCase();
                 String oldRole = existing.getRole() == null ? "MEMBER" : existing.getRole().toUpperCase();

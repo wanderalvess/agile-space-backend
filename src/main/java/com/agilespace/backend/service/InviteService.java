@@ -10,6 +10,7 @@ import com.agilespace.backend.repository.InviteRepository;
 import com.agilespace.backend.repository.ProjectConfigRepository;
 import com.agilespace.backend.repository.ProjectMemberRoleRepository;
 import com.agilespace.backend.repository.UserRepository;
+import com.agilespace.backend.security.LeadPolicy;
 import com.agilespace.backend.security.SquadLeadership;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -58,6 +59,14 @@ public class InviteService {
     void setSquadAuthz(SquadAccessService squadAccessService, AuthzShadow authzShadow) {
         this.squadAccessService = squadAccessService;
         this.authzShadow = authzShadow;
+    }
+
+    /** Etapa 4 (app.membership.lead-level). Montagem manual: legacy (LEAD concede, como antes). */
+    private LeadPolicy leadPolicy = LeadPolicy.LEGACY;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setLeadPolicy(LeadPolicy leadPolicy) {
+        if (leadPolicy != null) this.leadPolicy = leadPolicy;
     }
 
     @Transactional
@@ -153,7 +162,7 @@ public class InviteService {
         // Etapa 2 (app.membership.authz): na regra nova só o vínculo (pmr, inclusive tribo/segmento) conta; users.squad_id deixa de valer.
         return authzShadow.decide("inviteView", caller.getId(), squadId,
                 () -> legacyIsSquadMemberOrAdmin(squadId, caller),
-                () -> "ADMIN".equalsIgnoreCase(caller.getRole()) || "LEAD".equalsIgnoreCase(caller.getRole())
+                () -> leadPolicy.isPrivileged(caller.getRole())
                         || squadAccessService.isLinkedToSquad(caller, squadId),
                 legacyAllowed -> legacyAllowed
                         ? (squadId.equalsIgnoreCase(caller.getSquadId()) || squadId.equalsIgnoreCase(caller.getDefaultProjectId())
@@ -162,7 +171,7 @@ public class InviteService {
     }
 
     private boolean legacyIsSquadMemberOrAdmin(String squadId, User caller) {
-        if ("ADMIN".equalsIgnoreCase(caller.getRole()) || "LEAD".equalsIgnoreCase(caller.getRole())) return true;
+        if (leadPolicy.isPrivileged(caller.getRole())) return true;
         if (squadId.equalsIgnoreCase(caller.getSquadId()) || squadId.equalsIgnoreCase(caller.getDefaultProjectId())) return true;
         List<ProjectMemberRole> rows = projectMemberRoleRepository.findByProjectId(squadId);
         return rows != null && rows.stream().anyMatch(m ->

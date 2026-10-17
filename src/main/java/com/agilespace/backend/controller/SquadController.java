@@ -30,6 +30,14 @@ public class SquadController {
     private final com.agilespace.backend.service.SquadAccessService squadAccessService;
     private final com.agilespace.backend.service.SquadTeamService squadTeamService;
 
+    /** Etapa 4 (app.membership.lead-level). Montagem manual: legacy (LEAD concede, como antes). */
+    private com.agilespace.backend.security.LeadPolicy leadPolicy = com.agilespace.backend.security.LeadPolicy.LEGACY;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setLeadPolicy(com.agilespace.backend.security.LeadPolicy leadPolicy) {
+        if (leadPolicy != null) this.leadPolicy = leadPolicy;
+    }
+
     /**
      * Leitura: qualquer membro real da squad (ou admin/liderança) — nunca auto-vincula.
      * Antes desta checagem, todo GET de /api/squads/** exigia só autenticação, sem checar
@@ -281,10 +289,10 @@ public class SquadController {
     }
 
     // ----- Members -----
-    /** Squads da própria pessoa. Consultar o vínculo de outra pessoa (por e-mail, id…) é só de admin. */
+    /** Squads da própria pessoa. Consultar o vínculo de outra pessoa (por e-mail, id…) é só de admin (e do LEAD apenas em lead-level=legacy). */
     @GetMapping("/by-user")
     public ResponseEntity<List<SquadMember>> getSquadMembersForUser(@RequestParam String identifier, HttpServletRequest request) {
-        if (!isAdmin(request) && !"LEAD".equalsIgnoreCase((String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE))) {
+        if (!isAdmin(request) && !leadPolicy.leadGrants((String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE))) {
             String userId = callerId(request);
             User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
             String wanted = identifier == null ? "" : identifier.trim();

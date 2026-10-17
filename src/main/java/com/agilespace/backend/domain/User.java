@@ -44,7 +44,7 @@ public class User {
      *  Nunca confundir com o cargo de negócio do usuário — isso vive em {@link #jobTitle}. */
     @Column(name = "role")
     @Builder.Default
-    private String role = "MEMBER"; // "ADMIN", "LEAD", "MEMBER" — ver UserRole
+    private String role = "MEMBER"; // "ADMIN" ou "MEMBER" (LEAD legado lido como MEMBER) — ver UserRole
 
     public String getRole() {
         return role != null ? role : "MEMBER";

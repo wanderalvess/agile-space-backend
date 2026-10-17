@@ -11,17 +11,17 @@ public final class SquadLeadership {
 
     public static final Set<String> LEADERSHIP_JOB_TITLES = Set.of(
             "tech lead", "scrum master", "agile master", "product owner",
-            "people lead", "tribe lead", "agile coach", "sme", "admin", "lead"
+            "people lead", "tribe lead", "agile coach", "sme", "admin"
     );
 
     /**
      * Nomes de papel (ProjectMemberRole.roleName / Invite.roleName) que concedem governança. É a mesma lista que o
-     * sync do Jira usa pra marcar isLeadership=true (JiraProfieldsService.LEADERSHIP_ROLE_NAMES), mais "ADMIN"/"LEAD".
+     * sync do Jira usa pra marcar isLeadership=true (JiraProfieldsService.LEADERSHIP_ROLE_NAMES), mais "ADMIN". (Etapa 4: "LEAD" saiu, o nível de conta LEAD deixou de existir.)
      * "SME" fica de fora: é papel de contribuidor (autoatribuível) mesmo constando como cargo em LEADERSHIP_JOB_TITLES.
      */
     private static final Set<String> LEADERSHIP_ROLE_NAMES = Set.of(
             "AGILE MASTER", "AGILE COACH", "PRODUCT OWNER", "PRODUCT MANAGER",
-            "PEOPLE LEAD", "TRIBE LEAD", "TEAM LEAD", "TECH LEAD", "SCRUM MASTER", "ADMIN", "LEAD"
+            "PEOPLE LEAD", "TRIBE LEAD", "TEAM LEAD", "TECH LEAD", "SCRUM MASTER", "ADMIN"
     );
 
     private SquadLeadership() {

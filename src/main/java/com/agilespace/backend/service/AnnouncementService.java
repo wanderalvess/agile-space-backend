@@ -146,7 +146,7 @@ public class AnnouncementService {
 
     // --- regras ---
 
-    /** O aviso é do público deste usuário? ALL; SQUADS = alguma squad acessível; ROLES = UserRole ou roleKey. */
+    /** O aviso é do público deste usuário? ALL; SQUADS = alguma squad acessível; ROLES = nível de conta (ADMIN/MEMBER), roleKey ou a chave derivada LEADERSHIP. */
     static Predicate<GlobalAnnouncement> audienceOf(SquadAudienceService.UserContext ctx) {
         return a -> switch (a.getAudienceType() == null ? "ALL" : a.getAudienceType()) {
             case "SQUADS" -> a.getAudienceSquadIds() != null && a.getAudienceSquadIds().stream().anyMatch(ctx::hasSquad);
@@ -170,6 +170,8 @@ public class AnnouncementService {
 
         Set<String> squads = cleanList(r.audienceSquadIds(), 100, false, "squad");
         Set<String> roles = cleanList(r.audienceRoles(), 50, true, "papel");
+        // Etapa 4: LEAD deixou de ser nível de conta; o público "liderança" é a chave derivada LEADERSHIP (cliente antigo ainda manda LEAD).
+        if (roles.remove("LEAD")) roles.add(SquadAudienceService.LEADERSHIP_KEY);
         if ("SQUADS".equals(audience) && squads.isEmpty()) throw badRequest("Escolha ao menos uma squad.");
         if ("ROLES".equals(audience) && roles.isEmpty()) throw badRequest("Escolha ao menos um papel.");
 
