@@ -23,16 +23,21 @@ import java.util.stream.Collectors;
  * entregar um evento só a algumas pessoas (voto do Health Check, que não pode chegar aos demais).
  */
 @Slf4j
-public abstract class BoardWebSocketHandler extends TextWebSocketHandler {
+public abstract class BoardWebSocketHandler extends TextWebSocketHandler implements PresenceBroadcaster {
 
     private static final int SEND_TIME_LIMIT_MS = 10_000;
     private static final int BUFFER_SIZE_LIMIT = 512 * 1024;
 
     private final Map<String, Set<WebSocketSession>> boardSessions = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper;
+    private final PresenceModule module;
+    private final PresenceChannel presence;
 
-    protected BoardWebSocketHandler(ObjectMapper objectMapper) {
+    protected BoardWebSocketHandler(ObjectMapper objectMapper, PresenceRegistry presenceRegistry, PresenceModule module) {
         this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
+        this.module = module;
+        this.presence = new PresenceChannel(presenceRegistry != null ? presenceRegistry : new PresenceRegistry(),
+                module, "boardId", this.objectMapper);
     }
 
     @Override
@@ -44,6 +49,7 @@ public abstract class BoardWebSocketHandler extends TextWebSocketHandler {
             WebSocketSession safe = new ConcurrentWebSocketSessionDecorator(session, SEND_TIME_LIMIT_MS, BUFFER_SIZE_LIMIT);
             boardSessions.computeIfAbsent(boardId, k -> new CopyOnWriteArraySet<>()).add(safe);
             log.debug("{} connected. BoardId: {}, SessionId: {}", getClass().getSimpleName(), boardId, session.getId());
+            presence.joined(boardId, session, safe, () -> sessionsOf(boardId));
         }
     }
 
@@ -56,7 +62,23 @@ public abstract class BoardWebSocketHandler extends TextWebSocketHandler {
                 sessions.removeIf(s -> s.getId().equals(session.getId()));
                 return sessions.isEmpty() ? null : sessions;
             });
+            presence.left(boardId, session, () -> sessionsOf(boardId));
         }
+    }
+
+    @Override
+    public PresenceModule presenceModule() {
+        return module;
+    }
+
+    @Override
+    public void broadcastPresence(String boardId, PresenceRegistry.Snapshot snapshot) {
+        presence.broadcast(boardId, snapshot, sessionsOf(boardId));
+    }
+
+    private Set<WebSocketSession> sessionsOf(String boardId) {
+        Set<WebSocketSession> sessions = boardSessions.get(boardId);
+        return sessions == null ? Set.of() : sessions;
     }
 
     @Override

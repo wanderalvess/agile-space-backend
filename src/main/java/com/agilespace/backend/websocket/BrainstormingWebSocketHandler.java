@@ -7,7 +7,12 @@ import org.springframework.stereotype.Component;
 @Component
 public class BrainstormingWebSocketHandler extends BoardWebSocketHandler {
 
-    public BrainstormingWebSocketHandler(@Autowired(required = false) ObjectMapper objectMapper) {
-        super(objectMapper);
+    @Autowired
+    public BrainstormingWebSocketHandler(@Autowired(required = false) ObjectMapper objectMapper, PresenceRegistry presenceRegistry) {
+        super(objectMapper, presenceRegistry, PresenceModule.BRAINSTORMING);
+    }
+
+    public BrainstormingWebSocketHandler(ObjectMapper objectMapper) {
+        this(objectMapper, new PresenceRegistry());
     }
 }

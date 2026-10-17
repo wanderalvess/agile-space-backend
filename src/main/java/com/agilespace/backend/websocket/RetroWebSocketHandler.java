@@ -20,7 +20,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
 
 @Component
 @Slf4j
-public class RetroWebSocketHandler extends TextWebSocketHandler {
+public class RetroWebSocketHandler extends TextWebSocketHandler implements PresenceBroadcaster {
 
     private static final int SEND_TIME_LIMIT_MS = 10_000;
     private static final int BUFFER_SIZE_LIMIT = 512 * 1024;
@@ -30,9 +30,16 @@ public class RetroWebSocketHandler extends TextWebSocketHandler {
     private static final Map<String, Long> lastDisconnect = new ConcurrentHashMap<>();
     private static final Map<String, Set<WebSocketSession>> boardSessions = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper;
+    private final PresenceChannel presence;
 
-    public RetroWebSocketHandler(@Autowired(required = false) ObjectMapper objectMapper) {
+    @Autowired
+    public RetroWebSocketHandler(@Autowired(required = false) ObjectMapper objectMapper, PresenceRegistry presenceRegistry) {
         this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
+        this.presence = new PresenceChannel(presenceRegistry, PresenceModule.RETRO, "boardId", this.objectMapper);
+    }
+
+    public RetroWebSocketHandler(ObjectMapper objectMapper) {
+        this(objectMapper, new PresenceRegistry());
     }
 
     @Override
@@ -46,6 +53,7 @@ public class RetroWebSocketHandler extends TextWebSocketHandler {
             if (uid != null) lastDisconnect.remove(boardId + "|" + uid);
             boardSessions.computeIfAbsent(boardId, k -> new CopyOnWriteArraySet<>()).add(safe);
             log.debug("Retro WebSocket connected. BoardId: {}, SessionId: {}", boardId, session.getId());
+            presence.joined(boardId, session, safe, () -> sessionsOf(boardId));
         }
     }
 
@@ -65,7 +73,23 @@ public class RetroWebSocketHandler extends TextWebSocketHandler {
                 lastDisconnect.put(boardId + "|" + uid, now);
             }
             log.debug("Retro WebSocket closed. BoardId: {}, SessionId: {}", boardId, session.getId());
+            presence.left(boardId, session, () -> sessionsOf(boardId));
         }
+    }
+
+    @Override
+    public PresenceModule presenceModule() {
+        return PresenceModule.RETRO;
+    }
+
+    @Override
+    public void broadcastPresence(String boardId, PresenceRegistry.Snapshot snapshot) {
+        presence.broadcast(boardId, snapshot, sessionsOf(boardId));
+    }
+
+    private Set<WebSocketSession> sessionsOf(String boardId) {
+        Set<WebSocketSession> sessions = boardSessions.get(boardId);
+        return sessions == null ? Set.of() : sessions;
     }
 
     @Override

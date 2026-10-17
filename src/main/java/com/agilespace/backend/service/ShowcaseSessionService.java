@@ -56,6 +56,11 @@ public class ShowcaseSessionService {
     private UserRepository userRepository;
 
     @Transactional(readOnly = true)
+    public boolean sessionExists(String id) {
+        return id != null && repository.existsById(id);
+    }
+
+    @Transactional(readOnly = true)
     public ShowcaseSession getSession(String id) {
         return repository.findById(id).map(this::attachChildren).orElse(null);
     }

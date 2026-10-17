@@ -18,7 +18,7 @@ import java.util.function.Predicate;
 
 @Component
 @Slf4j
-public class PokerWebSocketHandler extends TextWebSocketHandler {
+public class PokerWebSocketHandler extends TextWebSocketHandler implements PresenceBroadcaster {
 
     /** Envio por sessão é serializado pelo decorator: requests concorrentes não podem escrever no mesmo socket ao mesmo tempo. */
     private static final int SEND_TIME_LIMIT_MS = 10_000;
@@ -27,9 +27,16 @@ public class PokerWebSocketHandler extends TextWebSocketHandler {
     // roomId -> (sessionId -> sessão decorada)
     private static final Map<String, Map<String, WebSocketSession>> roomSessions = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper;
+    private final PresenceChannel presence;
 
-    public PokerWebSocketHandler(@Autowired(required = false) ObjectMapper objectMapper) {
+    @Autowired
+    public PokerWebSocketHandler(@Autowired(required = false) ObjectMapper objectMapper, PresenceRegistry presenceRegistry) {
         this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
+        this.presence = new PresenceChannel(presenceRegistry, PresenceModule.POKER, "roomId", this.objectMapper);
+    }
+
+    public PokerWebSocketHandler(ObjectMapper objectMapper) {
+        this(objectMapper, new PresenceRegistry());
     }
 
     @Override
@@ -41,6 +48,7 @@ public class PokerWebSocketHandler extends TextWebSocketHandler {
             sessions.put(session.getId(), safe);
             log.info("Poker WebSocket connected. RoomId: {}, SessionId: {}, Total connected in room: {}",
                      roomId, session.getId(), sessions.size());
+            presence.joined(roomId, session, safe, () -> sessionsOf(roomId));
         }
     }
 
@@ -53,7 +61,23 @@ public class PokerWebSocketHandler extends TextWebSocketHandler {
                 return sessions.isEmpty() ? null : sessions;
             });
             log.info("Poker WebSocket closed. RoomId: {}, SessionId: {}", roomId, session.getId());
+            presence.left(roomId, session, () -> sessionsOf(roomId));
         }
+    }
+
+    @Override
+    public PresenceModule presenceModule() {
+        return PresenceModule.POKER;
+    }
+
+    @Override
+    public void broadcastPresence(String roomId, PresenceRegistry.Snapshot snapshot) {
+        presence.broadcast(roomId, snapshot, sessionsOf(roomId));
+    }
+
+    private List<WebSocketSession> sessionsOf(String roomId) {
+        Map<String, WebSocketSession> all = roomSessions.get(roomId);
+        return all == null ? List.of() : new ArrayList<>(all.values());
     }
 
     @Override
