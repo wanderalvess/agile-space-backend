@@ -112,6 +112,25 @@ public class RetroControllerTest {
     }
 
     @Test
+    public void testFinishAndReopenUseCallerFromToken() {
+        RetroBoard board = new RetroBoard();
+        when(service.finish("123", ANA)).thenReturn(board);
+        when(service.reopen("123", ANA)).thenReturn(board);
+
+        assertEquals(HttpStatus.OK, controller.finish("123", requestOf("ana", "MEMBER")).getStatusCode());
+        assertEquals(HttpStatus.OK, controller.reopen("123", requestOf("ana", "MEMBER")).getStatusCode());
+        verify(service).finish("123", ANA);
+        verify(service).reopen("123", ANA);
+    }
+
+    @Test
+    public void testFinish_forbiddenPropagates() {
+        when(service.finish("123", ANA)).thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
+
+        assertThrows(ResponseStatusException.class, () -> controller.finish("123", requestOf("ana", "MEMBER")));
+    }
+
+    @Test
     public void testTransferControlAndResetVotes() {
         RetroBoard board = new RetroBoard();
         when(service.transferControl("123", ANA)).thenReturn(board);
