@@ -109,8 +109,8 @@ Só calcula para o **próprio chamador** (nunca para outra pessoa). Sempre 200 p
 ### `GET /api/squads/{id}/link-requests`
 
 - `status`: `PENDING` (padrão) | `APPROVED` | `REJECTED` | `ALL` (sem caixa). Outro valor = 400.
-- Ordenado por `createdAt` decrescente. `limit` (1–200, padrão 100) e `offset` (≥ 0, padrão 0). Mais resultados = pedir
-  `offset += limit` enquanto vier uma página cheia.
+- Ordenado por `createdAt` decrescente. `size` (1–200, padrão 100) e `page` (≥ 0, padrão 0). Mais resultados = pedir
+  `page + 1` enquanto vier uma página cheia. Fora desses limites = 400.
 - Só devolve pedidos da squad `{id}` (e do alias `MISSI`/`DDWMISSI`).
 
 ```json
@@ -197,7 +197,7 @@ Rotas por squad:
 | linha de outra squad | 422 |
 | linha já ligada a outra conta (pedido continua PENDING) | 409 |
 | linha inexistente / conta do solicitante inexistente | 404 |
-| `status` inválido na lista / `reason` > 500 | 400 |
+| `status` inválido, `page`/`size` fora do limite na lista / `reason` > 500 | 400 |
 
 `/api/admin/link-requests*` continua exigindo `role=ADMIN` e funciona com a flag ligada ou desligada.
 

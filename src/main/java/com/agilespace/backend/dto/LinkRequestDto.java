@@ -13,5 +13,14 @@ public record LinkRequestDto(
         String status,
         Instant createdAt,
         Instant decidedAt,
-        String decisionNote) {
+        String decisionNote,
+        String kind,
+        String requestedRoleName) {
+
+    /** Forma anterior à V76. */
+    public LinkRequestDto(String id, String projectKey, String memberId, String memberName, String emailInJira,
+                          String message, String status, Instant createdAt, Instant decidedAt, String decisionNote) {
+        this(id, projectKey, memberId, memberName, emailInJira, message, status, createdAt, decidedAt, decisionNote,
+                "CONTRIBUTOR", null);
+    }
 }

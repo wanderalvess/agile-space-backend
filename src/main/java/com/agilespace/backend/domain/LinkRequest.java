@@ -12,7 +12,8 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "link_requests", indexes = {
     @Index(name = "idx_link_requests_status_created", columnList = "status, created_at"),
-    @Index(name = "idx_link_requests_requester_project_status", columnList = "requester_user_id, project_key, status")
+    @Index(name = "idx_link_requests_requester_project_status", columnList = "requester_user_id, project_key, status"),
+    @Index(name = "idx_link_requests_project_status_created", columnList = "project_key, status, created_at")
 })
 @Getter
 @Setter
@@ -24,6 +25,11 @@ public class LinkRequest {
     public static final String PENDING = "PENDING";
     public static final String APPROVED = "APPROVED";
     public static final String REJECTED = "REJECTED";
+
+    /** Pedido de contribuidor: aprovado por AM/SM/PO/People Lead da squad (ou People/Tribe Lead da tribo, ou ADMIN). */
+    public static final String KIND_CONTRIBUTOR = "CONTRIBUTOR";
+    /** Pedido de liderança (linha is_leadership): People Lead/Tribe Lead (squad ou tribo) ou ADMIN. */
+    public static final String KIND_LEADERSHIP = "LEADERSHIP";
 
     @Id
     @Column(length = 36)
@@ -60,4 +66,16 @@ public class LinkRequest {
 
     @Column(name = "decision_note", length = 500)
     private String decisionNote;
+
+    /** CONTRIBUTOR | LEADERSHIP (V76). Nulo = linha antiga: leia com {@link #effectiveKind()}. */
+    @Column(name = "kind", length = 12)
+    private String kind;
+
+    /** Papel de contribuidor pedido por quem não aparece no roster (allowlist do joinProject); nulo se há linha. */
+    @Column(name = "requested_role_name", length = 80)
+    private String requestedRoleName;
+
+    public String effectiveKind() {
+        return KIND_LEADERSHIP.equalsIgnoreCase(kind) ? KIND_LEADERSHIP : KIND_CONTRIBUTOR;
+    }
 }

@@ -8,6 +8,9 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import org.springframework.data.domain.Pageable;
+
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -23,6 +26,11 @@ public interface LinkRequestRepository extends JpaRepository<LinkRequest, String
     List<LinkRequest> findAllByOrderByCreatedAtDesc();
 
     List<LinkRequest> findByStatusOrderByCreatedAtDesc(String status);
+
+    /** Lista por squad (todas as chaves/aliases da squad), mais recentes primeiro. Índice (project_key, status, created_at). */
+    List<LinkRequest> findByProjectKeyInOrderByCreatedAtDesc(Collection<String> projectKeys, Pageable pageable);
+
+    List<LinkRequest> findByProjectKeyInAndStatusOrderByCreatedAtDesc(Collection<String> projectKeys, String status, Pageable pageable);
 
     /** Trava a linha para decidir: duas decisões simultâneas do mesmo pedido não passam as duas. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)

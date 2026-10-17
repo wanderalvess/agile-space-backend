@@ -164,15 +164,24 @@ public class NotificationTriggers {
 
     // --- LINK_REQUEST ---
 
-    /** Pedido de vínculo novo: avisa todos os ADMINs ativos (link para /admin). O solicitante nunca é notificado. */
-    public void linkRequestCreated(String requestId, String requesterId, String requesterName, String projectKey) {
+    /**
+     * Pedido de vínculo novo: avisa os APROVADORES da squad ({@code approverIds}, já sem o solicitante; link para a aba
+     * "Pedidos" da squad). Só quando não há nenhum aprovador com conta (ou a aprovação por squad está desligada) cai nos
+     * ADMINs ativos, com o link da fila de admin. O solicitante nunca é notificado.
+     */
+    public void linkRequestCreated(String requestId, String requesterId, String requesterName, String projectKey,
+                                   Collection<String> approverIds) {
         if (requestId == null) return;
+        List<String> approvers = approverIds == null ? List.of()
+                : approverIds.stream().filter(id -> id != null && !id.isBlank() && !id.equals(requesterId)).toList();
         fire("LINK_REQUEST_CREATED", () -> {
-            Collection<String> admins = userRepository.findActiveIdsByRoles(Set.of("ADMIN"));
             String who = requesterName == null || requesterName.isBlank() ? "Alguém" : requesterName.trim();
-            notificationService.notifyUsers(admins,
-                    new NotificationService.Draft(Notification.LINK_REQUEST, "Pedido de vínculo",
-                            who + " pediu para ser vinculado(a) à squad " + projectKey + ".", "/admin", requesterId, null,
+            String text = who + " pediu para ser vinculado(a) à squad " + projectKey + ".";
+            boolean toApprovers = !approvers.isEmpty();
+            Collection<String> recipients = toApprovers ? approvers : userRepository.findActiveIdsByRoles(Set.of("ADMIN"));
+            String link = toApprovers ? "/squad/roster?tab=pedidos&squadId=" + projectKey : "/admin?tab=aprovacoes";
+            notificationService.notifyUsers(recipients,
+                    new NotificationService.Draft(Notification.LINK_REQUEST, "Pedido de vínculo", text, link, requesterId, null,
                             "LINK_REQUEST_CREATED:" + requestId),
                     UserSignalService.NOTIFICATION);
         });
