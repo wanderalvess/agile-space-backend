@@ -1,9 +1,15 @@
 package com.agilespace.backend.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -23,9 +29,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 
 /**
  * O caminho do PRIMEIRO usuário numa instalação limpa (banco vazio) com {@code app.membership.mode=new} e
- * {@code app.membership.authz=new}, ponta a ponta por HTTP + Postgres real: cadastro, sessão, tentativa de criar a
- * equipe, bootstrap, telas da squad, convite. Fixa também o que NÃO funciona sem ADMIN (criar equipe e entrar por
- * "join"), para que uma mudança desse comportamento apareça como falha de teste. Sem Docker é ignorado.
+ * {@code app.membership.authz=new} (bootstrap no padrão, desligado), ponta a ponta por HTTP + Postgres real: cadastro,
+ * sessão sem vínculo, membro comum barrado, primeiro ADMIN criando a equipe, convite, telas da squad. Fixa também o que
+ * NÃO funciona sem ADMIN (criar equipe e inventar squad), para que uma mudança desse comportamento apareça como falha
+ * de teste. Sem Docker é ignorado.
  */
 @SpringBootTest(properties = {"app.membership.mode=new", "app.membership.authz=new"})
 @AutoConfigureMockMvc
@@ -47,10 +54,23 @@ class PrimeiroUsuarioInstalacaoLimpaTest {
     @Autowired ObjectMapper mapper;
     @Autowired MembershipCache cache;
 
+    private ListAppender<ILoggingEvent> logs;
+    private Logger logger;
+
     @BeforeEach
     void instalacaoLimpa() {
         jdbc.execute("TRUNCATE project_member_roles, squad_members, squad_member_exclusions, squads, projects, invites, link_requests, users CASCADE");
         cache.evictAll();
+        logs = new ListAppender<>();
+        logs.start();
+        logger = (Logger) LoggerFactory.getLogger(SquadAccessService.class);
+        logger.addAppender(logs);
+        logger.setLevel(Level.INFO);
+    }
+
+    @AfterEach
+    void detach() {
+        logger.detachAppender(logs);
     }
 
     private JsonNode register(String who) throws Exception {
@@ -78,7 +98,7 @@ class PrimeiroUsuarioInstalacaoLimpaTest {
     }
 
     @Test
-    void membroSemAdmin_naoCriaEquipePeloProjeto_masEntraPeloBootstrapEPassaEmTodasAsTelas() throws Exception {
+    void membroComumSemVinculo_naoEntraPorBootstrap_entraPeloConviteDoPrimeiroAdmin() throws Exception {
         JsonNode ana = register("ana");
         String auth = bearer(ana);
 
@@ -87,45 +107,56 @@ class PrimeiroUsuarioInstalacaoLimpaTest {
         assertTrue(ana.path("legacyOnly").isMissingNode() || ana.get("legacyOnly").isNull());
         assertEquals(0, memberships(auth).get("memberships").size());
         assertFalse(memberships(auth).get("legacyOnly").asBoolean());
-
-        // Onboarding: nada para reconhecer; criar equipe pelo projeto exige AM/PL/ADMIN.
         assertEquals(200, status(get("/api/onboarding/suggestions").header("Authorization", auth)));
+
+        // Nada de criar equipe nem inventar squad pelo bootstrap (desligado); nada é gravado.
         assertEquals(403, status(post("/api/projects").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"id\":\"TIMEA\",\"name\":\"Time A\"}")), "membro comum não cria equipe");
+        assertEquals(403, status(post("/api/squads/TIMEA").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"ceremonyMode\":\"manual\"}")), "bootstrap desligado");
+        assertEquals(403, status(get("/api/squads/TIMEA/member-metrics").header("Authorization", auth)));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM project_member_roles", Integer.class));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM projects", Integer.class));
+        assertNull(jdbc.queryForObject("SELECT squad_id FROM users WHERE email = 'ana@totvs.com.br'", String.class));
 
-        // Primeira escrita numa squad vazia: bootstrap (cria o vínculo de liderança).
-        assertEquals(200, status(post("/api/squads/TIMEA").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"ceremonyMode\":\"manual\"}")));
+        // O primeiro ADMIN (SQL, README) cria a equipe e entra como liderança (Agile Master).
+        register("root");
+        jdbc.update("UPDATE users SET role = 'ADMIN' WHERE email = 'root@totvs.com.br'");
+        String root = bearer(login("root"));
+        assertEquals(200, status(post("/api/projects").header("Authorization", root).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"id\":\"TIMEB\",\"name\":\"Time B\"}")));
+        JsonNode rootM = memberships(root).get("memberships").get(0);
+        assertEquals("TIMEB", rootM.get("projectId").asText());
+        assertEquals("AGILE_MASTER", rootM.get("roleKey").asText());
+        assertTrue(rootM.get("leadership").asBoolean(), "o criador da equipe é a liderança dela");
+        assertEquals("MANUAL", jdbc.queryForObject("SELECT source FROM project_member_roles WHERE project_id = 'TIMEB'", String.class));
+
+        // E convida; ana aceita o convite e entra como membro (sem liderança).
+        JsonNode invite = mapper.readTree(mockMvc.perform(post("/api/squads/TIMEB/invites").header("Authorization", root)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"roleName\":\"Developer\"}"))
+                .andReturn().getResponse().getContentAsString());
+        assertEquals(200, status(post("/api/invites/" + invite.get("token").asText() + "/accept").header("Authorization", auth)));
 
         JsonNode m = memberships(auth);
-        assertEquals("TIMEA", m.get("memberships").get(0).get("projectId").asText());
-        assertTrue(m.get("memberships").get(0).get("leadership").asBoolean());
-        assertEquals("TIMEA", m.get("activeProjectId").asText());
+        assertEquals("TIMEB", m.get("memberships").get(0).get("projectId").asText());
+        assertFalse(m.get("memberships").get(0).get("leadership").asBoolean());
+        assertEquals("TIMEB", m.get("activeProjectId").asText());
 
-        // Telas da squad (leitura, escrita, gestão, listagem, home, convite) pelo vínculo.
-        assertEquals(200, status(get("/api/squads/TIMEA").header("Authorization", auth)));
-        assertEquals(200, status(get("/api/squads/TIMEA/members").header("Authorization", auth)));
-        assertEquals(200, status(get("/api/squads/TIMEA/member-metrics").header("Authorization", auth)));
-        assertEquals(200, status(get("/api/squads/TIMEA/panels").header("Authorization", auth)));
-        assertEquals(200, status(post("/api/squads/TIMEA").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"syncJql\":\"project = TIMEA\"}")), "campo de liderança: ela é liderança agora");
+        // Telas da squad pelo vínculo: leitura sim; gestão não (a squad tem liderança), e sem o aviso de squad sem liderança.
+        assertEquals(204, status(get("/api/squads/TIMEB").header("Authorization", auth)), "lê; squad ainda sem sincronização = 204");
+        assertEquals(200, status(get("/api/squads/TIMEB/members").header("Authorization", auth)));
+        assertEquals(200, status(get("/api/squads/TIMEB/panels").header("Authorization", auth)));
         assertEquals(200, status(get("/api/home").header("Authorization", auth)));
-        assertEquals(201, status(post("/api/squads/TIMEA/invites").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"roleName\":\"Developer\"}")));
-        JsonNode squads = mapper.readTree(mockMvc.perform(get("/api/squads").header("Authorization", auth)).andReturn().getResponse().getContentAsString());
-        assertEquals(1, squads.size());
+        assertEquals(403, status(get("/api/squads/TIMEB/member-metrics").header("Authorization", auth)));
+        assertEquals(200, status(get("/api/squads/TIMEB/member-metrics").header("Authorization", root)));
+        assertTrue(logs.list.stream().map(ILoggingEvent::getFormattedMessage)
+                .noneMatch(l -> l.startsWith("authz_squad_without_leadership squad=TIMEB")), "a squad nasceu com liderança cadastrada");
+        assertEquals("TIMEB", login("ana").get("accessibleProjects").get(0).get("projectId").asText());
 
-        // Novo login: a sessão traz a squad dos vínculos.
-        JsonNode again = login("ana");
-        assertEquals("TIMEA", again.get("activeProjectId").asText());
-        assertEquals("TIMEA", again.get("accessibleProjects").get(0).get("projectId").asText());
-
-        // Quem chega depois, sem vínculo, não entra na squad (nem pelo bootstrap nem pelas telas).
+        // Quem chega sem convite continua de fora.
         String bia = bearer(register("bia"));
-        assertEquals(403, status(get("/api/squads/TIMEA").header("Authorization", bia)));
-        assertEquals(403, status(post("/api/squads/TIMEA").header("Authorization", bia).contentType(MediaType.APPLICATION_JSON).content("{\"ceremonyMode\":\"manual\"}")));
-        assertEquals(403, status(post("/api/squads/TIMEA/invites").header("Authorization", bia).contentType(MediaType.APPLICATION_JSON).content("{\"roleName\":\"Developer\"}")));
-        assertEquals(0, memberships(bia).get("memberships").size());
+        assertEquals(403, status(get("/api/squads/TIMEB").header("Authorization", bia)));
+        assertEquals(403, status(post("/api/squads/TIMEB/invites").header("Authorization", bia).contentType(MediaType.APPLICATION_JSON).content("{\"roleName\":\"Developer\"}")));
     }
 
     @Test
@@ -140,7 +171,7 @@ class PrimeiroUsuarioInstalacaoLimpaTest {
 
         JsonNode m = memberships(auth);
         assertEquals("TIMEB", m.get("memberships").get(0).get("projectId").asText());
-        assertFalse(m.get("memberships").get(0).get("leadership").asBoolean(), "admin puro entra sem liderança (createManualProject)");
+        assertTrue(m.get("memberships").get(0).get("leadership").asBoolean(), "createManualProject dá liderança ao criador");
         assertEquals(200, status(get("/api/squads/TIMEB/member-metrics").header("Authorization", auth)));
         assertEquals(201, status(post("/api/squads/TIMEB/invites").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"roleName\":\"Developer\"}")));

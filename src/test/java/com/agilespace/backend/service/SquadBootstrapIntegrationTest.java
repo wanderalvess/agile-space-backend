@@ -33,7 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * Bootstrap de squad nova em ambiente limpo (HTTP + Postgres real) nos três modos de {@code app.membership.authz}.
- * Em {@code new} o primeiro uso de uma squad vazia cria o vínculo de liderança (a pessoa continua passando na chamada
+ * Em {@code new} (com app.membership.bootstrap=on) o primeiro uso de uma squad vazia cria o vínculo de liderança (a pessoa continua passando na chamada
  * seguinte); em {@code legacy} e {@code shadow} só grava {@code users.squad_id}, como sempre. Sem Docker é ignorado.
  */
 @Testcontainers(disabledWithoutDocker = true)
@@ -116,7 +116,7 @@ class SquadBootstrapIntegrationTest {
     }
 
     @Nested
-    @SpringBootTest(properties = {"app.membership.authz=new", "app.membership.mode=new"})
+    @SpringBootTest(properties = {"app.membership.authz=new", "app.membership.mode=new", "app.membership.bootstrap=on"})
     @AutoConfigureMockMvc
     class ModoNew extends Base {
 
@@ -202,6 +202,29 @@ class SquadBootstrapIntegrationTest {
             assertTrue(bootstrapLogs().isEmpty());
             // E depois dele, a primeira pessoa sem time ainda faz o primeiro uso (o admin não "ocupou" a squad).
             assertEquals(200, manage("NOVA", "p1", "MEMBER"));
+        }
+    }
+
+    /** authz=new com o bootstrap no padrao (off): squad vazia e 403 para nao-ADMIN e nada e gravado. */
+    @Nested
+    @SpringBootTest(properties = {"app.membership.authz=new", "app.membership.mode=new"})
+    @AutoConfigureMockMvc
+    class ModoNewBootstrapDesligado extends Base {
+
+        @Test
+        void squadVazia_e403_eNadaEGravado() throws Exception {
+            assertEquals(403, manage("NOVA", "p1", "MEMBER"));
+            assertEquals(403, read("NOVA", "p1", "MEMBER"));
+            assertTrue(pmrOf("NOVA").isEmpty());
+            assertEquals(0, projectsNamed("NOVA"));
+            assertNull(squadIdOf("p1"));
+            assertTrue(bootstrapLogs().isEmpty());
+        }
+
+        @Test
+        void adminContinuaPassando() throws Exception {
+            assertEquals(200, manage("NOVA", "admin", "ADMIN"));
+            assertTrue(pmrOf("NOVA").isEmpty());
         }
     }
 
