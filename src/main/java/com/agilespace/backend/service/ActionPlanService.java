@@ -10,9 +10,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -27,7 +30,11 @@ public class ActionPlanService {
     static final int MAX_TITLE = 255;
     static final int MAX_TEXT = 5000;
     static final int MAX_SHORT = 255;
+    static final int MAX_SOURCE_ID = 80;
     static final Set<String> STATUSES = Set.of("todo", "doing", "done", "blocked");
+    static final String SOURCE_MANUAL = "MANUAL";
+    /** Origens aceitas do plano (V78). */
+    static final Set<String> SOURCE_TYPES = Set.of(SOURCE_MANUAL, "RETRO", "HEALTH_CHECK", "BRAINSTORMING", "SHOWCASE");
 
     private final ActionPlanRepository boardRepository;
     private final ActionPlanTaskRepository taskRepository;
@@ -75,6 +82,60 @@ public class ActionPlanService {
         return normalized;
     }
 
+    /** Tipo de origem em maiúsculas; null/vazio continua null (= "não informado"). Fora da lista: 400. */
+    static String sourceType(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String normalized = value.strip().toUpperCase(Locale.ROOT);
+        if (!SOURCE_TYPES.contains(normalized)) {
+            throw badRequest("Origem do plano inválida.");
+        }
+        return normalized;
+    }
+
+    /** Texto aparado e dentro do limite; vazio vira null (campo opcional que o cliente deixou em branco). */
+    private static String optional(String value, int max, String label) {
+        String clean = text(value, max, label);
+        return clean == null || clean.isEmpty() ? null : clean;
+    }
+
+    /** Chave de escopo da trava de origem: a squad em maiúsculas, ou '' para plano sem squad (igual ao índice V78). */
+    private static String scope(String squadId) {
+        return squadId == null ? "" : squadId.toUpperCase(Locale.ROOT);
+    }
+
+    /** Valida e normaliza a origem do plano em criação (tipo, id, título). MANUAL não tem id. */
+    private void applySource(ActionPlan board) {
+        String type = sourceType(board.getSourceType());
+        String sourceId = optional(board.getSourceId(), MAX_SOURCE_ID, "O id da origem");
+        String sourceTitle = optional(board.getSourceTitle(), MAX_TITLE, "O título da origem");
+        if (type == null || SOURCE_MANUAL.equals(type)) {
+            if (sourceId != null) {
+                throw badRequest("O id da origem só vale quando a origem do plano não é MANUAL.");
+            }
+            board.setSourceType(SOURCE_MANUAL);
+            board.setSourceId(null);
+            board.setSourceTitle(null);
+            return;
+        }
+        if (sourceId == null) {
+            throw badRequest("O id da origem é obrigatório para a origem " + type + ".");
+        }
+        board.setSourceType(type);
+        board.setSourceId(sourceId);
+        board.setSourceTitle(sourceTitle);
+    }
+
+    /** Plano já existente da mesma origem no mesmo escopo (squad ou "sem squad"), se houver. */
+    @Transactional(readOnly = true)
+    public Optional<ActionPlan> findExistingBySource(String squadId, String type, String sourceId) {
+        if (type == null || sourceId == null) {
+            return Optional.empty();
+        }
+        return boardRepository.findBySourceInScope(scope(squadId), type, sourceId).stream().findFirst();
+    }
+
     @Transactional
     public ActionPlan createBoard(ActionPlan board) {
         String title = text(board.getTitle(), MAX_TITLE, "O título");
@@ -86,6 +147,16 @@ public class ActionPlanService {
         board.setTeam(text(board.getTeam(), MAX_TITLE, "A squad"));
         board.setSprintId(text(board.getSprintId(), 100, "A sprint"));
         board.setSquadId(squadIdFor(board.getSquadId(), board.getTeam()));
+        applySource(board);
+        board.setTasksTotal(null);
+        board.setTasksDone(null);
+        boolean hasSource = board.getSourceId() != null;
+        if (hasSource) {
+            Optional<ActionPlan> existing = findExistingBySource(board.getSquadId(), board.getSourceType(), board.getSourceId());
+            if (existing.isPresent()) {
+                throw new ActionPlanSourceConflictException(existing.get());
+            }
+        }
         if (board.getIsPublic() == null) {
             board.setIsPublic(true);
         }
@@ -95,7 +166,13 @@ public class ActionPlanService {
         if (board.getCreatorId() != null) {
             board.getParticipantIds().add(board.getCreatorId());
         }
-        return boardRepository.save(board);
+        ActionPlan saved = boardRepository.save(board);
+        if (hasSource) {
+            // Força o INSERT agora: duas criações simultâneas da mesma origem esbarram no índice único parcial aqui
+            // (DataIntegrityViolationException), e não só no commit, onde o controller não consegue traduzir.
+            boardRepository.flush();
+        }
+        return saved;
     }
 
     /** Edição parcial do board: título (obrigatório se enviado, mesmo limite da criação) e visibilidade. */
@@ -127,13 +204,69 @@ public class ActionPlanService {
 
     @Transactional(readOnly = true)
     public List<ActionPlan> listBoardsBySprintId(String sprintId) {
-        return boardRepository.findBySprintIdOrderByCreatedAtDesc(sprintId);
+        return withCounts(boardRepository.findBySprintIdOrderByCreatedAtDesc(sprintId));
     }
 
-    /** Planos da squad, mais novos primeiro (limite {@value #MAX_LIST}). */
+    private static org.springframework.data.domain.Pageable page() {
+        return org.springframework.data.domain.PageRequest.of(0, MAX_LIST);
+    }
+
+    /** Planos da squad, mais novos primeiro (limite {@value #MAX_LIST}), com {@code tasksTotal}/{@code tasksDone}. */
     @Transactional(readOnly = true)
     public List<ActionPlan> listBoardsBySquad(String squadId) {
-        return boardRepository.findBySquad(squadId, org.springframework.data.domain.PageRequest.of(0, MAX_LIST));
+        return withCounts(boardRepository.findBySquad(squadId, page()));
+    }
+
+    /**
+     * Planos da squad filtrados por origem: só o tipo, ou tipo + id ("o plano deste radar"). {@code sourceId} sem tipo é 400;
+     * os dois ausentes = a listagem normal.
+     */
+    @Transactional(readOnly = true)
+    public List<ActionPlan> listBoardsBySquad(String squadId, String sourceType, String sourceId) {
+        String type = sourceType(sourceType);
+        String id = optional(sourceId, MAX_SOURCE_ID, "O id da origem");
+        if (id != null && type == null) {
+            throw badRequest("sourceId exige sourceType.");
+        }
+        if (type == null) {
+            return listBoardsBySquad(squadId);
+        }
+        return withCounts(id == null
+                ? boardRepository.findBySquadAndSourceType(squadId, type, page())
+                : boardRepository.findBySquadAndSource(squadId, type, id, page()));
+    }
+
+    /** Planos de uma origem em qualquer squad (quem chama filtra visibilidade e acesso à squad). */
+    @Transactional(readOnly = true)
+    public List<ActionPlan> listBoardsBySource(String sourceType, String sourceId) {
+        String type = sourceType(sourceType);
+        String id = optional(sourceId, MAX_SOURCE_ID, "O id da origem");
+        if (type == null || id == null) {
+            throw badRequest("A busca por origem exige sourceType e sourceId.");
+        }
+        return withCounts(boardRepository.findBySource(type, id, page()));
+    }
+
+    /** Preenche {@code tasksTotal}/{@code tasksDone} de cada plano com uma única consulta agregada. */
+    private List<ActionPlan> withCounts(List<ActionPlan> boards) {
+        if (boards == null || boards.isEmpty()) {
+            return boards;
+        }
+        Map<UUID, ActionPlanTaskRepository.BoardTaskCount> counts = new HashMap<>();
+        for (ActionPlanTaskRepository.BoardTaskCount c : taskRepository.countByBoards(boards.stream().map(ActionPlan::getId).toList())) {
+            counts.put(c.getBoardId(), c);
+        }
+        for (ActionPlan board : boards) {
+            ActionPlanTaskRepository.BoardTaskCount c = counts.get(board.getId());
+            board.setTasksTotal(c == null || c.getTotal() == null ? 0 : c.getTotal().intValue());
+            board.setTasksDone(c == null || c.getDone() == null ? 0 : c.getDone().intValue());
+        }
+        return boards;
+    }
+
+    /** Squad que o plano terá (a do corpo ou o "team", se for o id de uma squad cadastrada); null = sem squad. */
+    public String resolveSquadId(ActionPlan board) {
+        return squadIdFor(text(board.getSquadId(), 100, "A squad"), text(board.getTeam(), MAX_TITLE, "A squad"));
     }
 
     /**
@@ -180,6 +313,9 @@ public class ActionPlanService {
                 .howMuch(text(task.getHowMuch(), MAX_SHORT, "Quanto"))
                 .status(status(task.getStatus()) == null ? "todo" : status(task.getStatus()))
                 .order(task.getOrder())
+                .sourceItemId(optional(task.getSourceItemId(), MAX_SOURCE_ID, "O id do item de origem"))
+                .sourceLabel(optional(task.getSourceLabel(), MAX_SHORT, "O rótulo do item de origem"))
+                .dueDate(task.getDueDate())
                 .build();
         // Se a ordem não for fornecida, vai para o final da lista
         if (clean.getOrder() == null) {
@@ -225,6 +361,12 @@ public class ActionPlanService {
         if (updated.getHowMuch() != null) existing.setHowMuch(text(updated.getHowMuch(), MAX_SHORT, "Quanto"));
         if (updated.getStatus() != null) existing.setStatus(status(updated.getStatus()));
         if (updated.getOrder() != null) existing.setOrder(updated.getOrder());
+        // A origem da ação (sourceItemId/sourceLabel) é imutável; o prazo muda, e clearDueDate=true o limpa.
+        if (Boolean.TRUE.equals(updated.getClearDueDate())) {
+            existing.setDueDate(null);
+        } else if (updated.getDueDate() != null) {
+            existing.setDueDate(updated.getDueDate());
+        }
 
         ActionPlanTask saved = taskRepository.save(existing);
         notifyWho(saved, previousWho, actorId);

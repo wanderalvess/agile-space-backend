@@ -5,6 +5,7 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -50,6 +51,22 @@ public class ActionPlanTask {
 
     @Column(name = "task_order")
     private Integer order; // Ordem de exibição - mapeado para task_order no Postgres
+
+    /** Item de origem da ação (V78): id do cartão da retro, dimensão do radar, ideia do brainstorming. Imutável. */
+    @Column(name = "source_item_id", length = 80)
+    private String sourceItemId;
+
+    @Column(name = "source_label")
+    private String sourceLabel;
+
+    /** Prazo como data de verdade (V78); "when" segue como texto livre. */
+    @Column(name = "due_date")
+    private LocalDate dueDate;
+
+    /** Só na edição: true limpa o prazo (dueDate nulo = "não mexer"). Não persistido. */
+    @Transient
+    @com.fasterxml.jackson.annotation.JsonProperty(access = com.fasterxml.jackson.annotation.JsonProperty.Access.WRITE_ONLY)
+    private Boolean clearDueDate;
 
     @CreationTimestamp
     @Column(updatable = false)
