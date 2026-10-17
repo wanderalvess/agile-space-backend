@@ -349,7 +349,7 @@ class LeadLevelPolicyTest {
         SquadService squadService = mock(SquadService.class);
         when(squadService.getSquadMembersForUser(any())).thenReturn(List.of());
         SquadController controller = new SquadController(squadService, null, null, null, world.userRepository, world.resolver,
-                world.access(AuthzMode.LEGACY, LeadPolicy.OFF), null);
+                world.access(AuthzMode.LEGACY, LeadPolicy.OFF), null, null);
 
         controller.setLeadPolicy(LeadPolicy.LEGACY);
         assertEquals(200, controller.getSquadMembersForUser("qualquer@x.com", as("lead", "LEAD")).getStatusCode().value());
