@@ -196,30 +196,25 @@ class SquadControllerManageAccessTest {
     }
 
     @Test
-    @DisplayName("\"Sou eu\": membro liga a PRÓPRIA conta a uma linha livre, sem ser liderança")
-    void memberClaimsOwnRow() {
-        userInSq1("dev1");
-        squadHasLeadershipAndCallerIsNot();
-        when(service.claimMember("SQ1", "acc-1", "dev1")).thenReturn(new SquadMember());
+    @DisplayName("Rota antiga do \"Sou eu\" (payload só com claimedByUid): 410 Gone e nada é gravado")
+    void selfClaimRouteIsGone() {
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> controller.saveMember("SQ1", "acc-1",
+                SquadMember.builder().claimedByUid("dev1").updatedAt("2026-10-09T10:00:00Z").build(), as("dev1", "MEMBER")));
 
-        ResponseEntity<SquadMember> response = controller.saveMember("SQ1", "acc-1",
-                SquadMember.builder().claimedByUid("dev1").updatedAt("2026-10-09T10:00:00Z").build(), as("dev1", "MEMBER"));
-
-        assertEquals(HttpStatus.OK, response.getStatusCode());
-        verify(service).claimMember("SQ1", "acc-1", "dev1");
-        verify(service, never()).saveMember(any(), any(), any());
+        assertEquals(HttpStatus.GONE, ex.getStatusCode());
+        assertTrue(ex.getReason().contains("onboarding"));
+        verifyNoInteractions(service);
     }
 
     @Test
-    @DisplayName("Claim com a conta de OUTRA pessoa é recusado (403)")
-    void cannotClaimOnBehalfOfSomeoneElse() {
-        userInSq1("dev1");
-
-        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> controller.saveMember("SQ1", "acc-1",
-                SquadMember.builder().claimedByUid("vitima").build(), as("dev1", "MEMBER")));
-
-        assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
-        verify(service, never()).claimMember(any(), any(), any());
+    @DisplayName("410 vale para qualquer claim (inclusive com a conta de outra pessoa) e também para a liderança")
+    void selfClaimShapeIsGoneForEveryone() {
+        for (String uid : new String[] {"dev1", "vitima"}) {
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> controller.saveMember("SQ1", "acc-1",
+                    SquadMember.builder().claimedByUid(uid).build(), as("am1", "MEMBER")));
+            assertEquals(HttpStatus.GONE, ex.getStatusCode());
+        }
+        verifyNoInteractions(service);
     }
 
     @Test

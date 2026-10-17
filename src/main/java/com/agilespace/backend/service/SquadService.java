@@ -285,25 +285,6 @@ public class SquadService {
         exclusionRepository.deleteById(squadId + "_" + jiraAccountId);
     }
 
-    /**
-     * "Sou eu": liga a conta de quem chama à linha do roster. Só vale para linha que já existe e que está
-     * livre (ou já é da própria pessoa). Não mexe em nome, papel, capacidade nem no usuário.
-     */
-    @Transactional
-    public SquadMember claimMember(String squadId, String jiraAccountId, String callerIdentifier) {
-        SquadMember row = memberRepository.findBySquadIdAndJiraAccountId(squadId, jiraAccountId)
-                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
-                        org.springframework.http.HttpStatus.NOT_FOUND, "Pessoa não encontrada no time desta squad."));
-        String current = row.getClaimedByUid();
-        if (current != null && !current.isBlank() && !current.equalsIgnoreCase(callerIdentifier)) {
-            throw new org.springframework.web.server.ResponseStatusException(
-                    org.springframework.http.HttpStatus.CONFLICT, "Esta pessoa do time já está vinculada a outra conta.");
-        }
-        row.setClaimedByUid(callerIdentifier);
-        row.setUpdatedAt(Instant.now().toString());
-        return memberRepository.save(row);
-    }
-
     @Transactional
     public void deleteMember(String squadId, String jiraAccountId) {
         memberRepository.findBySquadIdAndJiraAccountId(squadId, jiraAccountId)

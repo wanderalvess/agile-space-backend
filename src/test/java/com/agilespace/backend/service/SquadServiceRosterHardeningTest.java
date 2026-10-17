@@ -104,43 +104,6 @@ class SquadServiceRosterHardeningTest {
     }
 
     @Test
-    @DisplayName("Claim: liga a conta a uma linha livre sem mexer em nome, papel ou capacidade")
-    void claimFreeRow() {
-        SquadMember row = SquadMember.builder().dbId("SQ1_acc-1").squadId("SQ1").jiraAccountId("acc-1").displayName("Ana").role("QA").build();
-        when(memberRepository.findBySquadIdAndJiraAccountId("SQ1", "acc-1")).thenReturn(Optional.of(row));
-        when(memberRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-
-        SquadMember claimed = service.claimMember("SQ1", "acc-1", "user-ana");
-
-        assertEquals("user-ana", claimed.getClaimedByUid());
-        assertEquals("Ana", claimed.getDisplayName());
-        assertEquals("QA", claimed.getRole());
-        verifyNoInteractions(userRepository);
-    }
-
-    @Test
-    @DisplayName("Claim de linha já vinculada a outra conta dá 409; linha inexistente dá 404")
-    void claimConflictsAndMissing() {
-        SquadMember taken = SquadMember.builder().jiraAccountId("acc-1").claimedByUid("outro").build();
-        when(memberRepository.findBySquadIdAndJiraAccountId("SQ1", "acc-1")).thenReturn(Optional.of(taken));
-        when(memberRepository.findBySquadIdAndJiraAccountId("SQ1", "nada")).thenReturn(Optional.empty());
-
-        assertEquals(HttpStatus.CONFLICT, assertThrows(ResponseStatusException.class, () -> service.claimMember("SQ1", "acc-1", "eu")).getStatusCode());
-        assertEquals(HttpStatus.NOT_FOUND, assertThrows(ResponseStatusException.class, () -> service.claimMember("SQ1", "nada", "eu")).getStatusCode());
-        verify(memberRepository, never()).save(any());
-    }
-
-    @Test
-    @DisplayName("Claim repetido pela mesma conta é aceito (idempotente)")
-    void claimIsIdempotentForSameAccount() {
-        SquadMember mine = SquadMember.builder().jiraAccountId("acc-1").claimedByUid("EU").build();
-        when(memberRepository.findBySquadIdAndJiraAccountId("SQ1", "acc-1")).thenReturn(Optional.of(mine));
-        when(memberRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-
-        assertEquals("eu", service.claimMember("SQ1", "acc-1", "eu").getClaimedByUid());
-    }
-
-    @Test
     @DisplayName("syncOwnerUserId vazio desliga o sync agendado (volta a null) em vez de gravar texto vazio")
     void blankSyncOwnerTurnsScheduleOff() {
         Squad stored = Squad.builder().id("SQ1").name("SQ1").syncOwnerUserId("u1").build();
