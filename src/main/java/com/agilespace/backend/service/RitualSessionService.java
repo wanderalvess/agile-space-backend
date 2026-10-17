@@ -343,7 +343,7 @@ public class RitualSessionService {
             r.participants = p.participants();
             r.startedAt = created;
             r.updatedAt = SessionStatusResolver.latest(created, i.lastActivity(), p.lastActivity());
-            r.status = resolver.brainstorming(r.updatedAt, now);
+            r.status = resolver.brainstorming(r.updatedAt, now, b.isFinished());
             r.date = created;
             r.summary = i.participants() == 0 ? null : i.participants() + (i.participants() == 1 ? " ideia" : " ideias");
             out.add(r);
