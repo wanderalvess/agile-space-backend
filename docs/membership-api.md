@@ -298,3 +298,29 @@ ficam de fora (decisão idêntica). Custo: algumas consultas por usuário; rode 
 3. Nenhum `authz_squad_without_leadership` de squad que ainda precise de configuração (cadastrar a liderança antes).
 4. Nenhum chamado de "perdi acesso" na janela do `shadow`.
 5. Virar `new` em horário de baixo uso, com o plano de reversão à mão (`APP_MEMBERSHIP_AUTHZ=legacy` + reinício; nada a restaurar no banco).
+
+---
+
+# Aposentadoria de `users.squad_id` (Etapa 5, passo 1)
+
+O vínculo (`project_member_roles`) é a única fonte de verdade de "quem está em qual squad". `users.default_project_id` fica como
+**preferência de squad ativa** (validada contra os vínculos). O backend **para de ler e de gravar** `users.squad_id` e o campo sai
+da entidade `User`; a **coluna continua no banco** (o `ddl-auto=validate` tolera coluna a mais; nenhuma migração nesta etapa).
+
+## Contrato de compatibilidade com o frontend (nada quebra)
+
+| Superfície | Antes | Agora |
+|---|---|---|
+| `POST /api/users` (`saveUser`, `updateProfile`) com `squadId` no corpo | `squadId` mudava a squad (exigia vínculo; 403 sem ele) | **Ignorado**: sem erro, sem 400, sem 403, sem efeito. O resto do perfil (nome, avatar, horas diárias, jira id, segmento, tribo) grava igual. |
+| Como trocar de squad | `saveUser` ou `POST /api/auth/switch-project` | **Só** `POST /api/auth/switch-project` (valida o vínculo e grava `users.default_project_id`, a preferência). |
+| `GET /api/users/{id}` e resposta de `POST /api/users` | `squadId` = coluna `users.squad_id` | `squadId` continua no JSON, **somente leitura**, derivado da **squad ativa validada** do `MembershipService` (a preferência `default_project_id` se estiver nos vínculos; senão a primeira squad por precedência; `null` sem nenhum vínculo). |
+| `GET /api/users` (lista, ADMIN) | `squadId` = coluna `users.squad_id` | `squadId` somente leitura = `users.default_project_id` **sem validar** (evita 3 consultas por pessoa; é só rótulo de exibição). Pessoa sem preferência vem sem `squadId` (a tela cai em `team`/"Sem squad"). |
+| `AuthResponse` (`login|me|refresh|register|switch-project|change-password`) | não tem campo `squadId`: a squad ativa é `activeProjectId` | **Inalterado.** `activeProjectId/Name/Role`, `accessibleProjects`, `legacyOnly` e o claim `defaultProjectId` do JWT seguem exatamente como antes. |
+| `GET /api/me/memberships` | — | Inalterado. |
+
+Regras para o frontend:
+
+- Pode **parar de enviar** `squadId` em `saveUser`/`updateProfile`; um cliente antigo que continue enviando não quebra (o campo é descartado).
+- Para saber a squad ativa, usar `AuthResponse.activeProjectId` ou `GET /api/me/memberships` (`activeProjectId`), como já faz. O `squadId` do
+  `User` é só legado de exibição e será removido do JSON quando o frontend não o ler mais.
+- O JSON de `User` nunca devolveu `team`; o `team` do `UserProfile` do frontend é derivado no cliente.
