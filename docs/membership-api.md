@@ -298,3 +298,128 @@ ficam de fora (decisão idêntica). Custo: algumas consultas por usuário; rode 
 3. Nenhum `authz_squad_without_leadership` de squad que ainda precise de configuração (cadastrar a liderança antes).
 4. Nenhum chamado de "perdi acesso" na janela do `shadow`.
 5. Virar `new` em horário de baixo uso, com o plano de reversão à mão (`APP_MEMBERSHIP_AUTHZ=legacy` + reinício; nada a restaurar no banco).
+
+# LEAD deixa de ser nível de conta (Etapa 4)
+
+Os níveis de conta (`users.role`) passam a ser **ADMIN | MEMBER**. Quem lidera uma squad tem um **vínculo de liderança**
+(`project_member_roles.is_leadership`, por exemplo Agile Master, People Lead, Tech Lead). O nível `LEAD` não concede mais nada.
+
+**Regra de ouro**: o sistema nunca infere liderança nem cria vínculo sozinho. A migração V77 é só aditiva (backup e troca de rótulo de
+aviso); quem decide quem vira MEMBER, e com qual vínculo de liderança, é um administrador, pelo endpoint abaixo.
+
+## Chave `app.membership.lead-level` (env `APP_MEMBERSHIP_LEAD_LEVEL`, também no `docker-compose.yml`)
+
+| Valor | O que o nível `LEAD` da conta faz |
+|---|---|
+| `off` (**padrão do `application.yml`**, instalação nova) | **Nada.** `LEAD` é tratado como `MEMBER` em toda decisão de acesso (autorização por squad, convite, `by-user`, facilitador do Poker, chaves de API, público de avisos, relatório). O poder vem só do vínculo. |
+| `legacy` | Comportamento de antes: LEAD acessa e gerencia todas as squads, convida, é facilitador de qualquer sala de Poker e pode emitir chaves com todos os escopos. Serve para **reverter sem deploy**. |
+
+Valor desconhecido (`of`, `Legacy2`...) cai em **`legacy`**: errar a digitação nunca REMOVE acesso (um aviso sai no log de
+inicialização). Valor vazio vale o padrão (`off`). Para desligar de verdade é preciso escrever `off`. Reverter:
+`APP_MEMBERSHIP_LEAD_LEVEL=legacy` e reiniciar (o rebaixamento de contas, se já feito, se desfaz com
+`POST /api/admin/membership/lead-restore`). A chave é independente de `app.membership.authz`: vale em `legacy`, `shadow` e `new`.
+
+## `POST /api/admin/membership/lead-demotion` (ADMIN)
+
+Rebaixa de `LEAD` para `MEMBER` **somente** quem já tem vínculo de liderança. **Dry-run por padrão**: sem `apply=true` não grava nada.
+`401` sem token, `403` para quem não é ADMIN, `400` parâmetro inválido (`forceDemote` sem `userId`, `limit` fora de 1..200).
+
+Query: `apply` (padrão `false`), `limit` (padrão `20`, máximo `200`; tamanho do lote), `userId` (restringe a uma conta; o `limit` não se
+aplica), `forceDemote` (padrão `false`; exige `userId`; permite rebaixar conscientemente uma conta `NO_LEADERSHIP_LINK`). Com `userId`
+inexistente: `404`; conta que não é LEAD: `409`.
+
+Classificação de cada conta com `users.role = LEAD` (ativa ou não):
+
+| `classification` | Significado | `apply=true` |
+|---|---|---|
+| `HAS_LEADERSHIP_LINK` | tem pelo menos uma linha `project_member_roles` com `is_leadership` (casada por conta, e-mail ou conta do Jira) | rebaixa (até o limite do lote) |
+| `NO_LEADERSHIP_LINK` | não tem liderança em nenhuma squad: rebaixar tira todo o poder dela | **não rebaixa**; só reporta. O admin cria o vínculo ou usa `userId` + `forceDemote=true` |
+
+```jsonc
+// POST /api/admin/membership/lead-demotion          (dry-run)
+// POST /api/admin/membership/lead-demotion?apply=true&limit=10
+// POST /api/admin/membership/lead-demotion?apply=true&userId=uid-7&forceDemote=true
+{
+  "mode": "DRY_RUN",                 // ou "APPLIED"
+  "leadLevel": "off",                // app.membership.lead-level em vigor: "off" | "legacy"
+  "limit": 20,
+  "summary": {
+    "leadUsers": 3,                  // contas LEAD consideradas (todas, ou só a do userId)
+    "hasLeadershipLink": 1,
+    "noLeadershipLink": 2,
+    "wouldDemote": 1,                // dry-run: o que o apply rebaixaria agora
+    "demoted": 0,                    // apply: o que foi rebaixado
+    "keptNoLeadershipLink": 2,
+    "overLimit": 0                   // elegíveis que ficaram para o próximo lote
+  },
+  "users": [
+    {
+      "userId": "uid-1",
+      "email": "ana@totvs.com.br",
+      "name": "Ana",
+      "active": true,
+      "classification": "HAS_LEADERSHIP_LINK",
+      "leadershipSquads": ["DDWMISSI", "DDWPRIME"],   // squads onde há linha de liderança (MAIÚSCULAS, sem repetição)
+      "action": "WOULD_DEMOTE",      // ver tabela abaixo
+      "activeApiKeys": 2,            // chaves de API ativas (não revogadas e não vencidas) do usuário
+      "apiKeysNote": "2 chave(s) de API ativa(s) continuam válidas com os escopos atuais até serem renovadas ou rotacionadas; a renovação corta os escopos de liderança. Nenhuma chave foi alterada."
+    },
+    { "userId": "uid-2", "email": "bia@totvs.com.br", "name": "Bia", "active": true, "classification": "NO_LEADERSHIP_LINK",
+      "leadershipSquads": [], "action": "KEPT_NO_LEADERSHIP_LINK", "activeApiKeys": 0, "apiKeysNote": null }
+  ],
+  "warnings": [
+    "app.membership.lead-level=legacy: rebaixar agora REMOVE o acesso global destas contas."   // só quando leadLevel=legacy
+  ]
+}
+```
+
+| `action` | Quando |
+|---|---|
+| `WOULD_DEMOTE` / `WOULD_DEMOTE_FORCED` | dry-run: seria rebaixada (a forçada é `NO_LEADERSHIP_LINK` com `userId`+`forceDemote=true`) |
+| `DEMOTED` / `DEMOTED_FORCED` | `apply=true`: rebaixada para `MEMBER` |
+| `KEPT_NO_LEADERSHIP_LINK` | `NO_LEADERSHIP_LINK` sem `forceDemote`: nada feito |
+| `OVER_LIMIT` | elegível, mas fora do lote atual (rode de novo) |
+
+O que o `apply` faz por conta: grava/atualiza `users_role_lead_backup(id, role='LEAD', migrated_at)`, troca `users.role` para `MEMBER`,
+audita (`audit_logs`: `LEAD_DEMOTED` ou `LEAD_DEMOTED_FORCED`, com quem fez e a conta) e derruba o cache de sessão (`UserSessionGuard`: o
+token vivo da pessoa passa a valer como MEMBER na hora neste servidor e em até ~30 s nos demais). O lote inteiro é uma transação. As
+**chaves de API não são alteradas**: seguem válidas até renovar/rotacionar; a renovação reavalia o papel e corta os escopos de liderança.
+
+## `POST /api/admin/membership/lead-restore` (ADMIN)
+
+Desfaz o rebaixamento a partir de `users_role_lead_backup`. Query: `userId` (opcional; sem ele, todos do backup). Só restaura quem hoje
+é `MEMBER` (nunca sobrescreve um `ADMIN` promovido depois). Audita `LEAD_RESTORED` e derruba o cache de sessão. Idempotente.
+
+```jsonc
+// POST /api/admin/membership/lead-restore            (todos)
+// POST /api/admin/membership/lead-restore?userId=uid-1
+{
+  "restored": 1,
+  "skipped": 1,
+  "users": [
+    { "userId": "uid-1", "email": "ana@totvs.com.br", "result": "RESTORED", "reason": null },
+    { "userId": "uid-9", "email": "caio@totvs.com.br", "result": "SKIPPED", "reason": "CURRENT_ROLE_NOT_MEMBER" }
+  ]
+}
+```
+
+`reason` quando `SKIPPED`: `ALREADY_LEAD`, `CURRENT_ROLE_NOT_MEMBER`, `USER_NOT_FOUND`, `NOT_IN_BACKUP` (só com `userId`).
+Observação: com `lead-level=off` a conta restaurada é `LEAD` mas continua sem poder algum.
+
+## Relatório (`GET /api/admin/membership/report`)
+
+- `LEAD_USERS` (mantida): contas **ativas** com `role = LEAD`; rótulo `squads_lideranca=N`.
+- `LEAD_NO_LEADERSHIP_LINK` (nova): subconjunto de `LEAD_USERS` com **nenhuma** linha de liderança (`squads_lideranca=0`); rótulo
+  `sem_lideranca_por_vinculo`. Quem aparece aqui perderia todo o poder ao sair de LEAD: crie o vínculo (ou aceite) antes do `apply`.
+
+## Migração V77 (aditiva)
+
+Cria `users_role_lead_backup(id, role, migrated_at)` e copia nela as contas com `UPPER(role) = 'LEAD'` que ainda não estão lá; troca
+`global_announcement_roles.role = 'LEAD'` por `'LEADERSHIP'`. **Não rebaixa ninguém e não cria vínculo.** Reexecutar é inofensivo.
+Público de aviso `LEADERSHIP` = quem tem alguma linha de liderança em `project_member_roles`; `LEAD` gravado por um cliente antigo é
+normalizado para `LEADERSHIP` ao salvar o aviso.
+
+## Mudança de leitura/escrita do nível de conta
+
+- `UserRole`: apenas `ADMIN` e `MEMBER`. A leitura de um `LEAD` legado vira `MEMBER` (`UserRole.parse`).
+- Criar/editar usuário pelo admin: `role = LEAD` é **rejeitado** (400, "use ADMIN ou MEMBER") com `lead-level=off`; em `legacy` continua aceito.
