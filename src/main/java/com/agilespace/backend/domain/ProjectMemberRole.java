@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
     @Index(name = "idx_pmr_jira_account", columnList = "jira_account_id"),
     @Index(name = "idx_pmr_user_id", columnList = "user_id")
 })
+@EntityListeners(com.agilespace.backend.service.MembershipCacheEvictionListener.class)
 @Getter
 @Setter
 @NoArgsConstructor

@@ -42,6 +42,20 @@ public class UserProjectResolverService {
         return i < 0 ? LEADERSHIP_RANK.size() : i;
     }
 
+    /**
+     * Linha que expande o acesso para a tribo/segmento inteiros: liderança de verdade (isLeadership=true) com papel
+     * TRIBE_LEAD, AGILE_COACH ou PEOPLE_LEAD.
+     */
+    static boolean isTransversalLeadershipRow(ProjectMemberRole role) {
+        return role.isLeadership() && ("TRIBE_LEAD".equalsIgnoreCase(role.getRoleKey())
+                || "AGILE_COACH".equalsIgnoreCase(role.getRoleKey())
+                || "PEOPLE_LEAD".equalsIgnoreCase(role.getRoleKey()));
+    }
+
+    static int rankOfKey(String roleKey) {
+        return leadershipRank(roleKey);
+    }
+
     /** True se o projeto já tem alguma pessoa marcada como liderança no cadastro (project_member_roles). */
     @Transactional(readOnly = true)
     public boolean hasRegisteredLeadership(String projectId) {
@@ -50,10 +64,11 @@ public class UserProjectResolverService {
     }
 
     /**
-     * Resolve todos os projetos, tribos e cargos associados ao usuário.
+     * Linhas de project_member_roles que pertencem à conta: por e-mail, por conta do Jira e por user_id (o vínculo
+     * explícito do "sou eu"), sem repetir a mesma linha. Usada pelo resolvedor legado e pelo {@link MembershipService}.
      */
     @Transactional(readOnly = true)
-    public UserProjectAccessDto resolveUserAccess(User user) {
+    public List<ProjectMemberRole> loadDirectRows(User user) {
         String email = user.getEmail();
         String jiraAccountId = user.getJiraAccountId();
 
@@ -81,6 +96,16 @@ public class UserProjectResolverService {
                 }
             }
         }
+        return directRoles;
+    }
+
+    /**
+     * Resolve todos os projetos, tribos e cargos associados ao usuário (cálculo LEGADO; o modelo novo é o
+     * {@link MembershipService}, que reaproveita {@link #loadDirectRows} e {@link #PRIMARY_ROLE_ORDER}).
+     */
+    @Transactional(readOnly = true)
+    public UserProjectAccessDto resolveUserAccess(User user) {
+        List<ProjectMemberRole> directRoles = loadDirectRows(user);
 
         Map<String, UserProjectAccessDto.ProjectAccessItem> projectMap = new LinkedHashMap<>();
         Set<String> leaderTribes = new HashSet<>();
@@ -122,7 +147,7 @@ public class UserProjectResolverService {
             // Só vale para linha de liderança de verdade (isLeadership=true: sync do Jira ou gestão de time). A roleKey
             // sozinha vem do NOME do papel, que um convite/backfill grava com isLeadership=false: sem esta exigência,
             // convidar alguém como "Tribe Lead" dava acesso a todos os projetos da tribo.
-            if (role.isLeadership() && ("TRIBE_LEAD".equalsIgnoreCase(role.getRoleKey()) || "AGILE_COACH".equalsIgnoreCase(role.getRoleKey()) || "PEOPLE_LEAD".equalsIgnoreCase(role.getRoleKey()))) {
+            if (isTransversalLeadershipRow(role)) {
                 isTransversalLeader = true;
                 if (!tribeName.isBlank()) leaderTribes.add(tribeName.toLowerCase());
                 if (!segmentName.isBlank()) leaderSegments.add(segmentName.toLowerCase());

@@ -97,6 +97,16 @@ app:
     # (ver WebCorsConfig/WebSocketConfig). Default cobre só o frontend em dev local
     # (next dev -p 9002); em produção defina ALLOWED_ORIGINS com o(s) domínio(s) público(s).
     allowed-origins: ${ALLOWED_ORIGINS:http://localhost:9002}
+  membership:
+    # Migração do vínculo Pessoa x Squad x Papel (docs/vinculo-auditoria-e-plano.md, Etapa 1; contrato em docs/membership-api.md).
+    #   legacy = sessão (accessibleProjects/activeProject*) como antes, sem o modelo novo.
+    #   shadow = a resposta continua a do legado; o modelo novo roda em paralelo e as divergências vão para o log
+    #            (membership_divergence) e para o contador membership.divergence. Padrão.
+    #   new    = a resposta vem do modelo novo (squad ativa validada contra os vínculos).
+    # Valor desconhecido cai em legacy. Reverter = APP_MEMBERSHIP_MODE=legacy e reiniciar; não há migração de banco.
+    mode: ${APP_MEMBERSHIP_MODE:shadow}
+    # TTL do cache de vínculos por usuário (segundos; 0 desliga). Toda gravação de pmr/projeto o invalida.
+    cache-ttl-seconds: ${APP_MEMBERSHIP_CACHE_TTL_SECONDS:60}
   squad:
     scheduled-sync:
       # Desligado por padrão: ligar isso é uma mudança de comportamento real (um processo

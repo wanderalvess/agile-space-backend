@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
  */
 @Entity
 @Table(name = "projects")
+@EntityListeners(com.agilespace.backend.service.MembershipCacheEvictionListener.class)
 @Getter
 @Setter
 @NoArgsConstructor
