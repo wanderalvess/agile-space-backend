@@ -103,8 +103,9 @@ Depois de encerrado (`status = FINISHED`):
 - O cronômetro não é alterado pelo servidor ao encerrar.
 - Murais antigos e novos nascem `OPEN`.
 
-O encerramento aparece também no histórico/Home: o status da sessão de Brainstorming em `/api/rituals/...` vira `FINISHED` assim
-que o mural é encerrado (antes só virava `FINISHED` por inatividade).
+O encerramento aparece também no histórico e no "ao vivo" da Home: o status da sessão de Brainstorming em
+`GET /api/rituals/BRAINSTORMING/history` e nas sessões ao vivo vira `FINISHED` assim que o mural é encerrado (antes só virava
+`FINISHED` por inatividade de 3 h). Reabrir devolve a regra de atividade.
 
 ## Facilitação
 
