@@ -201,11 +201,11 @@ continuam sendo gravados pelos sincronizadores (dual-write) em todos os modos.
 
 ## A regra nova (modo `new`)
 
-- **ADMIN** (token ou cadastro) e **LEAD** (mantido até a Etapa 4): acesso total, como hoje.
+- **ADMIN** (token ou cadastro): acesso total. **LEAD** só com `app.membership.lead-level=legacy` (Etapa 4: com `off` não concede nada).
 - **Vínculo** em `project_member_roles` (`MembershipService`, com cache), inclusive a expansão por tribo/segmento da liderança
   transversal (`TRIBE_LEAD`, `AGILE_COACH`, `PEOPLE_LEAD` com `is_leadership=true`).
 - **Deixam de dar acesso**: `users.squad_id`/`default_project_id`, o roster `squad_members` e o cargo (`jobTitle`) como autoridade.
-- **Gestão** (`canManageSquad`): ADMIN/LEAD, ou vínculo com `is_leadership` na squad (inclusive transversal).
+- **Gestão** (`canManageSquad`): ADMIN (LEAD só em `lead-level=legacy`), ou vínculo com `is_leadership` na squad (inclusive transversal).
 - **Liderança estrita** (`isSquadLeadership`): ADMIN, ou vínculo com `is_leadership` (o LEAD sem vínculo de liderança continua não
   contando, igual ao legado).
 - **Squad sem NENHUMA liderança cadastrada** (bootstrap de ambiente novo): só quem **tem vínculo** na squad gerencia (antes: qualquer
@@ -217,11 +217,13 @@ continuam sendo gravados pelos sincronizadores (dual-write) em todos os modos.
 
 | Ponto | Regra legada | Regra nova (`new`) | `check` no log |
 |---|---|---|---|
-| `SquadAccessService.matchesSquad` (leitura de qualquer tela por squad, WebSocket) | ADMIN/LEAD, `users.squad_id`/`default_project_id`, resolvedor pmr, roster | ADMIN/LEAD, vínculo (com tribo/segmento) | `matchesSquad` |
+| `SquadAccessService.matchesSquad` (leitura de qualquer tela por squad, WebSocket) | ADMIN/LEAD*, `users.squad_id`/`default_project_id`, resolvedor pmr, roster | ADMIN/LEAD*, vínculo (com tribo/segmento) | `matchesSquad` |
 | `SquadAccessService.canManageSquad` | `matchesSquad` + (cargo ou liderança pmr ou squad sem liderança) | vínculo + (liderança ou squad sem liderança) | `canManageSquad` |
 | `SquadAccessService.isSquadLeadership` | `matchesSquad` + (cargo ou liderança pmr) | vínculo com liderança | `isSquadLeadership` |
-| `InviteController.requireInviteAccess` (criar/listar/revogar convite) | ADMIN/LEAD; `users.squad_id` + cargo; liderança em linha pmr própria | ADMIN/LEAD; liderança em linha **própria** (escopo SQUAD; a expansão por tribo não convida) | `invite` |
-| `InviteService.isSquadMemberOrAdmin` (quem vê e-mail/autor de convite endereçado) | ADMIN/LEAD; `users.squad_id`; qualquer linha pmr por conta/e-mail | ADMIN/LEAD; vínculo | `inviteView` |
+| `InviteController.requireInviteAccess` (criar/listar/revogar convite) | ADMIN/LEAD*; `users.squad_id` + cargo; liderança em linha pmr própria | ADMIN/LEAD*; liderança em linha **própria** (escopo SQUAD; a expansão por tribo não convida) | `invite` |
+| `InviteService.isSquadMemberOrAdmin` (quem vê e-mail/autor de convite endereçado) | ADMIN/LEAD*; `users.squad_id`; qualquer linha pmr por conta/e-mail | ADMIN/LEAD*; vínculo | `inviteView` |
+
+\* LEAD só vale com `app.membership.lead-level=legacy` (Etapa 4); com `off` é tratado como MEMBER.
 | `SquadAudienceService.contextFor` (squads, papéis e liderança da home/avisos) | `users.squad_id`, resolvedor, roster; cargo conta como liderança; só o papel primário por squad | só vínculos; todos os papéis da pessoa; sem cargo | `audience`, `audienceLeadership`, `audienceRoles` |
 | `SquadAudienceService.memberUserIds` (destinatários de notificação/aviso por squad) | `users.squad_id`, linhas pmr, roster | só linhas pmr (sem `findActiveBySquadIds`) | `audienceMembers` |
 | `JoltProjectController` / `JoltProjectService` (compartilhar/ler projeto Jolt com a squad) | UMA squad: `users.squad_id` | N squads: as dos vínculos (nova consulta por lista) | `jolt` |
@@ -419,7 +421,48 @@ Cria `users_role_lead_backup(id, role, migrated_at)` e copia nela as contas com 
 Público de aviso `LEADERSHIP` = quem tem alguma linha de liderança em `project_member_roles`; `LEAD` gravado por um cliente antigo é
 normalizado para `LEADERSHIP` ao salvar o aviso.
 
+## Pontos que o nível LEAD concedia (antes x agora)
+
+| Ponto (arquivo: método) | Antes (LEAD) | Agora (`lead-level=off`) |
+|---|---|---|
+| `SquadAccessService.matchesSquad` (leitura por squad, WebSocket) | todas as squads | só vínculo (`legacy` authz: também o legado sem LEAD) |
+| `SquadAccessService.canManageSquad` | gestão de qualquer squad | só liderança por vínculo na squad |
+| `SquadAccessService.isSquadLeadership` | (nunca contou) | igual |
+| `InviteController.requireInviteAccess` | criar/listar/revogar convite em qualquer squad | só liderança em linha própria da squad |
+| `InviteService.isSquadMemberOrAdmin` | ver e-mail/autor de convite endereçado | só quem tem vínculo (ou o destinatário) |
+| `SquadController.getSquadMembersForUser` (`/by-user`) | consultar a squad de qualquer pessoa | só a própria (ou ADMIN) |
+| `PokerService` (`isRoomFacilitator`, `requireRoomParticipant`, `requireSelfOrFacilitator`) | facilitar, entrar e votar como outro em qualquer sala | facilitador = criador, ADMIN, participante marcado ou **liderança por vínculo na squad da sala** |
+| `PokerService.deleteRoom` / `deleteChatMessage` | excluir qualquer sala / moderar | só o criador e o ADMIN (mensagem: autor, criador, ADMIN) |
+| `ApiKeyController.create` / `ApiKeyLifecycle` (`reevaluateOwner`) | todos os escopos e squad livre | só `KNOWLEDGE_READ`/`SQUAD_READ`, travada na squad; **na renovação a chave perde os demais escopos** e, sem squad para travar, perde `SQUAD_READ` |
+| `SquadAudienceService` (`contextFor`, `userIdsWithRoles`) | `leadership=true`, chave `LEAD` | só vínculo; chave derivada `LEADERSHIP`; `LEAD` não casa ninguém |
+| `AuthzDiffService` / relatório | LEAD "privilegiado", fora da comparação | LEAD entra na comparação como MEMBER |
+| `SquadLeadership` | cargo/nome "lead" = liderança | removido |
+| `UserService.saveUser` | atribuía LEAD | rejeita (400); LEAD reenviado sem mudança é tolerado |
+| `AuthService` (token e sessão) | `role` como gravado | `LEAD` legado sai como `MEMBER` |
+| `UserRole` | `ADMIN, LEAD, MEMBER` | `ADMIN, MEMBER` (`parse("LEAD")` = `MEMBER`) |
+
+Chaves de API **já emitidas** a um LEAD não são alteradas: o filtro de chave usa os escopos gravados e a squad da chave, não o papel
+atual do dono. Elas valem até vencer ou ser renovada/rotacionada (a renovação reavalia). Revogue à mão as que não devem sobreviver.
+
+Decisão de produto registrada: com `off`, **liderança de uma squad por vínculo** (`is_leadership`, direta ou por expansão de tribo)
+passa a ser facilitadora automática das salas de Poker da própria squad, inclusive para quem nunca foi LEAD. Em `legacy` isto não existe.
+
 ## Mudança de leitura/escrita do nível de conta
 
 - `UserRole`: apenas `ADMIN` e `MEMBER`. A leitura de um `LEAD` legado vira `MEMBER` (`UserRole.parse`).
 - Criar/editar usuário pelo admin: `role = LEAD` é **rejeitado** (400, "use ADMIN ou MEMBER") com `lead-level=off`; em `legacy` continua aceito.
+- Token e `AuthResponse.role`: com `off`, um `LEAD` legado sai como `MEMBER`. A listagem de usuários do admin (`/api/users`) continua mostrando o valor gravado.
+
+## Roteiro recomendado (ambiente que já tem LEAD, como a homologação)
+
+1. Suba a versão com `APP_MEMBERSHIP_LEAD_LEVEL=legacy` **explícito** (o padrão do compose e do `application.yml` é `off`; sem a variável o
+   LEAD perderia o acesso global no deploy). A V77 é aditiva e roda sozinha.
+2. `GET /api/admin/membership/report`: `LEAD_USERS` e `LEAD_NO_LEADERSHIP_LINK`. Para cada LEAD sem liderança, **decida** o vínculo
+   (convite, importação do Jira, adição pela liderança da squad) ou aceite a perda. O sistema não cria vínculo sozinho.
+3. `POST /api/admin/membership/lead-demotion` (dry-run): confira `summary` e `warnings`; reúna-se com os poucos LEAD.
+4. `POST .../lead-demotion?apply=true&limit=5`, repetindo por lotes; acompanhe se alguém reclama de acesso. Com `legacy` o rebaixamento já
+   tira o acesso global da conta (o aviso `warnings[]` diz isso).
+5. Quando `LEAD_USERS` for 0 (ou só restar quem foi aceito), vire `APP_MEMBERSHIP_LEAD_LEVEL=off` e reinicie.
+6. Reverter a qualquer momento: `APP_MEMBERSHIP_LEAD_LEVEL=legacy` e reiniciar devolve o acesso a quem ainda é LEAD;
+   `POST /api/admin/membership/lead-restore` devolve o nível LEAD a quem foi rebaixado (revise antes: restaurar com `legacy` devolve o
+   acesso global). Rever as chaves de API de ex-LEAD (continuam válidas até renovar).

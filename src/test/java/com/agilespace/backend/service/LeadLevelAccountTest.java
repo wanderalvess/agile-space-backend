@@ -26,6 +26,8 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -102,6 +104,31 @@ class LeadLevelAccountTest {
         assertEquals("LEAD", service.saveUser(body("{\"id\":\"m1\",\"role\":\"lead\"}"), true, "a1").getRole());
         verify(audit).save(any(AuditLog.class));
         assertThrows(ResponseStatusException.class, () -> service.saveUser(body("{\"id\":\"m1\",\"role\":\"GERENTE\"}"), true, "a1"));
+    }
+
+    // ---------- Sessão ----------
+
+    @Test
+    @DisplayName("Sessão (token e AuthResponse): off entrega MEMBER para um LEAD legado; legacy entrega como está gravado")
+    void sessionRoleOfALegacyLead() {
+        com.agilespace.backend.repository.ProjectMemberRoleRepository pmr = mock(com.agilespace.backend.repository.ProjectMemberRoleRepository.class);
+        com.agilespace.backend.repository.ProjectConfigRepository projects = mock(com.agilespace.backend.repository.ProjectConfigRepository.class);
+        com.agilespace.backend.security.JwtTokenUtil jwt = mock(com.agilespace.backend.security.JwtTokenUtil.class);
+        when(jwt.generateToken(any(), any(), any(), any(), any(), any(), any(), anyLong())).thenReturn("jwt");
+        when(jwt.generateToken(any(), any(), any(), any(), any(), any(), any())).thenReturn("jwt");
+        when(pmr.findByEmailIgnoreCase(any())).thenReturn(List.of());
+        when(pmr.findByJiraAccountId(any())).thenReturn(List.of());
+        when(pmr.findByUserId(any())).thenReturn(List.of());
+        when(projects.findAll()).thenReturn(List.of());
+        AuthService auth = new AuthService(repo, projects, pmr, mock(com.agilespace.backend.repository.SquadMemberRepository.class),
+                new UserProjectResolverService(pmr, projects), jwt, null);
+
+        auth.setLeadPolicy(LeadPolicy.OFF);
+        assertEquals("MEMBER", auth.getMe("l1").getRole());
+        verify(jwt, atLeastOnce()).generateToken(any(), any(), any(), eq("MEMBER"), any(), any(), any(), anyLong());
+
+        auth.setLeadPolicy(LeadPolicy.LEGACY);
+        assertEquals("LEAD", auth.getMe("l1").getRole());
     }
 
     // ---------- Avisos ----------

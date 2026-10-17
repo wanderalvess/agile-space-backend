@@ -66,14 +66,15 @@ Datas e contagens vêm como números; campos ausentes vêm `null`.
 | `PHANTOM_ACCOUNTS` | Sem senha e e-mail `@empresa.com` ou id = conta do Jira (criadas pelo sync) | `ativa`, `inativa` |
 | `ROSTER_EMAIL_WITHOUT_ACCOUNT` | E-mail de pmr/roster que não casa com nenhuma conta | `pmr`, `squad_members` |
 | `PMR_UNRESOLVABLE` | pmr sem `user_id`, sem e-mail e sem conta do Jira | a `role_key` da linha |
-| `LEAD_USERS` | Contas ativas com `role = LEAD` | `squads_lideranca=N` (0 = perderia todo o acesso) |
+| `LEAD_USERS` | Contas ativas com `role = LEAD` (nível legado; com `app.membership.lead-level=off` não concede nada) | `squads_lideranca=N` (0 = perderia todo o poder ao sair de LEAD) |
+| `LEAD_NO_LEADERSHIP_LINK` | **Etapa 4.** Subconjunto de `LEAD_USERS` sem NENHUMA linha de liderança (`is_leadership`) em `project_member_roles`: `POST /api/admin/membership/lead-demotion?apply=true` NÃO as rebaixa (crie o vínculo ou use `userId`+`forceDemote=true`) | `sem_lideranca_por_vinculo` |
 | `TRANSVERSAL_LEADERS` | Linhas TRIBE_LEAD/AGILE_COACH/PEOPLE_LEAD com liderança, que expandem para a tribo/segmento | `squads_alcancadas=N` |
 | `SQUAD_KEY_CASE_VARIANTS` | `users.squad_id` gravado com caixa/espaço diferentes para a mesma squad | `N variantes` |
 | `USER_SQUAD_DEFAULT_DIVERGENT` | `users.squad_id` ≠ `default_project_id` | `default=<chave>` |
 | `PMR_ORPHAN_PROJECT` | pmr de `project_id` que não existe em `projects` (não há FK) | `N linhas` |
 | `ROSTER_ONLY_SQUAD` | `squad_members` de squad sem linha em `projects` | `N pessoas` |
 | `PROJECT_WITHOUT_TRIBE` | `projects.tribe_name` vazio | `sem_tribo` |
-| `WOULD_LOSE_ACCESS` | **Etapa 2.** Pessoa que o legado deixa acessar a squad e a regra nova (`app.membership.authz=new`: só vínculos, ADMIN/LEAD) NEGARIA. Uma linha por pessoa, squad e ponto de decisão | `matchesSquad:ONLY_ROSTER`, `matchesSquad:ONLY_SQUAD_ID`, `matchesSquad:ROSTER_AND_SQUAD_ID`, `canManageSquad:ONLY_JOB_TITLE`, `canManageSquad:NO_LEADERSHIP_FALLBACK`, `isSquadLeadership:ONLY_JOB_TITLE`, `*:RESOLVER_ONLY` |
+| `WOULD_LOSE_ACCESS` | **Etapa 2.** Pessoa que o legado deixa acessar a squad e a regra nova (`app.membership.authz=new`: só vínculos e ADMIN; LEAD só com `lead-level=legacy`) NEGARIA. Uma linha por pessoa, squad e ponto de decisão | `matchesSquad:ONLY_ROSTER`, `matchesSquad:ONLY_SQUAD_ID`, `matchesSquad:ROSTER_AND_SQUAD_ID`, `canManageSquad:ONLY_JOB_TITLE`, `canManageSquad:NO_LEADERSHIP_FALLBACK`, `isSquadLeadership:ONLY_JOB_TITLE`, `*:RESOLVER_ONLY` |
 
 Observações:
 - `squad_id` que não é projeto (consulta 3.7b do plano) está dentro de `USERS_WITH_SQUAD_WITHOUT_LINK` (rótulo `squad_id_nao_e_projeto`).
@@ -117,5 +118,5 @@ Células que começam com `=`, `+`, `-` ou `@` ganham um apóstrofo à frente (p
 1. Gere o relatório **antes** de aplicar a V75 (se possível) e depois; compare `pmr_without_user_id` e `pmr_source_BACKFILL`.
 2. Trate por grupo: `WOULD_LOSE_ACCESS` é a lista objetiva de quem perderia acesso na etapa 2 (`USERS_WITH_SQUAD_WITHOUT_LINK` e
    `ROSTER_WITHOUT_LINK` são a causa-raiz);
-   `LEAD_USERS` com `squads_lideranca=0` bloqueia a etapa 4; `SQUADS_WITHOUT_APPROVER` bloqueia a etapa 3.
+   `LEAD_USERS` com `squads_lideranca=0` (= `LEAD_NO_LEADERSHIP_LINK`) bloqueia o rebaixamento da etapa 4; `SQUADS_WITHOUT_APPROVER` bloqueia a etapa 3.
 3. A migração V75 não corrige nada disso além do backfill conservador de `user_id` por e-mail único.
