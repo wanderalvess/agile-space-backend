@@ -87,4 +87,26 @@ public class ShowcaseEvidence {
         private String qa;
         private String tu;
     }
+
+    /** Cópia dos campos que o servidor guarda (inclui os planejados, que ficam fora do JSON). */
+    public ShowcaseEvidence copy() {
+        return ShowcaseEvidence.builder()
+                .problem(problem).solution(solution).dev(dev).qa(qa).screenshot(screenshot).video(video)
+                .evidencePreference(evidencePreference).techDocUrl(techDocUrl).tdnUrl(tdnUrl)
+                .timeSpent(timeSpent).timeEstimate(timeEstimate)
+                .plannedDev(plannedDev).plannedQa(plannedQa).plannedTu(plannedTu)
+                .build();
+    }
+
+    /** Mesmo conteúdo (texto em branco = null). */
+    public boolean sameContentAs(ShowcaseEvidence o) {
+        return o != null && ShowcaseTask.eq(problem, o.problem) && ShowcaseTask.eq(solution, o.solution)
+                && ShowcaseTask.eq(dev, o.dev) && ShowcaseTask.eq(qa, o.qa)
+                && ShowcaseTask.eq(screenshot, o.screenshot) && ShowcaseTask.eq(video, o.video)
+                && ShowcaseTask.eq(evidencePreference, o.evidencePreference)
+                && ShowcaseTask.eq(techDocUrl, o.techDocUrl) && ShowcaseTask.eq(tdnUrl, o.tdnUrl)
+                && java.util.Objects.equals(timeSpent, o.timeSpent) && java.util.Objects.equals(timeEstimate, o.timeEstimate)
+                && ShowcaseTask.eq(plannedDev, o.plannedDev) && ShowcaseTask.eq(plannedQa, o.plannedQa)
+                && ShowcaseTask.eq(plannedTu, o.plannedTu);
+    }
 }

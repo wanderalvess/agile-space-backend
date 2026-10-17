@@ -85,7 +85,37 @@ public class ShowcaseWebSocketHandler extends TextWebSocketHandler implements Pr
         log.debug("Received client Showcase WebSocket message from session {} ({} chars)", session.getId(), message.getPayloadLength());
     }
 
+    /** Quem recebe um evento: todas as conexões da sala ou só um dos dois grupos (com/sem {@code ?presence=1}). */
+    private enum Audience { ALL, OPT_IN, LEGACY }
+
     public void broadcastEvent(String sessionId, String eventType, Object payload) {
+        broadcast(sessionId, eventType, payload, Audience.ALL);
+    }
+
+    /**
+     * Evento NOVO: só para as conexões abertas com {@code ?presence=1} (docs/presence-api.md). O frontend antigo trata qualquer
+     * tipo desconhecido como "recarrega a sala", então nunca recebe um tipo que não conhece.
+     */
+    public void broadcastToOptIn(String sessionId, String eventType, Object payload) {
+        broadcast(sessionId, eventType, payload, Audience.OPT_IN);
+    }
+
+    /** Há conexão aberta SEM {@code ?presence=1} (frontend antigo) na sala? Evita montar o payload completo à toa. */
+    public boolean hasLegacyConnections(String sessionId) {
+        for (WebSocketSession s : sessionsOf(sessionId)) {
+            if (s.isOpen() && !PresenceChannel.wantsPresence(s)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** O evento que o frontend antigo já conhece, só para quem NÃO abriu com {@code ?presence=1}. */
+    public void broadcastToLegacy(String sessionId, String eventType, Object payload) {
+        broadcast(sessionId, eventType, payload, Audience.LEGACY);
+    }
+
+    private void broadcast(String sessionId, String eventType, Object payload, Audience audience) {
         Set<WebSocketSession> sessions = roomSessions.get(sessionId);
         if (sessions != null && !sessions.isEmpty()) {
             try {
@@ -97,8 +127,8 @@ public class ShowcaseWebSocketHandler extends TextWebSocketHandler implements Pr
 
                 String json = objectMapper.writeValueAsString(messageMap);
                 TextMessage textMessage = new TextMessage(json);
-                log.info("Broadcasting event '{}' to {} sessions in showcase session {}", eventType, sessions.size(), sessionId);
-                broadcastToSessions(sessions, textMessage);
+                log.info("Broadcasting event '{}' ({}) to {} sessions in showcase session {}", eventType, audience, sessions.size(), sessionId);
+                broadcastToSessions(sessions, textMessage, audience);
             } catch (Exception e) {
                 log.error("Failed to serialize or broadcast event '{}' for showcase session {}", eventType, sessionId, e);
             }
@@ -109,8 +139,11 @@ public class ShowcaseWebSocketHandler extends TextWebSocketHandler implements Pr
         broadcastEvent(sessionId, "REFRESH_SESSION", null);
     }
 
-    private void broadcastToSessions(Set<WebSocketSession> sessions, TextMessage message) {
+    private void broadcastToSessions(Set<WebSocketSession> sessions, TextMessage message, Audience audience) {
         for (WebSocketSession session : sessions) {
+            if (audience != Audience.ALL && PresenceChannel.wantsPresence(session) != (audience == Audience.OPT_IN)) {
+                continue;
+            }
             if (session.isOpen()) {
                 try {
                     session.sendMessage(message);
