@@ -343,7 +343,7 @@ public class AuthServiceTest {
         ghost.setEmail("maria.souza@empresa.com.br");
         ghost.setName("Maria Souza");
         ghost.setJiraAccountId("acc-123");
-        ghost.setSquadId("DDWMISSI");
+        ghost.setDefaultProjectId("DDWMISSI");
         ghost.setActive(false);
 
         when(userRepository.findByEmail("maria.souza@empresa.com.br")).thenReturn(Optional.of(ghost));
@@ -364,7 +364,7 @@ public class AuthServiceTest {
 
         assertEquals("acc-123", saved.getId(), "deve reaproveitar o id da conta-fantasma, nao gerar outro");
         assertEquals("Maria Souza", saved.getName(), "nome vindo do Jira nao deve ser sobrescrito");
-        assertEquals("DDWMISSI", saved.getSquadId());
+        assertEquals("DDWMISSI", saved.getDefaultProjectId());
         assertTrue(saved.isActive());
         assertTrue(PasswordUtil.verifyPassword(RAW_PASSWORD, saved.getPasswordHash()));
         assertEquals("jwt-token", response.getToken());

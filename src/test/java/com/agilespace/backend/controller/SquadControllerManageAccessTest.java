@@ -55,7 +55,7 @@ class SquadControllerManageAccessTest {
     }
 
     private User userInSq1(String id) {
-        User u = User.builder().id(id).email(id + "@empresa.com.br").squadId("SQ1").build();
+        User u = User.builder().id(id).email(id + "@empresa.com.br").defaultProjectId("SQ1").build();
         lenient().when(userRepository.findById(id)).thenReturn(Optional.of(u));
         return u;
     }
@@ -243,7 +243,7 @@ class SquadControllerManageAccessTest {
 
         assertThrows(ResponseStatusException.class, () -> controller.syncSquad("SQ1", false, as("novo", "MEMBER")));
 
-        assertNull(loner.getSquadId());
+        assertNull(loner.getDefaultProjectId());
         verify(userRepository, never()).save(any());
         verifyNoInteractions(squadSyncService);
     }
@@ -260,7 +260,7 @@ class SquadControllerManageAccessTest {
         ResponseEntity<Void> response = controller.syncSquad("NOVA", false, as("novo", "MEMBER"));
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertEquals("NOVA", loner.getSquadId());
+        assertEquals("NOVA", loner.getDefaultProjectId());
         verify(userRepository).save(loner);
     }
 

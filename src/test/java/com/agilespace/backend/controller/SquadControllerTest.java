@@ -103,7 +103,7 @@ public class SquadControllerTest {
         // usuário autenticado da aplicação lia dado de qualquer squad.
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-other");
+        caller.setDefaultProjectId("sq-other");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
 
         assertThrows(ResponseStatusException.class, () -> controller.getSquad("sq-1", memberRequest("user-1")));
@@ -114,7 +114,7 @@ public class SquadControllerTest {
     public void testGetSquad_memberOfSquad_succeeds() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-1");
+        caller.setDefaultProjectId("sq-1");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
         when(service.getSquad("sq-1")).thenReturn(Optional.of(new Squad()));
 
@@ -135,7 +135,7 @@ public class SquadControllerTest {
     public void testGetIssues_nonMemberOfSquad_forbidden() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-other");
+        caller.setDefaultProjectId("sq-other");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
 
         assertThrows(ResponseStatusException.class,
@@ -147,7 +147,7 @@ public class SquadControllerTest {
     public void testGetMemberMetrics_memberOfSquad_succeeds() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-1");
+        caller.setDefaultProjectId("sq-1");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
         when(service.getMemberMetrics("sq-1")).thenReturn(List.of());
 
@@ -161,7 +161,7 @@ public class SquadControllerTest {
     public void testSaveSquad_nonMemberOfSquad_forbidden() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-other");
+        caller.setDefaultProjectId("sq-other");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
 
         assertThrows(ResponseStatusException.class,
@@ -200,7 +200,7 @@ public class SquadControllerTest {
     public void testSyncSquad_usesCallerIdFromToken_neverFromRequestBody() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-1");
+        caller.setDefaultProjectId("sq-1");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
 
         controller.syncSquad("sq-1", false, memberRequest("user-1"));
@@ -214,7 +214,7 @@ public class SquadControllerTest {
     public void testSyncSquad_nonMemberOfSquad_forbidden() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-other");
+        caller.setDefaultProjectId("sq-other");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
 
         assertThrows(ResponseStatusException.class,
@@ -227,7 +227,7 @@ public class SquadControllerTest {
     public void testForceResyncSprint_memberOfSquad_delegatesToSyncService() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-1");
+        caller.setDefaultProjectId("sq-1");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
 
         ResponseEntity<Void> response = controller.forceResyncSprint("sq-1", "SPRINT-42", memberRequest("user-1"));
@@ -240,7 +240,7 @@ public class SquadControllerTest {
     public void testCreatePanel_nonMemberOfSquad_forbidden() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-other");
+        caller.setDefaultProjectId("sq-other");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
 
         assertThrows(ResponseStatusException.class,
@@ -255,7 +255,7 @@ public class SquadControllerTest {
     public void testCreatePanel_memberOfSquad_succeeds() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-1");
+        caller.setDefaultProjectId("sq-1");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
         SquadPanel panel = new SquadPanel();
         when(service.createPanel(eq("sq-1"), eq("user-1"), eq(panel))).thenReturn(panel);
@@ -283,7 +283,7 @@ public class SquadControllerTest {
     public void testSaveSquad_missiAlias_succeeds() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("MISSI");
+        caller.setDefaultProjectId("MISSI");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
         Squad squad = new Squad();
         when(service.saveSquad(squad)).thenReturn(squad);
@@ -305,7 +305,7 @@ public class SquadControllerTest {
         ResponseEntity<Squad> response = controller.saveSquad("DDWMISSI", squad, memberRequest("user-1"));
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertEquals("DDWMISSI", caller.getSquadId());
+        assertEquals("DDWMISSI", caller.getDefaultProjectId());
         assertEquals("DDWMISSI", caller.getDefaultProjectId());
         verify(userRepository).save(caller);
     }
@@ -314,7 +314,7 @@ public class SquadControllerTest {
     public void testSaveSquad_dbAdminRole_succeeds() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-other");
+        caller.setDefaultProjectId("sq-other");
         caller.setRole("ADMIN");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
         Squad squad = new Squad();
@@ -329,7 +329,7 @@ public class SquadControllerTest {
     public void testSaveSquad_leadershipJobTitle_succeeds() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("DDWMISSI");
+        caller.setDefaultProjectId("DDWMISSI");
         caller.setJobTitle("Agile Master");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
         Squad squad = new Squad();
@@ -344,7 +344,7 @@ public class SquadControllerTest {
     public void testSaveSquad_leadershipJobTitle_otherSquad_forbidden() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-other");
+        caller.setDefaultProjectId("sq-other");
         caller.setJobTitle("Agile Master");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
         when(service.getMembers("DDWMISSI")).thenReturn(java.util.List.of());
@@ -360,7 +360,7 @@ public class SquadControllerTest {
         User caller = new User();
         caller.setId("user-1");
         caller.setEmail("wanderson@totvs.com.br");
-        caller.setSquadId("sq-other");
+        caller.setDefaultProjectId("sq-other");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
 
         com.agilespace.backend.domain.SquadMember member = new com.agilespace.backend.domain.SquadMember();
@@ -380,7 +380,7 @@ public class SquadControllerTest {
     public void testSaveSquad_semTimeAutoAssign_succeeds() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("Sem Time");
+        caller.setDefaultProjectId("Sem Time");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
         Squad squad = new Squad();
         when(service.saveSquad(squad)).thenReturn(squad);
@@ -388,7 +388,7 @@ public class SquadControllerTest {
         ResponseEntity<Squad> response = controller.saveSquad("DDWMISSI", squad, memberRequest("user-1"));
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertEquals("DDWMISSI", caller.getSquadId());
+        assertEquals("DDWMISSI", caller.getDefaultProjectId());
         verify(userRepository).save(caller);
     }
 

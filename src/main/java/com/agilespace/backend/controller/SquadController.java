@@ -81,7 +81,9 @@ public class SquadController {
         if (caller == null) {
             return false;
         }
-        boolean hasNoSquad = caller.getSquadId() == null || caller.getSquadId().isBlank() || "Sem Time".equalsIgnoreCase(caller.getSquadId().trim());
+        // users.squad_id foi aposentada (Etapa 5 do vínculo): "sem squad" = sem squad ativa preferida (default_project_id).
+        boolean hasNoSquad = caller.getDefaultProjectId() == null || caller.getDefaultProjectId().isBlank()
+                || "Sem Time".equalsIgnoreCase(caller.getDefaultProjectId().trim());
         if (!hasNoSquad) {
             return false;
         }
@@ -89,11 +91,7 @@ public class SquadController {
         if (squadAlreadyExists) {
             return false;
         }
-        boolean hasNoProject = caller.getDefaultProjectId() == null || caller.getDefaultProjectId().isBlank() || "Sem Time".equalsIgnoreCase(caller.getDefaultProjectId().trim());
-        caller.setSquadId(squadId);
-        if (hasNoProject) {
-            caller.setDefaultProjectId(squadId);
-        }
+        caller.setDefaultProjectId(squadId);
         userRepository.save(caller);
         return true;
     }

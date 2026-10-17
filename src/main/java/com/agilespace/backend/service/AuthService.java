@@ -143,20 +143,14 @@ public class AuthService {
         // Se o usuário ainda não tiver um defaultProjectId e possuir projetos associados, define o primeiro
         if (user.getDefaultProjectId() == null && !resolved.access().getProjects().isEmpty()) {
             user.setDefaultProjectId(resolved.access().getProjects().get(0).getProjectId());
-            if (user.getSquadId() == null || user.getSquadId().isBlank()) {
-                user.setSquadId(resolved.access().getProjects().get(0).getProjectId());
-            }
             userRepository.save(user);
             resolved = resolveAccess(user);
-        } else if ((user.getSquadId() == null || user.getSquadId().isBlank()) && user.getDefaultProjectId() != null) {
-            user.setSquadId(user.getDefaultProjectId());
-            userRepository.save(user);
-        } else if (user.getSquadId() == null || user.getSquadId().isBlank()) {
+        } else if (user.getDefaultProjectId() == null) {
+            // Etapa 5 do vínculo: users.squad_id não é mais lida nem gravada; só a preferência default_project_id.
             List<SquadMember> matchedMembers = squadMemberRepository.findByUserIdentifier(cleanEmail);
             if (!matchedMembers.isEmpty()) {
                 rosterFallback = true;
                 user.setDefaultProjectId(matchedMembers.get(0).getSquadId());
-                user.setSquadId(matchedMembers.get(0).getSquadId());
                 userRepository.save(user);
                 for (SquadMember sm : matchedMembers) {
                     if (sm.getClaimedByUid() == null) {
@@ -170,12 +164,12 @@ public class AuthService {
 
         if (resolved.access().getProjects().isEmpty()) {
             // Sessão sem nenhuma linha em project_member_roles. Antes isso passava em silêncio (principalmente o fallback
-            // por roster acima, que grava squad_id/default_project_id sem criar vínculo). Não bloqueia o login: fica
+            // por roster acima, que grava default_project_id sem criar vínculo). Não bloqueia o login: fica
             // registrado e, no modelo novo, /me/memberships e a sessão trazem legacyOnly=true. Conta nova, sem rastro
             // nenhum, só vai para o onboarding (não é "legado").
-            boolean traces = rosterFallback || hasSquadTrace(user.getSquadId()) || hasSquadTrace(user.getDefaultProjectId());
+            boolean traces = rosterFallback || hasSquadTrace(user.getDefaultProjectId());
             if (traces) {
-                log.warn("Login sem vínculo em project_member_roles (só roster/squad_id antigo): user={} roster_fallback={}",
+                log.warn("Login sem vínculo em project_member_roles (só roster/default_project_id antigo): user={} roster_fallback={}",
                         user.getId(), rosterFallback);
             } else {
                 log.debug("Login de conta sem vínculo e sem rastro do modelo antigo: user={}", user.getId());
@@ -281,9 +275,6 @@ public class AuthService {
             if (user.getDefaultProjectId() == null || user.getDefaultProjectId().isBlank()) {
                 user.setDefaultProjectId(defaultProject);
             }
-            if (user.getSquadId() == null || user.getSquadId().isBlank()) {
-                user.setSquadId(defaultProject);
-            }
             if (user.getSegmentName() == null || user.getSegmentName().isBlank()) {
                 user.setSegmentName(segment);
             }
@@ -300,7 +291,6 @@ public class AuthService {
                     .role("MEMBER")
                     .jiraAccountId(requestedJiraId != null && !requestedJiraId.isEmpty() ? requestedJiraId : null)
                     .defaultProjectId(defaultProject)
-                    .squadId(defaultProject)
                     .segmentName(segment)
                     .tribeName(tribe)
                     .active(true)
@@ -354,11 +344,10 @@ public class AuthService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Usuário não tem acesso a este projeto");
         }
 
-        // Dual-write continua (default_project_id e squad_id). No modelo novo grava o id canônico do vínculo (o legado
-        // gravava o texto como veio, inclusive com outra caixa).
+        // Grava só a preferência default_project_id (Etapa 5 do vínculo: users.squad_id foi aposentada). No modelo novo
+        // grava o id canônico do vínculo (o legado gravava o texto como veio, inclusive com outra caixa).
         String toStore = membershipMode() == MembershipMode.NEW ? target.getProjectId() : newProjectId;
         user.setDefaultProjectId(toStore);
-        user.setSquadId(toStore);
         user = userRepository.save(user);
         if (membershipService != null) {
             membershipService.evict(userId);

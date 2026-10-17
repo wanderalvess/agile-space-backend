@@ -81,7 +81,7 @@ class InviteServiceTest {
         service.acceptInvite("tok", u);
 
         verify(projectMemberRoleRepository).save(argThat(m -> "SQ".equals(m.getProjectId()) && "u1".equals(m.getUserId()) && !m.isLeadership() && "INVITE".equals(m.getSource())));
-        assertEquals("SQ", u.getSquadId());
+        assertEquals("SQ", u.getDefaultProjectId());
         verify(userRepository).save(u);
     }
 
@@ -169,7 +169,7 @@ class InviteServiceTest {
         assertEquals("ana@totvs.com.br", seen.getEmail());
         assertEquals("lead@totvs.com.br", seen.getInvitedBy());
 
-        User member = User.builder().id("m").email("m@totvs.com.br").squadId("SQ").build();
+        User member = User.builder().id("m").email("m@totvs.com.br").defaultProjectId("SQ").build();
         assertEquals("lead@totvs.com.br", service.getForDisplay("t", member).getInvitedBy());
     }
 

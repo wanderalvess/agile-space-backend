@@ -50,7 +50,7 @@ class ApiKeyExpiryTest {
     }
 
     private User user(String id, String role, boolean active, String squad) {
-        return User.builder().id(id).email(id + "@totvs.com.br").name(id).role(role).active(active).squadId(squad).build();
+        return User.builder().id(id).email(id + "@totvs.com.br").name(id).role(role).active(active).defaultProjectId(squad).build();
     }
 
     @Test

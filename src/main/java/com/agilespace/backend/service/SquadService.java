@@ -236,7 +236,6 @@ public class SquadService {
                 if (saved.getDisplayName() != null && !saved.getDisplayName().isBlank()) {
                     user.setName(saved.getDisplayName());
                 }
-                user.setSquadId(squadId);
                 user.setUpdatedAt(java.time.LocalDateTime.now());
                 userRepository.save(user);
             }
@@ -308,21 +307,9 @@ public class SquadService {
     @Transactional
     public void deleteMember(String squadId, String jiraAccountId) {
         memberRepository.findBySquadIdAndJiraAccountId(squadId, jiraAccountId)
-                .ifPresent(m -> {
-                    memberRepository.delete(m);
-                    // Atualiza usuário desvinculando da squad
-                    try {
-                        userRepository.findByJiraAccountId(jiraAccountId).ifPresent(u -> {
-                            if (squadId.equalsIgnoreCase(u.getSquadId())) {
-                                u.setSquadId(null);
-                                u.setUpdatedAt(java.time.LocalDateTime.now());
-                                userRepository.save(u);
-                            }
-                        });
-                    } catch (Exception ex) {
-                        log.warn("Falha ao desvincular usuário {} da squad {} após remoção: {}", jiraAccountId, squadId, ex.getMessage());
-                    }
-                });
+                // Etapa 5 do vínculo: remover do roster não mexe mais na conta (users.squad_id foi aposentada; o
+                // vínculo de acesso vive em project_member_roles e é desfeito por SquadTeamService.remove).
+                .ifPresent(memberRepository::delete);
     }
 
     // ----- Member Metrics -----

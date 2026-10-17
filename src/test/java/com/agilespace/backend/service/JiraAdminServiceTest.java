@@ -172,7 +172,7 @@ class JiraAdminServiceTest {
             SquadMember staying = SquadMember.builder().dbId("PROJ1_acc1").squadId("PROJ1").jiraAccountId("acc1").build();
             SquadMember leaving = SquadMember.builder().dbId("PROJ1_acc2").squadId("PROJ1").jiraAccountId("acc2").displayName("Saindo").build();
 
-            User leavingUser = User.builder().id("acc2").squadId("PROJ1").email("acc2@empresa.com").build();
+            User leavingUser = User.builder().id("acc2").defaultProjectId("PROJ1").email("acc2@empresa.com").build();
 
             when(squadRepository.findById("PROJ1")).thenReturn(Optional.empty());
             when(squadRepository.save(any(Squad.class))).thenAnswer(i -> i.getArgument(0));
@@ -195,7 +195,7 @@ class JiraAdminServiceTest {
             ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
             verify(userRepository, atLeastOnce()).save(userCaptor.capture());
             boolean unlinkedLeavingUser = userCaptor.getAllValues().stream()
-                    .anyMatch(u -> "acc2".equals(u.getId()) && u.getSquadId() == null);
+                    .anyMatch(u -> "acc2".equals(u.getId()) && u.getDefaultProjectId() == null);
             assertTrue(unlinkedLeavingUser);
         }
 
@@ -228,7 +228,7 @@ class JiraAdminServiceTest {
             assertEquals("ADMIN", updated.getRole(), "Papel ADMIN não pode ser rebaixado para MEMBER");
             assertEquals("Developer", updated.getJobTitle());
             assertEquals(6, updated.getDailyHours());
-            assertEquals("PROJ1", updated.getSquadId());
+            assertEquals("PROJ1", updated.getDefaultProjectId());
         }
     }
 

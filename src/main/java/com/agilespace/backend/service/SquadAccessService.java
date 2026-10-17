@@ -150,13 +150,15 @@ public class SquadAccessService {
         return rosterMatches(caller, squadId);
     }
 
-    /** users.squad_id / default_project_id aponta para a squad (comparação sem caixa, com o alias DDWMISSI/MISSI). */
+    /**
+     * default_project_id (a squad ativa preferida) aponta para a squad (comparação sem caixa, com o alias DDWMISSI/MISSI).
+     * Etapa 5 do vínculo: users.squad_id deixou de ser lido (a coluna foi aposentada); no legado ele era gravado junto
+     * com default_project_id, então esta é a mesma "squad da sessão" de antes.
+     */
     static boolean sessionSquadMatches(User caller, String squadId) {
-        boolean matches = (caller.getSquadId() != null && caller.getSquadId().equalsIgnoreCase(squadId))
-                || (caller.getDefaultProjectId() != null && caller.getDefaultProjectId().equalsIgnoreCase(squadId));
+        boolean matches = caller.getDefaultProjectId() != null && caller.getDefaultProjectId().equalsIgnoreCase(squadId);
         if (!matches && ("DDWMISSI".equalsIgnoreCase(squadId) || "MISSI".equalsIgnoreCase(squadId))) {
-            matches = ("DDWMISSI".equalsIgnoreCase(caller.getSquadId()) || "MISSI".equalsIgnoreCase(caller.getSquadId()))
-                    || ("DDWMISSI".equalsIgnoreCase(caller.getDefaultProjectId()) || "MISSI".equalsIgnoreCase(caller.getDefaultProjectId()));
+            matches = "DDWMISSI".equalsIgnoreCase(caller.getDefaultProjectId()) || "MISSI".equalsIgnoreCase(caller.getDefaultProjectId());
         }
         return matches;
     }
@@ -404,7 +406,8 @@ public class SquadAccessService {
 
     /**
      * Squad "do usuário" para quem precisa de UMA (autoria de documento, chave de API, atribuição do Prompt Hub).
-     * Legado: {@code users.squad_id}. Novo: a squad ativa validada contra os vínculos (null sem vínculo nenhum).
+     * Legado: {@code users.default_project_id} (a coluna squad_id foi aposentada). Novo: a squad ativa validada contra
+     * os vínculos (null sem vínculo nenhum).
      * Em {@code shadow} devolve o legado e registra a diferença com {@code check} no log.
      */
     public String activeSquadFor(String check, User user) {
@@ -412,10 +415,10 @@ public class SquadAccessService {
             return null;
         }
         if (legacyOnly()) {
-            return user.getSquadId();
+            return user.getDefaultProjectId();
         }
         return authz.choose(check, user.getId(),
-                user::getSquadId,
+                user::getDefaultProjectId,
                 () -> membershipService.activeProjectOf(user),
                 (legacy, neu) -> {
                     boolean hadLegacy = legacy != null && !legacy.isBlank();
@@ -429,7 +432,7 @@ public class SquadAccessService {
 
     /**
      * Squads com as quais a pessoa pode compartilhar/ler algo "da squad" (Jolt). Retorna {@code null} quando quem decide
-     * ainda é o legado (a squad única de users.squad_id, que o chamador já tem); só em {@code new} devolve a lista
+     * ainda é o legado (a squad única de users.default_project_id, que o chamador já tem); só em {@code new} devolve a lista
      * (ids canônicos dos vínculos). Em {@code shadow} registra o que cada lado deixaria de fora.
      */
     public Set<String> squadsForSharing(String check, User user) {
@@ -445,7 +448,7 @@ public class SquadAccessService {
 
     private static Set<String> legacyShareSet(User user) {
         Set<String> out = new LinkedHashSet<>();
-        if (user.getSquadId() != null && !user.getSquadId().isBlank()) out.add(user.getSquadId());
+        if (user.getDefaultProjectId() != null && !user.getDefaultProjectId().isBlank()) out.add(user.getDefaultProjectId());
         return out;
     }
 

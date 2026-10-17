@@ -32,7 +32,7 @@ class SquadAccessServiceTest {
     }
 
     private User user(String id, String squadId) {
-        User u = User.builder().id(id).email(id + "@empresa.com.br").squadId(squadId).build();
+        User u = User.builder().id(id).email(id + "@empresa.com.br").defaultProjectId(squadId).build();
         lenient().when(userRepository.findById(id)).thenReturn(Optional.of(u));
         return u;
     }

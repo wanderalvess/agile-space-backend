@@ -127,7 +127,7 @@ class UserServiceTest {
         @Test
         @DisplayName("Deve permitir trocar para uma squad com a qual o usuário já tem vínculo")
         void shouldAllowSquadChangeToLinkedProject() {
-            User incoming = User.builder().id("user-123").squadId("SQUAD-NOVA").build();
+            User incoming = User.builder().id("user-123").defaultProjectId("SQUAD-NOVA").build();
 
             when(userRepository.findById("user-123")).thenReturn(Optional.of(sampleUser));
             when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));
@@ -137,13 +137,13 @@ class UserServiceTest {
 
             User saved = service.saveUser(incoming, false);
 
-            assertEquals("SQUAD-NOVA", saved.getSquadId());
+            assertEquals("SQUAD-NOVA", saved.getDefaultProjectId());
         }
 
         @Test
         @DisplayName("Não deve deixar um membro se colocar numa squad sem vínculo editando o perfil")
         void shouldRejectSquadChangeWithoutLink() {
-            User incoming = User.builder().id("user-123").squadId("SQUAD-ALHEIA").build();
+            User incoming = User.builder().id("user-123").defaultProjectId("SQUAD-ALHEIA").build();
 
             when(userRepository.findById("user-123")).thenReturn(Optional.of(sampleUser));
             when(userProjectResolverService.resolveUserAccess(sampleUser))
@@ -156,8 +156,8 @@ class UserServiceTest {
         @Test
         @DisplayName("Reenviar a mesma squad não exige checagem de vínculo")
         void shouldNotCheckAccessWhenSquadUnchanged() {
-            sampleUser.setSquadId("SQUAD-ATUAL");
-            User incoming = User.builder().id("user-123").squadId("SQUAD-ATUAL").name("Novo Nome").build();
+            sampleUser.setDefaultProjectId("SQUAD-ATUAL");
+            User incoming = User.builder().id("user-123").defaultProjectId("SQUAD-ATUAL").name("Novo Nome").build();
 
             when(userRepository.findById("user-123")).thenReturn(Optional.of(sampleUser));
             when(userRepository.save(any(User.class))).thenAnswer(i -> i.getArgument(0));

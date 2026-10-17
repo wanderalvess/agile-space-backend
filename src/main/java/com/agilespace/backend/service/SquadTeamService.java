@@ -133,8 +133,7 @@ public class SquadTeamService {
 
         for (SquadMember m : memberRepository.findBySquadIdOrderByDisplayNameAsc(squadId)) {
             boolean same = m.getJiraAccountId().equalsIgnoreCase(jiraAccountId)
-                    || (email != null && m.getEmail() != null && m.getEmail().trim().equalsIgnoreCase(email))
-                    || (user != null && user.getId().equals(m.getClaimedByUid()));
+                    || (email != null && m.getEmail() != null && m.getEmail().trim().equalsIgnoreCase(email));
             if (same) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, name + " já está no time desta squad.");
             }
@@ -222,7 +221,6 @@ public class SquadTeamService {
         User linked = linkedUser(member);
         if (linked != null) {
             boolean changed = false;
-            if (squadId.equalsIgnoreCase(linked.getSquadId())) { linked.setSquadId(null); changed = true; }
             if (linked.getDefaultProjectId() != null && squadId.equalsIgnoreCase(linked.getDefaultProjectId())) { linked.setDefaultProjectId(null); changed = true; }
             if (changed) { linked.setUpdatedAt(LocalDateTime.now()); userRepository.save(linked); }
         }
@@ -298,18 +296,23 @@ public class SquadTeamService {
     /** Linhas do cadastro do projeto que são desta pessoa do roster (conta do Jira, e-mail ou conta vinculada). */
     private List<ProjectMemberRole> rowsOf(String squadId, SquadMember m) {
         List<ProjectMemberRole> out = new ArrayList<>();
+        User linked = linkedUser(m);
         for (ProjectMemberRole r : projectRows(squadId)) {
             boolean match = (notBlank(r.getJiraAccountId()) && r.getJiraAccountId().equals(m.getJiraAccountId()))
                     || (notBlank(r.getEmail()) && notBlank(m.getEmail()) && r.getEmail().trim().equalsIgnoreCase(m.getEmail().trim()))
-                    || (notBlank(r.getUserId()) && r.getUserId().equals(m.getClaimedByUid()));
+                    || (notBlank(r.getUserId()) && linked != null && r.getUserId().equals(linked.getId()));
             if (match) out.add(r);
         }
         return out;
     }
 
+    /**
+     * Conta da pessoa do roster: pela conta do Jira ou, na falta, pelo e-mail. squad_members.claimed_by_uid deixou de
+     * ser fonte de vínculo (Etapa 5 do vínculo): a capacidade liga por jira_account_id e o acesso por project_member_roles.
+     */
     private User linkedUser(SquadMember m) {
-        if (notBlank(m.getClaimedByUid())) {
-            User u = userRepository.findById(m.getClaimedByUid()).orElse(null);
+        if (notBlank(m.getJiraAccountId())) {
+            User u = userRepository.findByJiraAccountId(m.getJiraAccountId().trim()).orElse(null);
             if (u != null) return u;
         }
         if (notBlank(m.getEmail())) {

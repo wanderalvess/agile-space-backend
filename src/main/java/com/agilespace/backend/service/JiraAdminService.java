@@ -291,26 +291,8 @@ public class JiraAdminService {
                 if (!approvedAccountIds.contains(current.getJiraAccountId())) {
                     log.info("Removendo membro não confirmado da Squad {}: {}", projectKey, current.getDisplayName());
                     squadMemberRepository.delete(current);
-
-                    // Se syncUsers ativo, desvincula o squadId do usuário
-                    if (request.isSyncUsers()) {
-                        userRepository.findByJiraAccountId(current.getJiraAccountId()).ifPresent(u -> {
-                            if (projectKey.equalsIgnoreCase(u.getSquadId())) {
-                                u.setSquadId(null);
-                                u.setUpdatedAt(LocalDateTime.now());
-                                userRepository.save(u);
-                            }
-                        });
-                        if (current.getEmail() != null && !current.getEmail().isBlank()) {
-                            userRepository.findByEmail(current.getEmail()).ifPresent(u -> {
-                                if (projectKey.equalsIgnoreCase(u.getSquadId())) {
-                                    u.setSquadId(null);
-                                    u.setUpdatedAt(LocalDateTime.now());
-                                    userRepository.save(u);
-                                }
-                            });
-                        }
-                    }
+                    // Etapa 5 do vínculo: a conta não é mais "desvinculada" aqui (users.squad_id foi aposentada; o
+                    // vínculo de acesso vive em project_member_roles e não é tocado pelo roster).
                 }
             }
         }
@@ -346,7 +328,6 @@ public class JiraAdminService {
                         user.setName(m.getDisplayName());
                         user.setEmail(m.getEmail() != null && !m.getEmail().isBlank() ? m.getEmail() : m.getJiraAccountId() + "@empresa.com");
                         user.setJobTitle(m.getRole()); // Cargo validado pelo usuário (não é tier de autorização)
-                        user.setSquadId(projectKey);
                         user.setJiraAccountId(m.getJiraAccountId());
                         user.setAvatarSeed(m.getDisplayName());
                         user.setDailyHours(m.getCapacityHoursPerDay() != null ? m.getCapacityHoursPerDay().intValue() : 8);
@@ -359,7 +340,6 @@ public class JiraAdminService {
                         // rebaixar/elevar o acesso admin de alguém a partir de um texto de cargo do Jira.
                         user.setName(m.getDisplayName());
                         user.setJobTitle(m.getRole());
-                        user.setSquadId(projectKey);
                         user.setJiraAccountId(m.getJiraAccountId());
                         if (m.getCapacityHoursPerDay() != null) {
                             user.setDailyHours(m.getCapacityHoursPerDay().intValue());

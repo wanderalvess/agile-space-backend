@@ -77,13 +77,12 @@ public class InviteController {
     }
 
     /**
-     * Regra LEGADA (app.membership.authz=legacy): quem tem a squad em users.squad_id/default_project_id e cargo de
+     * Regra LEGADA (app.membership.authz=legacy): quem tem a squad em default_project_id (users.squad_id foi aposentada) e cargo de
      * liderança, ou liderança em linha própria de project_member_roles (por conta ou e-mail), mesmo com outra squad
      * ativa. A regra nova (new) só vale a liderança em linha PRÓPRIA do vínculo; o cargo e users.squad_id deixam de valer.
      */
     private boolean legacyInviteAllowed(String squadId, User caller) {
-        boolean ownsSquad = (caller.getSquadId() != null && caller.getSquadId().equalsIgnoreCase(squadId))
-                || (caller.getDefaultProjectId() != null && caller.getDefaultProjectId().equalsIgnoreCase(squadId));
+        boolean ownsSquad = caller.getDefaultProjectId() != null && caller.getDefaultProjectId().equalsIgnoreCase(squadId);
         if (!ownsSquad) {
             // Liderança de roster conta mesmo com outra squad ativa (ex.: AM que acabou de criar uma equipe manual).
             return isRosterLeader(squadId, caller);

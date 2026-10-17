@@ -153,7 +153,7 @@ class AuthzOtherPointsTest {
         assertEquals(pick(mode, true, false), members.contains("title"), "cargo + users.squad_id");
         assertFalse(members.contains("outsider"));
         if (mode == AuthzMode.NEW) {
-            verify(world.userRepository, never()).findActiveBySquadIds(any());
+            verify(world.userRepository, never()).findActiveByDefaultProjectIds(any());
             verify(world.rosterRepository, never()).findBySquadIdsUpper(any());
         }
     }

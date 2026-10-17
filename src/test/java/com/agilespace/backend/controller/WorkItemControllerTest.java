@@ -60,21 +60,21 @@ class WorkItemControllerTest {
 
     /** Membro da squad SQ1: passa no requireSquadWriteAccess. */
     private HttpServletRequest memberOfSq1() {
-        User caller = User.builder().id("u1").email("joao@empresa.com.br").squadId("SQ1").build();
+        User caller = User.builder().id("u1").email("joao@empresa.com.br").defaultProjectId("SQ1").build();
         lenient().when(userRepository.findById("u1")).thenReturn(Optional.of(caller));
         return requestAs("u1", "MEMBER");
     }
 
     /** Liderança da squad SQ1 (cargo de liderança + pertence à squad). */
     private HttpServletRequest leaderOfSq1() {
-        User caller = User.builder().id("u5").email("lider@empresa.com.br").squadId("SQ1").jobTitle("tech lead").build();
+        User caller = User.builder().id("u5").email("lider@empresa.com.br").defaultProjectId("SQ1").jobTitle("tech lead").build();
         lenient().when(userRepository.findById("u5")).thenReturn(Optional.of(caller));
         return requestAs("u5", "MEMBER");
     }
 
     /** Membro de outra squad: deve ser barrado ao mexer em work_items da SQ1. */
     private HttpServletRequest memberOfAnotherSquad() {
-        User caller = User.builder().id("u2").email("outro@empresa.com.br").squadId("SQ-OUTRA").build();
+        User caller = User.builder().id("u2").email("outro@empresa.com.br").defaultProjectId("SQ-OUTRA").build();
         lenient().when(userRepository.findById("u2")).thenReturn(Optional.of(caller));
         // requireSquadWriteAccess consulta ProjectMemberRoleRepository como fallback
         // (passo 2.1) antes de decidir — sem papel de projeto pra essa squad.
@@ -206,7 +206,7 @@ class WorkItemControllerTest {
             // perfil pra escrever em work_items de qualquer squad. O bypass só é seguro quando gated por
             // "matches" (mesma regra de SquadController.requireSquadWriteAccess) — este teste trava isso.
             User caller = User.builder().id("u4").email("lider.de.outra@empresa.com.br")
-                    .squadId("SQ-OUTRA").jobTitle("tech lead").build();
+                    .defaultProjectId("SQ-OUTRA").jobTitle("tech lead").build();
             when(userRepository.findById("u4")).thenReturn(Optional.of(caller));
 
             ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> controller.estimateWorkItem(
@@ -226,7 +226,7 @@ class WorkItemControllerTest {
                     "SQ1", "DDW-1", new WorkItemController.EstimateRequest(8.0), requestAs("u3", "MEMBER")));
 
             assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
-            assertNull(caller.getSquadId());
+            assertNull(caller.getDefaultProjectId());
             verify(userRepository, never()).save(any());
             verifyNoInteractions(workItemService);
         }

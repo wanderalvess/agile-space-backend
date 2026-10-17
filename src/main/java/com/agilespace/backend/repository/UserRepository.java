@@ -19,9 +19,12 @@ public interface UserRepository extends JpaRepository<User, String> {
     /** Quantos admins ativos existem (guarda do último admin). */
     long countByRoleIgnoreCaseAndActiveTrue(String role);
 
-    /** Contas ativas cuja squad da sessão (squadId/defaultProjectId) está entre os ids informados (MAIÚSCULOS). */
-    @Query("SELECT u FROM User u WHERE u.active = true AND (UPPER(u.squadId) IN :ids OR UPPER(u.defaultProjectId) IN :ids)")
-    List<User> findActiveBySquadIds(@Param("ids") Collection<String> upperSquadIds);
+    /**
+     * Contas ativas cuja squad ativa preferida (default_project_id) está entre os ids informados (MAIÚSCULOS). Só o
+     * caminho LEGADO de SquadAudienceService usa: users.squad_id foi aposentada (Etapa 5 do vínculo).
+     */
+    @Query("SELECT u FROM User u WHERE u.active = true AND UPPER(u.defaultProjectId) IN :ids")
+    List<User> findActiveByDefaultProjectIds(@Param("ids") Collection<String> upperSquadIds);
 
     @Query("SELECT u FROM User u WHERE u.active = true AND LOWER(u.email) IN :emails")
     List<User> findActiveByEmails(@Param("emails") Collection<String> lowerEmails);

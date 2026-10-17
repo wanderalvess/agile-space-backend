@@ -37,7 +37,7 @@ class SquadAudienceServiceTest {
     @Test
     @DisplayName("Squad da sessão vem primeiro; projetos e roster entram sem duplicar (sem caixa)")
     void contextOrdersCurrentSquadFirst() {
-        User ana = User.builder().id("ana").email("ana@totvs.com.br").defaultProjectId("SQB").squadId("sqb").build();
+        User ana = User.builder().id("ana").email("ana@totvs.com.br").defaultProjectId("SQB").build();
         when(userRepository.findById("ana")).thenReturn(Optional.of(ana));
         when(resolver.resolveUserAccess(ana)).thenReturn(UserProjectAccessDto.builder()
                 .projects(List.of(project("SQA", "DEV_TEAM", false), project("SQB", "DEV_TEAM", false))).build());
@@ -81,8 +81,8 @@ class SquadAudienceServiceTest {
     @Test
     @DisplayName("Membros: sessão, papel em projeto (id/e-mail/Jira) e roster; consultas em lote")
     void memberUserIdsResolvesAllSources() {
-        when(userRepository.findActiveBySquadIds(Set.of("SQA", "SQB"))).thenReturn(List.of(
-                User.builder().id("u1").squadId("sqa").build()));
+        when(userRepository.findActiveByDefaultProjectIds(Set.of("SQA", "SQB"))).thenReturn(List.of(
+                User.builder().id("u1").defaultProjectId("sqa").build()));
         when(projectMemberRoleRepository.findByProjectIdsUpper(Set.of("SQA", "SQB"))).thenReturn(List.of(
                 ProjectMemberRole.builder().projectId("SQB").userId("u2").build(),
                 ProjectMemberRole.builder().projectId("SQB").email("Tri@x.com").build()));

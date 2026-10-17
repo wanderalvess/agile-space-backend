@@ -125,7 +125,7 @@ class AuthServiceMembershipModeTest {
 
     private User user(String id, String email, String defaultProject) {
         User u = User.builder().id(id).email(email).name("Pessoa " + id).role("MEMBER").active(true)
-                .passwordHash(passwordHash).defaultProjectId(defaultProject).squadId(defaultProject).build();
+                .passwordHash(passwordHash).defaultProjectId(defaultProject).build();
         when(userRepository.findById(id)).thenReturn(Optional.of(u));
         when(userRepository.findByEmail(email)).thenReturn(Optional.of(u));
         return u;
@@ -307,7 +307,7 @@ class AuthServiceMembershipModeTest {
                     && e.getFormattedMessage().contains("Login sem vínculo em project_member_roles")
                     && e.getFormattedMessage().contains("user=u-roster")), "fallback por roster fica registrado");
             assertFalse(authLogs.list.stream().anyMatch(e -> e.getFormattedMessage().contains("roster@x.com")), "sem e-mail no log");
-            assertEquals("SQUAD_ROSTER", u.getSquadId(), "o dual-write do fallback continua como antes");
+            assertEquals("SQUAD_ROSTER", u.getDefaultProjectId(), "o dual-write do fallback continua como antes");
         } finally {
             authLogger.detachAppender(authLogs);
         }
@@ -329,7 +329,7 @@ class AuthServiceMembershipModeTest {
         AuthResponseDto response = auth.switchActiveProject("u-ana", "sq2");
 
         assertEquals("SQ2", ana.getDefaultProjectId(), "grava o id canônico, não o texto digitado");
-        assertEquals("SQ2", ana.getSquadId());
+        assertEquals("SQ2", ana.getDefaultProjectId());
         assertEquals("SQ2", response.getActiveProjectId());
         ResponseStatusException negado = assertThrows(ResponseStatusException.class, () -> auth.switchActiveProject("u-ana", "SQ3"));
         assertEquals(403, negado.getStatusCode().value());
@@ -347,7 +347,7 @@ class AuthServiceMembershipModeTest {
             auth.switchActiveProject("u-ana", "sq1");
 
             assertEquals("sq1", ana.getDefaultProjectId(), mode);
-            assertEquals("sq1", ana.getSquadId(), mode);
+            assertEquals("sq1", ana.getDefaultProjectId(), mode);
             assertThrows(ResponseStatusException.class, () -> auth.switchActiveProject("u-ana", "OUTRA"));
         }
     }
