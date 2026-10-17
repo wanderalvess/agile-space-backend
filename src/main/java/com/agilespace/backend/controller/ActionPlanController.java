@@ -4,6 +4,8 @@ import com.agilespace.backend.domain.ActionPlan;
 import com.agilespace.backend.domain.ActionPlanTask;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.ActionPlanService;
+import com.agilespace.backend.service.ActionPlanSourceConflictException;
+import org.springframework.dao.DataIntegrityViolationException;
 import com.agilespace.backend.service.CeremonyCaller;
 import com.agilespace.backend.service.SquadAccessService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -13,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -61,21 +64,65 @@ public class ActionPlanController {
         // creatorId vem sempre do token validado, nunca do corpo — senão qualquer
         // chamador autenticado poderia criar um board se passando por outra pessoa.
         board.setCreatorId(caller(request).id());
-        return ResponseEntity.status(HttpStatus.CREATED).body(actionPlanService.createBoard(board));
+        // Só quem lê a squad cria plano nela (antes da trava de origem: quem não é da squad nunca vê o 409).
+        // team de texto livre não é squad e não pede nada. sourceId é só rótulo: não concede acesso.
+        String squadId = actionPlanService.resolveSquadId(board);
+        if (squadId != null) {
+            squadAccessService.requireSquadReadAccess(squadId, request);
+        }
+        try {
+            return ResponseEntity.status(HttpStatus.CREATED).body(actionPlanService.createBoard(board));
+        } catch (DataIntegrityViolationException e) {
+            // Corrida: duas criações da mesma origem ao mesmo tempo; o índice único parcial barrou a segunda.
+            ActionPlan existing = actionPlanService
+                    .findExistingBySource(board.getSquadId(), board.getSourceType(), board.getSourceId())
+                    .orElse(null);
+            if (existing == null) {
+                throw e;
+            }
+            throw new ActionPlanSourceConflictException(existing);
+        }
+    }
+
+    private static boolean canSee(CeremonyCaller caller, ActionPlan b) {
+        return caller.isAdmin() || Boolean.TRUE.equals(b.getIsPublic()) || caller.is(b.getCreatorId())
+                || (caller.isAuthenticated() && b.getParticipantIds().contains(caller.id()));
+    }
+
+    /** Listagem sem filtro de origem (o comportamento de antes da V78). */
+    public ResponseEntity<List<ActionPlan>> listBoards(String sprintId, String squadId, HttpServletRequest request) {
+        return listBoards(sprintId, squadId, null, null, request);
     }
 
     @GetMapping
     public ResponseEntity<List<ActionPlan>> listBoards(
             @RequestParam(value = "sprintId", required = false) String sprintId,
             @RequestParam(value = "squadId", required = false) String squadId,
+            @RequestParam(value = "sourceType", required = false) String sourceType,
+            @RequestParam(value = "sourceId", required = false) String sourceId,
             HttpServletRequest request) {
+        boolean hasSourceType = sourceType != null && !sourceType.isBlank();
+        boolean hasSourceId = sourceId != null && !sourceId.isBlank();
+        if (hasSourceId && !hasSourceType) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "sourceId exige sourceType.");
+        }
         // Por squad: exige acesso à squad (planos privados só aparecem para criador/participante/ADMIN).
         if (squadId != null && !squadId.isBlank()) {
             squadAccessService.requireSquadReadAccess(squadId, request);
             CeremonyCaller caller = caller(request);
-            List<ActionPlan> boards = actionPlanService.listBoardsBySquad(squadId).stream()
-                    .filter(b -> caller.isAdmin() || Boolean.TRUE.equals(b.getIsPublic()) || caller.is(b.getCreatorId())
-                            || (caller.isAuthenticated() && b.getParticipantIds().contains(caller.id())))
+            List<ActionPlan> boards = (hasSourceType
+                    ? actionPlanService.listBoardsBySquad(squadId, sourceType, sourceId)
+                    : actionPlanService.listBoardsBySquad(squadId)).stream()
+                    .filter(b -> canSee(caller, b))
+                    .toList();
+            return ResponseEntity.ok(boards);
+        }
+        if (hasSourceType && hasSourceId && (sprintId == null || sprintId.isBlank())) {
+            // "O plano deste radar" sem saber a squad: só o que o chamador vê, e de squad que ele lê (sem squad entra).
+            CeremonyCaller caller = caller(request);
+            List<ActionPlan> boards = actionPlanService.listBoardsBySource(sourceType, sourceId).stream()
+                    .filter(b -> canSee(caller, b))
+                    .filter(b -> b.getSquadId() == null || squadAccessService.matchesSquad(b.getSquadId(), request))
                     .toList();
             return ResponseEntity.ok(boards);
         }
@@ -179,6 +226,22 @@ public class ActionPlanController {
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tarefa não encontrada.");
         }
+    }
+
+    /**
+     * 409 de origem repetida: {@code existingPlanId} só vai se quem chama pode ver o plano existente (um privado
+     * alheio não vaza o id).
+     */
+    @ExceptionHandler(ActionPlanSourceConflictException.class)
+    public ResponseEntity<Map<String, String>> handleSourceConflict(ActionPlanSourceConflictException ex, HttpServletRequest request) {
+        Map<String, String> body = new LinkedHashMap<>();
+        body.put("error", ex.getStatusCode().toString());
+        body.put("message", ex.getReason());
+        ActionPlan existing = ex.getExisting();
+        if (existing != null && existing.getId() != null && canSee(caller(request), existing)) {
+            body.put("existingPlanId", existing.getId().toString());
+        }
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
     }
 
     /** Em produção o Spring omite a mensagem das respostas de erro; as dos fluxos (em português) precisam chegar à tela. */
