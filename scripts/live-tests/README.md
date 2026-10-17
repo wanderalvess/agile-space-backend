@@ -44,6 +44,8 @@ node t_carga_poker.js --pessoas 30 --duracao 300
 | 4 | `node t_ws.js <boardId>` | **9/9** (use o id de um quadro criado pelo `t_retro.py`) |
 | 5 | `node t_takeover.js` | 4 linhas `PASS` (demora ~50 s: espera os 45 s de tolerância) |
 | 6 | `python t_new.py` | **78/78** (2026-10-14): refresh/logout, link de redefinição de senha e troca da própria senha, chaves de API com validade, token do Jira escondido do admin, Base de Conhecimento (permissão e versões), anonimato da Retro e do Brainstorming, Poker (só o facilitador revela e limpa), homônimo sem acesso à squad. Troca os tokens de `dani.fora` e `carla.qa` em `tokens.json` (logout e reset invalidam os antigos), então rode depois dos outros. Espera a janela de 10 chamadas por minuto das rotas de autenticação (leva ~2 min). No Windows use `PYTHONIOENCODING=utf-8`. |
+| 7 | `python t_v78.py` | **28/28** (2026-10-17): origem do plano de ação (V78: 409 para origem repetida, 403 para quem é de fora da squad, `tasksTotal`/`tasksDone`, prazo da ação) e presença em tempo real (`/api/presence`: 200/401/403/404). Usa `ana`, `bruno`, `dani` e `adm`. |
+| 8 | `python t_ceremonias.py` | **36/36** (2026-10-17): encerrar e reabrir a Retro e o Brainstorming (participante comum x facilitador x ADMIN), limite de votos, passar a facilitação e a trava de decisão da Review (dev e QA levam 403; liderança e ADMIN decidem). Usa `ana`, `bruno`, `carla`, `dani` e `adm`. |
 
 "FAIL" esperados nas re-execuções de `t_retro.py`: o roteiro assume banco novo (equipe e papel já existem; quem já é
 membro não muda de papel pelo `join`) e uma regra mudou de propósito em 2026-10-09 (quem recebe o link da Retro entra mesmo
