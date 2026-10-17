@@ -75,8 +75,8 @@ Cabeçalhos da resposta: `Cache-Control: no-store` e `X-Membership-Contract: 1` 
   `activeProjectId`.
 - **`activeProjectId`**: `users.default_project_id` é só uma **preferência**. Vale se está nos vínculos (comparação sem caixa; devolve
   o id canônico). Se não está, é a primeira squad por precedência. Sem vínculo nenhum, `null`. Nada é gravado na leitura.
-- **`legacyOnly`**: `true` só quando `memberships` está vazio **e** a conta tem rastro do modelo antigo: `users.squad_id` ou
-  `default_project_id` preenchido (fora de "Sem Time"/"Sem Squad"), ou presença no roster (`squad_members` reivindicado pela conta ou
+- **`legacyOnly`**: `true` só quando `memberships` está vazio **e** a conta tem rastro do modelo antigo: `default_project_id`
+  preenchido (fora de "Sem Time"/"Sem Squad"; a coluna `users.squad_id` deixou de ser lida na Etapa 5), ou presença no roster (`squad_members` reivindicado pela conta ou
   casando por e-mail/conta do Jira). Conta nova, sem rastro nenhum, é `false` (vai para o onboarding). Hoje essas pessoas só
   entram nas telas pelo acesso do roster; quando a leitura passar só para os vínculos (Etapa 2), é este o grupo que perde acesso.
 - **`source`**: `JIRA`, `MANUAL`, `INVITE`, `CLAIM`, `APPROVED`, `BACKFILL`, `MIGRATION`, ou `null` (linha anterior à V75; a origem
@@ -101,8 +101,8 @@ Fora do `new`, `activeProjectId` de `/api/me/memberships` (validado) pode diferi
 | `new` | vem do `MembershipService` (squad ativa validada) | é a resposta |
 
 Valor desconhecido (erro de digitação) cai em `legacy`, nunca no modelo novo. Reverter: `APP_MEMBERSHIP_MODE=legacy` e reiniciar.
-`switchActiveProject` continua gravando `default_project_id` **e** `squad_id` (dual-write) nos três modos e só aceita squad que esteja
-nos vínculos (`403` caso contrário). No `new`, grava o id canônico do vínculo (o legado gravava o texto como veio, ex. `ddwmissi`).
+`switchActiveProject` grava **só** `default_project_id` (a preferência; o dual-write com `squad_id` acabou na Etapa 5) nos três modos
+e só aceita squad que esteja nos vínculos (`403` caso contrário). No `new`, grava o id canônico do vínculo (o legado gravava o texto como veio, ex. `ddwmissi`).
 
 ### Modo sombra: log e métrica
 
@@ -196,8 +196,9 @@ virar. O padrão não muda nada.
 | `new` | a nova | é a decisão |
 
 Valor vazio ou desconhecido (`nwe`, `true`...) cai em **`legacy`**, nunca em `new` (um aviso sai no log de inicialização). Reverter:
-`APP_MEMBERSHIP_AUTHZ=legacy` e reiniciar. **Sem migração de banco**, sem dump necessário; `users.squad_id`/`default_project_id`
-continuam sendo gravados pelos sincronizadores (dual-write) em todos os modos.
+`APP_MEMBERSHIP_AUTHZ=legacy` e reiniciar. **Sem migração de banco**, sem dump necessário. Desde a Etapa 5 só `default_project_id`
+é gravado pelos fluxos de entrada; nos modos `legacy`/`shadow` a antiga "squad da sessão" (`users.squad_id`) é lida como
+`default_project_id` (eram gravados juntos, então coincidem; a categoria `USER_SQUAD_DEFAULT_DIVERGENT` do relatório lista as exceções).
 
 ## A regra nova (modo `new`)
 
@@ -223,7 +224,7 @@ continuam sendo gravados pelos sincronizadores (dual-write) em todos os modos.
 | `InviteController.requireInviteAccess` (criar/listar/revogar convite) | ADMIN/LEAD; `users.squad_id` + cargo; liderança em linha pmr própria | ADMIN/LEAD; liderança em linha **própria** (escopo SQUAD; a expansão por tribo não convida) | `invite` |
 | `InviteService.isSquadMemberOrAdmin` (quem vê e-mail/autor de convite endereçado) | ADMIN/LEAD; `users.squad_id`; qualquer linha pmr por conta/e-mail | ADMIN/LEAD; vínculo | `inviteView` |
 | `SquadAudienceService.contextFor` (squads, papéis e liderança da home/avisos) | `users.squad_id`, resolvedor, roster; cargo conta como liderança; só o papel primário por squad | só vínculos; todos os papéis da pessoa; sem cargo | `audience`, `audienceLeadership`, `audienceRoles` |
-| `SquadAudienceService.memberUserIds` (destinatários de notificação/aviso por squad) | `users.squad_id`, linhas pmr, roster | só linhas pmr (sem `findActiveBySquadIds`) | `audienceMembers` |
+| `SquadAudienceService.memberUserIds` (destinatários de notificação/aviso por squad) | `default_project_id`, linhas pmr, roster | só linhas pmr (sem `findActiveByDefaultProjectIds`) | `audienceMembers` |
 | `JoltProjectController` / `JoltProjectService` (compartilhar/ler projeto Jolt com a squad) | UMA squad: `users.squad_id` | N squads: as dos vínculos (nova consulta por lista) | `jolt` |
 | `KnowledgeService.squadOfUser` (squad gravada no documento novo; define quem edita) | `users.squad_id` | squad ativa validada contra os vínculos | `knowledge` |
 | `PromptHubApiV1Controller` / `McpPromptHubTools` (squad de autoria, fallback da chave) | `users.squad_id` | squad ativa validada | `prompthub` |
@@ -234,7 +235,7 @@ continuam sendo gravados pelos sincronizadores (dual-write) em todos os modos.
 só mudou de onde vem a squad gravada no documento (que decide quem edita), nunca quem lê.
 
 **Deliberadamente NÃO migrado (continua legado, sem chave)**: `SquadController.bootstrapNewSquad` (primeiro uso em ambiente limpo:
-decide pelo `users.squad_id` vazio e grava `squad_id` na pessoa). Em `new` essa gravação não vira vínculo, então a pessoa passaria na
+decide pelo `default_project_id` vazio e o grava na pessoa; antes decidia por `users.squad_id` e gravava os dois). Em `new` essa gravação não vira vínculo, então a pessoa passaria na
 primeira chamada e seria negada na seguinte. Precisa de decisão de produto (que papel o criador da squad recebe) antes de migrar.
 
 ## Modo sombra: `authz_divergence`
@@ -267,7 +268,7 @@ authz_divergence user=<id da conta> check=<ponto> squad=<chave> legacy=<bool> ne
 
 ## `GET /api/admin/membership/authz-diff` (ADMIN)
 
-Compara, para **todos os usuários ativos x squads** (todas as de `projects` mais as que aparecem para a pessoa em `users.squad_id`,
+Compara, para **todos os usuários ativos x squads** (todas as de `projects` mais as que aparecem para a pessoa em `default_project_id`,
 roster ou vínculos), a decisão legada e a nova de `matchesSquad`, `canManageSquad` e `isSquadLeadership`. Somente leitura (transação
 `readOnly`), sem cache. `401` sem token, `403` para quem não é ADMIN; a chamada é auditada como qualquer `/api/admin/**`. ADMIN/LEAD
 ficam de fora (decisão idêntica). Custo: algumas consultas por usuário; rode fora do pico em bases grandes.
@@ -324,3 +325,129 @@ Regras para o frontend:
 - Para saber a squad ativa, usar `AuthResponse.activeProjectId` ou `GET /api/me/memberships` (`activeProjectId`), como já faz. O `squadId` do
   `User` é só legado de exibição e será removido do JSON quando o frontend não o ler mais.
 - O JSON de `User` nunca devolveu `team`; o `team` do `UserProfile` do frontend é derivado no cliente.
+
+## O que mudou no código (inventário verificado por busca e por compilação)
+
+Verificação: o campo saiu da entidade, então **o compilador** prova que não resta nenhum `getSquadId()/setSquadId()/squadId(...)` de `User`
+(os de `SquadMember`, `WorkItem`, `Invite`, cerimônias etc. são de outras entidades e seguem). Mais a varredura de SQL/JPQL: a única
+consulta com `users.squad_id` fora do diagnóstico era `UserRepository.findActiveBySquadIds`. O teste `UsersSquadIdColumnRetiredTest` trava
+a regressão (reflexão na entidade + varredura de `src/main/java` sem comentários).
+
+| # (tabela 1.A) | Arquivo: método | L/E | Antes | Agora |
+|---|---|---|---|---|
+| 4(c), 5 | `SquadAccessService.sessionSquadMatches` (legado de `matchesSquad`/`canManageSquad`/`isSquadLeadership`) | L | `squad_id` OU `default_project_id` = squad | só `default_project_id` |
+| 9 | `SquadController.bootstrapNewSquad` | L/E | "sem squad" = `squad_id` vazio; gravava `squad_id` (+ `default_project_id` se vazio) | "sem squad" = `default_project_id` vazio; grava só `default_project_id` |
+| 13 | `SquadService.saveMember` | E | sobrescrevia `users.squad_id` (last-write-wins entre squads) | só sincroniza o nome da conta; nada de squad |
+| 14 | `SquadService.deleteMember` | L/E | zerava `squad_id` da conta removida | só apaga a linha do roster (a conta não é tocada) |
+| 15 | `SquadTeamService.removeMember` | E | zerava `squad_id` e `default_project_id` | zera só `default_project_id` (se era essa squad) |
+| 16 | `AuthService.login` (e o fallback do roster) | L/E | gravava `default_project_id` e `squad_id`; copiava um para o outro | grava só `default_project_id` (1ª squad dos vínculos, ou a do roster no fallback) |
+| 17 | `AuthService.register` (conta nova e conta-fantasma) | E | gravava `default_project_id` e `squad_id` | só `default_project_id` |
+| 18 | `AuthService.switchActiveProject` (também `ProjectController`, `OnboardingController`, `InviteController`) | E | dual-write | só `default_project_id` |
+| 27 | `JiraAdminService.confirmSync` (importar do Jira, `syncUsers`) | E | gravava `squad_id=projectKey` (criar/atualizar) e zerava na saída | não grava nem zera nada de squad na conta |
+| 28 | `InviteService.linkProjectMembership` (aceite de convite) | E | `default_project_id` se vazio + `squad_id` sempre | só `default_project_id` se vazio |
+| 29 | `InviteService.isSquadMemberOrAdmin` / `legacyIsSquadMemberOrAdmin` | L | `squad_id` ou `default_project_id` | só `default_project_id` |
+| 30 | `InviteController.legacyInviteAllowed` | L | idem | idem |
+| 32 | `UserService.saveUser` | L/E | `squadId` do corpo trocava a squad (exigia vínculo) | **ignorado** (sem erro); a troca é só `/auth/switch-project` |
+| 34 | `UserRepository.findActiveBySquadIds` | L | `squad_id` OU `default_project_id` | renomeada `findActiveByDefaultProjectIds` (só `default_project_id`); só o caminho legado de `SquadAudienceService` usa |
+| 35, 36 | `SquadAudienceService.legacyContext` / `legacyMemberUserIds` | L | `squad_id` entrava na "squad corrente" e nos membros | só `default_project_id`; o caminho `new` já não lia |
+| 44 | `KnowledgeService.squadOfUser` (legado) | L | `squad_id` | `default_project_id` (em `new`/`shadow` já era `activeSquadFor`) |
+| 45 | `JoltProjectController` (`Caller.squadId`, legado) | L | `squad_id` | `default_project_id` |
+| 46, 47 | `SquadAccessService.activeSquadFor` / `legacyShareSet`; `ApiKeyLifecycle.reevaluateOwner` (sem o serviço) | L | `squad_id` | `default_project_id` (em `new` segue a squad ativa validada) |
+| — (não estava na tabela) | `MembershipService.hasLegacyTraces` | L | `squad_id` ou `default_project_id` | só `default_project_id` (+ roster) |
+| — (não estava na tabela) | `AuthzDiffService.evaluateUser` | L | `squad_id` entrava no universo de squads | só `default_project_id`, roster e vínculos |
+| — | `MembershipReportService` (SQL nativo) | L | `users.squad_id` | **mantido de propósito**: diagnóstico de legado (`LEGACY-SQUAD-ID-DIAGNOSTIC`), sai com o DROP COLUMN |
+
+Correções à tabela 1.A do plano: (a) os itens 9, 13-18, 27, 28 e 32 estão certos; o item 15 grava `squad_id` só no `removeMember` (a
+adição/troca de papel nunca escreveu); o item 27 tem **dois** pontos de escrita (criar e atualizar) mais o de zerar; (b) faltavam
+`MembershipService.hasLegacyTraces`, `AuthzDiffService` e o caminho `ApiKeyLifecycle`/`activeSquadFor` (todos leituras); (c) o item 46
+(`PromptHubApiV1Controller`, `McpPromptHubTools`) não lê a coluna diretamente: passa por `SquadAccessService.activeSquadFor`; (d)
+`PokerService`, `HomeService`, `LiveSessionService`, `NotificationTriggers` e `ConversationService` **nunca** leram `User.squadId`: usam o
+`SquadAudienceService.contextFor/memberUserIds` (indiretos, já cobertos acima); (e) `SquadSyncService` e `SquadCapacityService` só usam
+`squadId` de `SquadMember`/`WorkItem`, não de `User`.
+
+Não há consumidor da coluna em `scripts/` (os `live-tests` só mandam `squadId` em payloads de cerimônia), `deploy/`, `docker-compose.yml`
+nem jobs de `scheduler/` (`SquadSyncScheduler` não lê `User`).
+
+## `squad_members.claimed_by_uid`: o que foi aposentado e o que ficou
+
+Aposentado como fonte de vínculo/acesso (a coluna **fica**; a capacidade segue ligada por `squad_members.jira_account_id`):
+
+- `UserService.getSquadsForUser` (`GET /api/users/{uid}/squads`): agora vem dos **vínculos diretos** do `MembershipService` (a expansão por
+  tribo/segmento não é "vínculo da pessoa"). Mesmo formato (`squadId`, `role`, `displayName`...): usa a linha do roster da pessoa pelo
+  `jira_account_id` quando existe; senão uma linha só de resposta.
+- `SquadTeamService.rowsOf`/`linkedUser`: a conta da pessoa do roster é achada por `jira_account_id` e depois por e-mail (antes: por
+  `claimed_by_uid`). A checagem de duplicidade em `addMember` deixou de olhar `claimed_by_uid` (jira/e-mail já cobriam).
+- `OnboardingService.applyLink` ("Sou eu" e pedido aprovado): **deixa de gravar** `claimed_by_uid` no roster; grava `project_member_roles.user_id`
+  e herda o `jira_account_id` na conta, que é o que liga a capacidade.
+
+**Ficou (remoção arriscada ou grande demais; recomendação abaixo):**
+
+| Uso restante | Onde | Por que ficou | Recomendação |
+|---|---|---|---|
+| Escrita do "Sou eu" do roster | `SquadService.claimMember` (`POST /api/squads/{id}/members/{jira}` só com `claimedByUid`); o frontend ainda chama (`useSquadStore.ts:196`) | remover quebra o botão antigo sem o frontend sair antes | quando o `vinc5-front` parar de chamar, devolver `410` e apagar o método |
+| Gravação em login/registro/convite/import | `AuthService.login` (fallback do roster), `register`; `InviteService.acceptInvite`; `SquadTeamService.addMember`; `JiraAdminService.confirmSync` | marcam a linha do roster com a conta; sem leitor em `new` | parar de gravar junto do DROP da coluna |
+| Leitura no caminho **legado** (só `authz`≠`new`) | `SquadAccessService.rosterMatches`, `SquadAudienceService` (`legacyContext`, links do roster), `AuthzDiffService.rosterRows`, `JiraAccountIdGuard` (guarda de posse do id do Jira) | são o próprio modo legado/sombra que ainda existe | cai quando o modo legado for removido; `JiraAccountIdGuard` é segurança (impede sequestro do id), mantenha |
+| Diagnóstico | `MembershipReportService` (várias categorias), `MembershipService.hasLegacyTraces` | só leitura | idem |
+
+Em `app.membership.authz=new` nenhuma decisão de acesso lê `claimed_by_uid`.
+
+## Consumidores externos da coluna (varridos)
+
+- `agile-space-backend/scripts`, `deploy`, `docker-compose.yml`, `Caddyfile`, `scheduler/`: nenhum uso de `users.squad_id`.
+- `agile-space-legado` (somente leitura): usa Firestore e, nas telas de Jolt e snapshots, a **API** deste backend; não conecta ao Postgres nem lê `users.squad_id`.
+- `agile-space-frontend-wt/integration/src`: só recebe `squadId` pela API (contrato acima). O que depende do campo do `User`: `components/admin/user-admin.ts`
+  (`squadLabelOf`), `UserExplorer.tsx` (resumo da squad ativa), `UserContext.tsx`/`useSquadStore.ts` (**enviam** `squadId` em `saveUser`; ignorado agora).
+- **Não confirmado:** relatórios/BI/consultas manuais direto no Postgres da homologação e do futuro Azure. Rodar `grep -rn "squad_id"` nos repositórios de BI e no
+  histórico de consultas antes do passo 2.
+
+## Passo 2 (destrutivo, NÃO feito): backup e DROP da coluna
+
+Só depois de N semanas em produção/homologação sem leituras (a trava de arquitetura garante o código; o resto é externo) e **aprovação explícita**.
+Script proposto (próxima migração livre, **não criada**):
+
+```sql
+-- V8x__retire_users_squad_id.sql  (exemplo; renumerar para a próxima livre)
+CREATE TABLE users_squad_legacy_backup (
+    id                 VARCHAR(255) PRIMARY KEY,
+    squad_id           VARCHAR(255),
+    default_project_id VARCHAR(255),
+    backed_up_at       TIMESTAMP NOT NULL DEFAULT now()
+);
+
+INSERT INTO users_squad_legacy_backup (id, squad_id, default_project_id)
+SELECT id, squad_id, default_project_id FROM users;
+
+-- confere antes de dropar: a Flyway aborta a migração (e nada é dropado) se o backup não cobrir todos os usuários
+DO $$
+BEGIN
+  IF (SELECT COUNT(*) FROM users_squad_legacy_backup) <> (SELECT COUNT(*) FROM users) THEN
+    RAISE EXCEPTION 'backup de users.squad_id incompleto';
+  END IF;
+END $$;
+
+ALTER TABLE users DROP COLUMN squad_id;
+```
+
+No mesmo PR do passo 2: remover as categorias de `MembershipReportService` que usam `users.squad_id` (`USERS_WITH_SQUAD_WITHOUT_LINK` na parte
+`squad_id`, `SQUAD_KEY_CASE_VARIANTS`, `USER_SQUAD_DEFAULT_DIVERGENT`, `EXCLUDED_BUT_STILL_LINKED` na parte `squad_id`, `squad_id AS squad` de `LEAD_USERS`
+e dos duplicados), ajustar `docs/membership-report.md`, e tirar `MembershipReportService.java` da lista do `UsersSquadIdColumnRetiredTest`.
+Os índices da coluna, se existirem, caem com ela (conferir `\d users` antes). Reverter: `ALTER TABLE users ADD COLUMN squad_id VARCHAR(255);` e
+`UPDATE users u SET squad_id = b.squad_id FROM users_squad_legacy_backup b WHERE b.id = u.id;`.
+
+## Diagnóstico de legado: a coluna virou um retrato congelado
+
+`MembershipReportService` continua lendo `users.squad_id` por SQL nativo, mas desde esta etapa ninguém a atualiza: ela descreve o que havia no
+deploy. Efeitos a ter em mente ao interpretar `docs/membership-report.md`: `USERS_WITH_SQUAD_WITHOUT_LINK`, `SQUAD_KEY_CASE_VARIANTS` e
+`USER_SQUAD_DEFAULT_DIVERGENT` não crescem mais (contas novas têm a coluna `NULL`); `EXCLUDED_BUT_STILL_LINKED` pode listar com o rótulo `squad_id`
+quem foi removido do time depois do deploy (a remoção não limpa mais a coluna): ignore esse rótulo e confie em `pmr`.
+
+## Riscos de deploy e reversão
+
+- **Nenhuma migração**: a coluna não é tocada; o `ddl-auto=validate` tolera coluna a mais (provado pelo `UsersSquadIdRetiredIntegrationTest` contra o schema real).
+- Quem lia `squad_id` por fora (BI, consultas manuais, outro serviço) continua lendo, mas o valor deixa de se mover; contas novas vêm com `NULL`.
+- Em `authz`≠`new` (rollback do modo), a "squad da sessão" passa a ser só `default_project_id`. Quem tinha `squad_id` ≠ `default_project_id` (lista em
+  `USER_SQUAD_DEFAULT_DIVERGENT`) perde, **nesses modos**, o acesso que vinha só do `squad_id`; em `new` não muda nada.
+- Frontend antigo que ainda envia `squadId` em `saveUser` não quebra (ignorado). Quem dependia disso para TROCAR de squad passa a precisar de `/auth/switch-project`.
+- `GET /api/users` (lista) devolve `squadId` = `default_project_id` sem validar; `GET /api/users/{id}` e a resposta do `POST` devolvem a squad ativa validada.
+- Reverter: reinserir `@Column(name = "squad_id") private String squadId;` em `User`, desfazer os commits `refactor(vinculo): users.squad_id deixa de ser lida...`
+  e `test(vinculo)...` (a coluna nunca foi tocada, os dados antigos continuam lá).
