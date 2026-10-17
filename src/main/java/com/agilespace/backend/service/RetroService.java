@@ -205,6 +205,12 @@ public class RetroService {
         return boardRepository.findById(boardId).map(b -> isMember(b, caller)).orElse(false);
     }
 
+    /** O board existe (a presença distingue 404 de 403). */
+    @Transactional(readOnly = true)
+    public boolean boardExists(String boardId) {
+        return boardId != null && boardRepository.existsById(boardId);
+    }
+
     private RetroBoard requireBoard(String boardId) {
         return boardRepository.findById(boardId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Board não encontrado"));

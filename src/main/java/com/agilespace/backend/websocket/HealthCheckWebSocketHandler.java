@@ -7,7 +7,12 @@ import org.springframework.stereotype.Component;
 @Component
 public class HealthCheckWebSocketHandler extends BoardWebSocketHandler {
 
-    public HealthCheckWebSocketHandler(@Autowired(required = false) ObjectMapper objectMapper) {
-        super(objectMapper);
+    @Autowired
+    public HealthCheckWebSocketHandler(@Autowired(required = false) ObjectMapper objectMapper, PresenceRegistry presenceRegistry) {
+        super(objectMapper, presenceRegistry, PresenceModule.HEALTH_CHECK);
+    }
+
+    public HealthCheckWebSocketHandler(ObjectMapper objectMapper) {
+        this(objectMapper, new PresenceRegistry());
     }
 }
