@@ -1,8 +1,8 @@
 # API de vínculos (Pessoa x Squad x Papel)
 
-Etapa 1 do plano de vínculo (`docs/vinculo-auditoria-e-plano.md`). **Aditiva**: não muda quem pode o quê. Autorização por
-squad continua no `SquadAccessService` e no resolvedor antigo (Etapa 2). A fonte da verdade do vínculo é
-`project_member_roles` (pmr).
+Etapa 1 do plano de vínculo (`docs/vinculo-auditoria-e-plano.md`). **Aditiva**: não muda quem pode o quê. A autorização por
+squad só muda na Etapa 2, atrás da chave própria `app.membership.authz` (padrão `legacy` = comportamento de sempre; ver a seção
+"Autorização por squad (Etapa 2)" no fim deste documento). A fonte da verdade do vínculo é `project_member_roles` (pmr).
 
 ## `GET /api/me/memberships`
 
@@ -177,3 +177,124 @@ remover), `AuthService.register` (liga `user_id` às linhas) e edição de proje
 evicção do usuário. Fora do JPA, a evicção **não** é automática: SQL direto, migrações Flyway, o `deleteByProjectId` JPQL (hoje sem
 chamador) e edição manual no banco só aparecem após o TTL (ou reinício). Com mais de uma instância da API a evicção vale só no
 processo que gravou; as demais convergem pelo TTL.
+
+---
+
+# Autorização por squad (Etapa 2)
+
+**ALTO RISCO.** Quem hoje acessa uma squad só pelo roster (`squad_members`, ex.: responsável de issue), por um `users.squad_id`
+solto ou pelo cargo (`jobTitle`) perde o acesso quando a regra nova entra. Por isso a mudança nasce atrás de uma chave
+**separada** de `app.membership.mode` (que só controla a sessão), com modo sombra e uma lista de exceções para tratar ANTES de
+virar. O padrão não muda nada.
+
+## Chave `app.membership.authz` (env `APP_MEMBERSHIP_AUTHZ`, também no `docker-compose.yml`)
+
+| Valor | Decisão de acesso | Regra nova |
+|---|---|---|
+| `legacy` (**padrão**) | exatamente a de antes | nem é calculada (custo zero) |
+| `shadow` | a do legado | calculada em paralelo; cada divergência vira log e métrica (abaixo) |
+| `new` | a nova | é a decisão |
+
+Valor vazio ou desconhecido (`nwe`, `true`...) cai em **`legacy`**, nunca em `new` (um aviso sai no log de inicialização). Reverter:
+`APP_MEMBERSHIP_AUTHZ=legacy` e reiniciar. **Sem migração de banco**, sem dump necessário; `users.squad_id`/`default_project_id`
+continuam sendo gravados pelos sincronizadores (dual-write) em todos os modos.
+
+## A regra nova (modo `new`)
+
+- **ADMIN** (token ou cadastro) e **LEAD** (mantido até a Etapa 4): acesso total, como hoje.
+- **Vínculo** em `project_member_roles` (`MembershipService`, com cache), inclusive a expansão por tribo/segmento da liderança
+  transversal (`TRIBE_LEAD`, `AGILE_COACH`, `PEOPLE_LEAD` com `is_leadership=true`).
+- **Deixam de dar acesso**: `users.squad_id`/`default_project_id`, o roster `squad_members` e o cargo (`jobTitle`) como autoridade.
+- **Gestão** (`canManageSquad`): ADMIN/LEAD, ou vínculo com `is_leadership` na squad (inclusive transversal).
+- **Liderança estrita** (`isSquadLeadership`): ADMIN, ou vínculo com `is_leadership` (o LEAD sem vínculo de liderança continua não
+  contando, igual ao legado).
+- **Squad sem NENHUMA liderança cadastrada** (bootstrap de ambiente novo): só quem **tem vínculo** na squad gerencia (antes: qualquer
+  membro do roster/`users.squad_id`). Cada squad nessa situação gera, uma vez por processo, o aviso
+  `authz_squad_without_leadership squad=<chave>`; ela também aparece no relatório (`SQUADS_WITHOUT_LEADERSHIP`). A saída é cadastrar
+  a liderança (importação do Jira, convite de admin).
+
+## Pontos de autorização migrados
+
+| Ponto | Regra legada | Regra nova (`new`) | `check` no log |
+|---|---|---|---|
+| `SquadAccessService.matchesSquad` (leitura de qualquer tela por squad, WebSocket) | ADMIN/LEAD, `users.squad_id`/`default_project_id`, resolvedor pmr, roster | ADMIN/LEAD, vínculo (com tribo/segmento) | `matchesSquad` |
+| `SquadAccessService.canManageSquad` | `matchesSquad` + (cargo ou liderança pmr ou squad sem liderança) | vínculo + (liderança ou squad sem liderança) | `canManageSquad` |
+| `SquadAccessService.isSquadLeadership` | `matchesSquad` + (cargo ou liderança pmr) | vínculo com liderança | `isSquadLeadership` |
+| `InviteController.requireInviteAccess` (criar/listar/revogar convite) | ADMIN/LEAD; `users.squad_id` + cargo; liderança em linha pmr própria | ADMIN/LEAD; liderança em linha **própria** (escopo SQUAD; a expansão por tribo não convida) | `invite` |
+| `InviteService.isSquadMemberOrAdmin` (quem vê e-mail/autor de convite endereçado) | ADMIN/LEAD; `users.squad_id`; qualquer linha pmr por conta/e-mail | ADMIN/LEAD; vínculo | `inviteView` |
+| `SquadAudienceService.contextFor` (squads, papéis e liderança da home/avisos) | `users.squad_id`, resolvedor, roster; cargo conta como liderança; só o papel primário por squad | só vínculos; todos os papéis da pessoa; sem cargo | `audience`, `audienceLeadership`, `audienceRoles` |
+| `SquadAudienceService.memberUserIds` (destinatários de notificação/aviso por squad) | `users.squad_id`, linhas pmr, roster | só linhas pmr (sem `findActiveBySquadIds`) | `audienceMembers` |
+| `JoltProjectController` / `JoltProjectService` (compartilhar/ler projeto Jolt com a squad) | UMA squad: `users.squad_id` | N squads: as dos vínculos (nova consulta por lista) | `jolt` |
+| `KnowledgeService.squadOfUser` (squad gravada no documento novo; define quem edita) | `users.squad_id` | squad ativa validada contra os vínculos | `knowledge` |
+| `PromptHubApiV1Controller` / `McpPromptHubTools` (squad de autoria, fallback da chave) | `users.squad_id` | squad ativa validada | `prompthub` |
+| `ApiKeyController.create` / `ApiKeyLifecycle.renew` (chave SQUAD_READ travada na squad) | `users.squad_id` | squad ativa validada; **sem vínculo, a chave perde `SQUAD_READ`** em vez de ficar sem restrição | `apikey` |
+
+**Sem mudança necessária**: `SquadAudienceService.userIdsWithRoles` já lê só `UserRole` + `project_member_roles`;
+`UserService.requireProjectAccess` já usa o resolvedor de vínculos. **A base de conhecimento continua compartilhada de propósito**:
+só mudou de onde vem a squad gravada no documento (que decide quem edita), nunca quem lê.
+
+**Deliberadamente NÃO migrado (continua legado, sem chave)**: `SquadController.bootstrapNewSquad` (primeiro uso em ambiente limpo:
+decide pelo `users.squad_id` vazio e grava `squad_id` na pessoa). Em `new` essa gravação não vira vínculo, então a pessoa passaria na
+primeira chamada e seria negada na seguinte. Precisa de decisão de produto (que papel o criador da squad recebe) antes de migrar.
+
+## Modo sombra: `authz_divergence`
+
+A cada decisão em `shadow` em que legado e novo discordam:
+
+```
+authz_divergence user=<id da conta> check=<ponto> squad=<chave> legacy=<bool> new=<bool> reason=<rótulo>
+```
+
+- **WARN** quando o novo NEGA o que o legado permite (`legacy=true new=false`) = **perda de acesso**. **INFO** no sentido contrário.
+- Contador Micrometer `authz.divergence{check, direction}` com `direction` = `LOSS` (legado permite, novo nega) ou `GAIN`. O
+  actuator só expõe `health` por padrão: o contador só aparece num backend de métricas (OTLP/SigNoz) ou se `metrics` for exposto.
+- Sem e-mail, nome ou qualquer PII: só o id da conta, a chave da squad (saneada: `[A-Za-z0-9._:-]`, 64 caracteres) e rótulos.
+- O mesmo log (conta, ponto, squad, sentido) repete no máximo a cada `app.membership.authz-log-dedupe-seconds` (padrão 60; `0` loga
+  todas) para não inundar o log em pontos que rodam a cada requisição. O contador conta todas.
+- Erro no cálculo sombra gera `authz_shadow_error user=.. check=.. squad=.. erro=<classe>` (nunca a mensagem) e **nunca** muda a decisão.
+- Em `new`, erro no cálculo propaga (um 500 visível é melhor que falhar aberto num controle de acesso).
+
+| `reason` | Significa |
+|---|---|
+| `ONLY_ROSTER` | o legado dava acesso só porque a pessoa está no roster (`squad_members`) |
+| `ONLY_SQUAD_ID` | só porque `users.squad_id`/`default_project_id` aponta para a squad |
+| `ROSTER_AND_SQUAD_ID` | pelos dois, sem vínculo |
+| `ONLY_JOB_TITLE` | gestão/liderança só pelo cargo (`jobTitle`) |
+| `NO_LEADERSHIP_FALLBACK` | gestão só porque a squad não tem liderança cadastrada e a pessoa não tem vínculo |
+| `NEW_ONLY_MEMBERSHIP` | (sentido GAIN) o novo permite e o legado nega: dado novo entre as duas leituras ou resolvedor divergente |
+| `RESOLVER_ONLY` | os dois cálculos de vínculo discordam entre si: investigar o `user` |
+| `NO_MEMBERSHIP`, `ACTIVE_SQUAD_DIFFERENT`, `ROLE_KEYS_LOST`, `ROLE_KEYS_ADDED`, `UNKNOWN` | pontos que comparam squad ativa/papéis (não há permitir/negar) |
+
+## `GET /api/admin/membership/authz-diff` (ADMIN)
+
+Compara, para **todos os usuários ativos x squads** (todas as de `projects` mais as que aparecem para a pessoa em `users.squad_id`,
+roster ou vínculos), a decisão legada e a nova de `matchesSquad`, `canManageSquad` e `isSquadLeadership`. Somente leitura (transação
+`readOnly`), sem cache. `401` sem token, `403` para quem não é ADMIN; a chamada é auditada como qualquer `/api/admin/**`. ADMIN/LEAD
+ficam de fora (decisão idêntica). Custo: algumas consultas por usuário; rode fora do pico em bases grandes.
+
+```jsonc
+{
+  "generatedAt": "2026-10-17T12:00:00Z",
+  "mode": "legacy",                 // app.membership.authz em vigor (a comparação é a mesma em qualquer modo)
+  "sampleLimit": 20,
+  "usersChecked": 150, "usersSkippedPrivileged": 3, "usersFailed": 0,
+  "pairsChecked": 6300, "usersWithDivergence": 12,
+  "totals": { "LOSS": 31, "GAIN": 0 },                       // conta divergências (pessoa x squad x ponto)
+  "byCheck": { "matchesSquad":      { "LOSS": 18, "GAIN": 0 },
+               "canManageSquad":    { "LOSS": 9,  "GAIN": 0 },
+               "isSquadLeadership": { "LOSS": 4,  "GAIN": 0 } },
+  "byReason": { "LOSS:ONLY_ROSTER": 12, "LOSS:ONLY_SQUAD_ID": 6, "LOSS:ONLY_JOB_TITLE": 9, "LOSS:NO_LEADERSHIP_FALLBACK": 4 },
+  "sample": [ { "userId": "uid-1", "squad": "DDWMISSI", "check": "matchesSquad", "direction": "LOSS", "reason": "ONLY_ROSTER" } ],
+  "truncated": true                 // há mais divergências do que a amostra (as contagens são exatas)
+}
+```
+
+## Quando virar a chave (critério objetivo para a homologação)
+
+1. `APP_MEMBERSHIP_AUTHZ=shadow` por **pelo menos um ciclo de sprint** com uso real; acompanhar `authz_divergence` (WARN).
+2. `GET /api/admin/membership/authz-diff` e a categoria `WOULD_LOSE_ACCESS` de `/api/admin/membership/report`
+   (`docs/membership-report.md`): **`totals.LOSS = 0`**, ou cada pessoa restante tem decisão registrada (criar o vínculo ou aceitar a
+   perda). `RESOLVER_ONLY` e `GAIN` precisam estar em 0 ou explicados (indicam bug ou dado mudando).
+3. Nenhum `authz_squad_without_leadership` de squad que ainda precise de configuração (cadastrar a liderança antes).
+4. Nenhum chamado de "perdi acesso" na janela do `shadow`.
+5. Virar `new` em horário de baixo uso, com o plano de reversão à mão (`APP_MEMBERSHIP_AUTHZ=legacy` + reinício; nada a restaurar no banco).

@@ -73,11 +73,27 @@ Datas e contagens vêm como números; campos ausentes vêm `null`.
 | `PMR_ORPHAN_PROJECT` | pmr de `project_id` que não existe em `projects` (não há FK) | `N linhas` |
 | `ROSTER_ONLY_SQUAD` | `squad_members` de squad sem linha em `projects` | `N pessoas` |
 | `PROJECT_WITHOUT_TRIBE` | `projects.tribe_name` vazio | `sem_tribo` |
+| `WOULD_LOSE_ACCESS` | **Etapa 2.** Pessoa que o legado deixa acessar a squad e a regra nova (`app.membership.authz=new`: só vínculos, ADMIN/LEAD) NEGARIA. Uma linha por pessoa, squad e ponto de decisão | `matchesSquad:ONLY_ROSTER`, `matchesSquad:ONLY_SQUAD_ID`, `matchesSquad:ROSTER_AND_SQUAD_ID`, `canManageSquad:ONLY_JOB_TITLE`, `canManageSquad:NO_LEADERSHIP_FALLBACK`, `isSquadLeadership:ONLY_JOB_TITLE`, `*:RESOLVER_ONLY` |
 
 Observações:
 - `squad_id` que não é projeto (consulta 3.7b do plano) está dentro de `USERS_WITH_SQUAD_WITHOUT_LINK` (rótulo `squad_id_nao_e_projeto`).
 - Uma linha pmr que casa com duas contas (por `user_id` e por e-mail) conta para as duas, exatamente como o resolvedor de acesso.
 - `count` é exato; `breakdown` mostra até 50 rótulos.
+
+### `WOULD_LOSE_ACCESS` (Etapa 2): a lista de exceções antes de virar `app.membership.authz=new`
+
+- É calculada em Java com as MESMAS regras do modo sombra e de `GET /api/admin/membership/authz-diff` (não em SQL, porque precisa da
+  expansão por tribo/segmento e do roster por vaga/e-mail/conta do Jira); ADMIN/LEAD ficam de fora (decisão idêntica nos dois modos).
+  Somente leitura.
+- Cada linha da amostra é `id` (da conta), `email`, `squad` e `detalhe = ponto:motivo`. O `count` conta linhas (pessoa x squad x ponto de
+  decisão), então a mesma pessoa pode aparecer até três vezes por squad; o que interessa à leitura de tela é `matchesSquad:*` (cada linha é
+  uma pessoa que deixaria de ver a squad).
+- Motivos: `ONLY_ROSTER` (só no roster, ex.: responsável de issue), `ONLY_SQUAD_ID` (só `users.squad_id`/`default_project_id`),
+  `ROSTER_AND_SQUAD_ID`, `ONLY_JOB_TITLE` (gestão só pelo cargo), `NO_LEADERSHIP_FALLBACK` (gestão só porque a squad não tem liderança
+  cadastrada; veja também `SQUADS_WITHOUT_LEADERSHIP`), `RESOLVER_ONLY` (os dois cálculos de vínculo discordam: investigar).
+- Como tratar: crie o vínculo da pessoa na squad (convite, pedido de vínculo, importação do Jira, adição pela liderança) ou aceite a
+  perda. Cadastre a liderança das squads de `SQUADS_WITHOUT_LEADERSHIP` antes de virar. Rode de novo e repita até `count = 0` (critério em
+  `docs/membership-api.md`).
 
 ## CSV
 
@@ -99,6 +115,7 @@ Células que começam com `=`, `+`, `-` ou `@` ganham um apóstrofo à frente (p
 ## Como usar na homologação
 
 1. Gere o relatório **antes** de aplicar a V75 (se possível) e depois; compare `pmr_without_user_id` e `pmr_source_BACKFILL`.
-2. Trate por grupo: `USERS_WITH_SQUAD_WITHOUT_LINK` e `ROSTER_WITHOUT_LINK` decidem quem perderia acesso na etapa 2;
+2. Trate por grupo: `WOULD_LOSE_ACCESS` é a lista objetiva de quem perderia acesso na etapa 2 (`USERS_WITH_SQUAD_WITHOUT_LINK` e
+   `ROSTER_WITHOUT_LINK` são a causa-raiz);
    `LEAD_USERS` com `squads_lideranca=0` bloqueia a etapa 4; `SQUADS_WITHOUT_APPROVER` bloqueia a etapa 3.
 3. A migração V75 não corrige nada disso além do backfill conservador de `user_id` por e-mail único.
