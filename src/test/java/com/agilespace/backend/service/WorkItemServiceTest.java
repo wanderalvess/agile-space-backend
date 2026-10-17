@@ -168,6 +168,7 @@ public class WorkItemServiceTest {
         assertEquals("delivered", saved.getCeremonyStatus());
         assertEquals("Aceito pelo PO", saved.getDecisionFeedback());
         assertNotNull(saved.getDecidedAt());
+        assertTrue(saved.getDecidedAt().endsWith("Z"), saved.getDecidedAt()); // instante com fuso, não hora local do servidor
     }
 
     @Test

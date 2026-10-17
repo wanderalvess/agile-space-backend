@@ -7,7 +7,7 @@ import com.agilespace.backend.repository.SquadRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -96,7 +96,7 @@ public class WorkItemService {
         SquadIssueSnapshot item = findOrCreate(squadId, jiraKey);
         item.setCeremonyStatus(status);
         item.setDecisionFeedback(feedback);
-        item.setDecidedAt(LocalDateTime.now().toString());
+        item.setDecidedAt(Instant.now().toString());
         issueSnapshotRepository.save(item);
     }
 
