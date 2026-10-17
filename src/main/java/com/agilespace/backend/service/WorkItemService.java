@@ -136,6 +136,9 @@ public class WorkItemService {
         double velocityReal = 0;
         double previsto = 0;
         int carryOvers = 0;
+        double carryOverPontos = 0;
+        int concluidosJira = 0;
+        int bugs = 0;
 
         for (SquadIssueSnapshot item : items) {
             double pts = item.getPointsEstimated() != null ? item.getPointsEstimated() : 0;
@@ -144,15 +147,28 @@ public class WorkItemService {
                 velocityReal += pts;
             } else if ("carried_over".equals(item.getCeremonyStatus())) {
                 carryOvers++;
+                carryOverPontos += pts;
+            }
+            if ("done".equals(item.getStatusCategory())) {
+                concluidosJira++;
+            }
+            if (Boolean.TRUE.equals(item.getIsBug())) {
+                bugs++;
             }
         }
 
-        return Map.of(
-                "velocityReal", velocityReal,
-                "previsto", previsto,
-                "entregue", velocityReal,
-                "carryOvers", carryOvers
-        );
+        // Os quatro primeiros vêm do estágio da cerimônia (Poker/Planner/Showcase); os quatro últimos, do Jira sincronizado.
+        // Campos novos são aditivos (docs/ceremony-radar-retro-api.md, 2.5).
+        Map<String, Object> stats = new java.util.LinkedHashMap<>();
+        stats.put("velocityReal", velocityReal);
+        stats.put("previsto", previsto);
+        stats.put("entregue", velocityReal);
+        stats.put("carryOvers", carryOvers);
+        stats.put("totalItens", items.size());
+        stats.put("concluidosJira", concluidosJira);
+        stats.put("bugs", bugs);
+        stats.put("carryOverPontos", carryOverPontos);
+        return stats;
     }
 
     public List<WorkItem> getAssignedWorkItems(String squadId, String identifier) {

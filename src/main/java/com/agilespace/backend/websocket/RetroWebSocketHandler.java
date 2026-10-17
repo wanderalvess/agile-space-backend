@@ -2,7 +2,9 @@ package com.agilespace.backend.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.agilespace.backend.domain.RetroCard;
 import com.agilespace.backend.service.RetroCardRedactor;
 import org.springframework.stereotype.Component;
@@ -12,11 +14,15 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 @Component
 @Slf4j
@@ -29,13 +35,36 @@ public class RetroWebSocketHandler extends TextWebSocketHandler implements Prese
     // "boardId|userId" -> instante da última desconexão (limpa ao reconectar e por varredura lazy)
     private static final Map<String, Long> lastDisconnect = new ConcurrentHashMap<>();
     private static final Map<String, Set<WebSocketSession>> boardSessions = new ConcurrentHashMap<>();
+
+    // "Escrevendo…" (docs/ceremony-radar-retro-api.md, 2.4): efêmero, só em memória.
+    static final long TYPING_MIN_INTERVAL_MS = 2_000;
+    static final long TYPING_EXPIRES_MS = 5_000;
+    static final int TYPING_MAX_MESSAGE_CHARS = 512;
+    private static final int TYPING_MAX_COLUMN_KEY = 50;
+    private static final int TYPING_MAX_CHANNEL_ID = 100;
+
     private final ObjectMapper objectMapper;
     private final PresenceChannel presence;
+    private final Supplier<RetroTypingGate> typingGate;
+    private final LongSupplier clock;
+    // sessionId -> instante do último TYPING aceito (limite de taxa por sessão); removido ao fechar a conexão
+    private final Map<String, Long> lastTyping = new ConcurrentHashMap<>();
 
     @Autowired
-    public RetroWebSocketHandler(@Autowired(required = false) ObjectMapper objectMapper, PresenceRegistry presenceRegistry) {
+    public RetroWebSocketHandler(@Autowired(required = false) ObjectMapper objectMapper, PresenceRegistry presenceRegistry,
+                                 ObjectProvider<RetroTypingGate> typingGate) {
+        this(objectMapper, presenceRegistry, typingGate == null ? () -> null : typingGate::getIfAvailable, System::currentTimeMillis);
+    }
+
+    RetroWebSocketHandler(ObjectMapper objectMapper, PresenceRegistry presenceRegistry, Supplier<RetroTypingGate> typingGate, LongSupplier clock) {
         this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
         this.presence = new PresenceChannel(presenceRegistry, PresenceModule.RETRO, "boardId", this.objectMapper);
+        this.typingGate = typingGate;
+        this.clock = clock;
+    }
+
+    public RetroWebSocketHandler(ObjectMapper objectMapper, PresenceRegistry presenceRegistry) {
+        this(objectMapper, presenceRegistry, () -> null, System::currentTimeMillis);
     }
 
     public RetroWebSocketHandler(ObjectMapper objectMapper) {
@@ -66,6 +95,7 @@ public class RetroWebSocketHandler extends TextWebSocketHandler implements Prese
                 sessions.removeIf(s -> s.getId().equals(session.getId()));
                 return sessions.isEmpty() ? null : sessions;
             });
+            lastTyping.remove(session.getId());
             Object uid = session.getAttributes().get("userId");
             if (uid != null) {
                 long now = System.currentTimeMillis();
@@ -94,8 +124,83 @@ public class RetroWebSocketHandler extends TextWebSocketHandler implements Prese
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) {
-        // O cliente não envia nada útil por aqui; nunca logar o conteúdo.
-        log.debug("Ignored client Retro WebSocket message from session {}", session.getId());
+        // Único tipo aceito do cliente: TYPING, e só de quem abriu a conexão com ?typing=1. Nunca logar o conteúdo.
+        if (!WsOptIn.wants(session, WsOptIn.TYPING)) {
+            log.debug("Ignored client Retro WebSocket message from session {}", session.getId());
+            return;
+        }
+        try {
+            relayTyping(session, message.getPayload());
+        } catch (Exception e) {
+            log.debug("Ignored invalid TYPING from session {}: {}", session.getId(), e.toString());
+        }
+    }
+
+    /**
+     * Repassa o "escrevendo…" à sala. O remetente é SEMPRE o userId do token do handshake (campos do corpo além de
+     * type/scope/columnKey/channelId são ignorados); no máximo 1 evento a cada 2 s por sessão (o excedente some em
+     * silêncio); só sessões da sala com ?typing=1 recebem, menos o próprio remetente.
+     */
+    private void relayTyping(WebSocketSession session, String raw) throws Exception {
+        if (raw == null || raw.length() > TYPING_MAX_MESSAGE_CHARS) return;
+        JsonNode in = objectMapper.readTree(raw);
+        if (in == null || !in.isObject() || !"TYPING".equals(in.path("type").asText(null))) return;
+        String userId = PresenceChannel.userIdOf(session);
+        String boardId = getBoardId(session);
+        if (userId == null || boardId == null) return;
+
+        String scope = in.hasNonNull("scope") ? in.get("scope").asText() : "card";
+        if (!"card".equals(scope) && !"chat".equals(scope)) return;
+        String columnKey = shortText(in.get("columnKey"), TYPING_MAX_COLUMN_KEY);
+        String channelId = shortText(in.get("channelId"), TYPING_MAX_CHANNEL_ID);
+        if ("chat".equals(scope) && channelId == null) return;
+
+        long now = clock.getAsLong();
+        Long last = lastTyping.get(session.getId());
+        if (last != null && now - last < TYPING_MIN_INTERVAL_MS) return;
+        lastTyping.put(session.getId(), now);
+
+        RetroTypingGate gate = typingGate.get();
+        if (gate == null) return;
+        Object role = session.getAttributes().get("role");
+        Optional<RetroTypingGate.Route> route = gate.route(boardId, userId, role == null ? null : role.toString(), scope, channelId);
+        if (route.isEmpty()) return;
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("userId", route.get().anonymous() ? null : userId);
+        payload.put("anonymous", route.get().anonymous());
+        payload.put("scope", scope);
+        if ("card".equals(scope) && columnKey != null) payload.put("columnKey", columnKey);
+        if ("chat".equals(scope)) payload.put("channelId", channelId);
+        payload.put("expiresInMs", TYPING_EXPIRES_MS);
+        payload.put("expiresAt", now + TYPING_EXPIRES_MS);
+        Map<String, Object> envelope = new LinkedHashMap<>();
+        envelope.put("type", "TYPING");
+        envelope.put("boardId", boardId);
+        envelope.put("payload", payload);
+        envelope.put("timestamp", now);
+        TextMessage out = new TextMessage(objectMapper.writeValueAsString(envelope));
+
+        Set<String> audience = route.get().audience();
+        for (WebSocketSession target : sessionsOf(boardId)) {
+            String targetUser = PresenceChannel.userIdOf(target);
+            if (!target.isOpen() || targetUser == null || targetUser.equals(userId)
+                    || !WsOptIn.wants(target, WsOptIn.TYPING)
+                    || (audience != null && !audience.contains(targetUser))) {
+                continue;
+            }
+            try {
+                target.sendMessage(out);
+            } catch (IOException e) {
+                log.debug("Failed to send TYPING to session {}", target.getId());
+            }
+        }
+    }
+
+    private static String shortText(JsonNode node, int max) {
+        if (node == null || !node.isTextual()) return null;
+        String text = node.asText().strip();
+        return text.isEmpty() || text.length() > max ? null : text;
     }
 
     public void broadcastEvent(String boardId, String eventType, Object payload) {
