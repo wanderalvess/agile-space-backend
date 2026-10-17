@@ -190,6 +190,63 @@ public class LinkRequestFlowIntegrationTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    public void cancelOwnPendingRequestAgainstRealPostgres() throws Exception {
+        projectConfigRepository.save(ProjectConfig.builder().id("LRCANC").name("Squad Cancelar").build());
+        User admin = newUser("lc-admin", "ADMIN");
+        User dona = newUser("lc-dona", "MEMBER");
+        User outra = newUser("lc-outra", "MEMBER");
+
+        String requestId = createRequest(dona, "projectKey", "LRCANC", "emailInJira", "dona@jira.com");
+        String dedupe = "LINK_REQUEST_CREATED:" + requestId;
+        assertTrue(notificationRepository.findAll().stream()
+                .anyMatch(n -> dedupe.equals(n.getDedupeKey()) && "lc-admin".equals(n.getUserId()) && n.getReadAt() == null));
+
+        // Outra conta: 403, e o pedido segue pendente. Inexistente: 404. Sem token: 401.
+        mockMvc.perform(post("/api/link-requests/" + requestId + "/cancel").header("Authorization", token(outra)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/link-requests/nao-existe/cancel").header("Authorization", token(dona)))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(post("/api/link-requests/" + requestId + "/cancel")).andExpect(status().isUnauthorized());
+        assertEquals("PENDING", jdbc.queryForObject("select status from link_requests where id = ?", String.class, requestId));
+
+        // A dona cancela: 200 CANCELLED (a coluna VARCHAR aceita o valor, sem migração)
+        mockMvc.perform(post("/api/link-requests/" + requestId + "/cancel").header("Authorization", token(dona)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(requestId))
+                .andExpect(jsonPath("$.status").value("CANCELLED"))
+                .andExpect(jsonPath("$.decidedAt").isNotEmpty());
+        assertEquals("CANCELLED", jdbc.queryForObject("select status from link_requests where id = ?", String.class, requestId));
+
+        // Idempotente: repetir devolve 200 e não duplica a auditoria
+        mockMvc.perform(post("/api/link-requests/" + requestId + "/cancel").header("Authorization", token(dona)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CANCELLED"));
+        assertEquals(1, auditLogRepository.findAll().stream()
+                .filter(a -> "LINK_REQUEST_CANCELLED".equals(a.getAction()) && a.getDetails().startsWith("pedido=" + requestId)).count());
+
+        // O aviso dos aprovadores foi retirado (lido), nenhum aviso de "decidido" foi para a dona
+        assertTrue(notificationRepository.findAll().stream()
+                .filter(n -> dedupe.equals(n.getDedupeKey())).allMatch(n -> n.getReadAt() != null));
+        assertFalse(notificationRepository.findAll().stream().anyMatch(n -> ("LINK_REQUEST_DECIDED:" + requestId).equals(n.getDedupeKey())));
+
+        // Fila de admin: não está mais PENDING, e o admin não consegue decidir um cancelado (409)
+        mockMvc.perform(get("/api/admin/link-requests").param("status", "PENDING").header("Authorization", token(admin)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[?(@.id=='" + requestId + "')]").isEmpty());
+        mockMvc.perform(get("/api/admin/link-requests").param("status", "CANCELLED").header("Authorization", token(admin)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[?(@.id=='" + requestId + "')].status").value("CANCELLED"));
+        mockMvc.perform(post("/api/admin/link-requests/" + requestId + "/reject").header("Authorization", token(admin)))
+                .andExpect(status().isConflict());
+
+        // Cancelar liberou o pedido único pendente da squad: a dona pode pedir de novo, e um aprovado não se cancela
+        String second = createRequest(dona, "projectKey", "LRCANC", "emailInJira", "dona@jira.com");
+        ProjectMemberRole livre = row("LRCANC", "Developer", "DEVELOPER", false, null);
+        mockMvc.perform(post("/api/admin/link-requests/" + second + "/approve").header("Authorization", token(admin))
+                        .contentType(MediaType.APPLICATION_JSON).content(json("memberId", livre.getId())))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/link-requests/" + second + "/cancel").header("Authorization", token(dona)))
+                .andExpect(status().isConflict());
+    }
+
     private ProjectMemberRole row(String project, String roleName, String roleKey, boolean leadership, String userId) {
         return projectMemberRoleRepository.save(ProjectMemberRole.builder().projectId(project).roleName(roleName).roleKey(roleKey)
                 .displayName("Linha " + roleKey + " " + userId).isLeadership(leadership).userId(userId)

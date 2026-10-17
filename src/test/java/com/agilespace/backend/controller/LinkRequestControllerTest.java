@@ -128,4 +128,27 @@ class LinkRequestControllerTest {
 
         assertSame(dto, adminController.reject("lr1", null, request).getBody());
     }
+
+    @Test
+    @DisplayName("POST /{id}/cancel usa o usuário do token como solicitante e responde 200 com o pedido")
+    void cancelUsesTokenUser() {
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("u1");
+        when(userRepository.findById("u1")).thenReturn(Optional.of(User.builder().id("u1").build()));
+        LinkRequestDto dto = mock(LinkRequestDto.class);
+        when(service.cancel("lr1", "u1")).thenReturn(dto);
+
+        ResponseEntity<LinkRequestDto> res = userController.cancel("lr1", request);
+
+        assertEquals(HttpStatus.OK, res.getStatusCode());
+        assertSame(dto, res.getBody());
+    }
+
+    @Test
+    @DisplayName("POST /{id}/cancel sem sessão válida: 401 e o serviço nem é chamado")
+    void cancelRequiresSession() {
+        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn(null);
+        assertEquals(HttpStatus.UNAUTHORIZED,
+                assertThrows(ResponseStatusException.class, () -> userController.cancel("lr1", request)).getStatusCode());
+        verifyNoInteractions(service);
+    }
 }

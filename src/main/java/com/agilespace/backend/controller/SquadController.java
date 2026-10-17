@@ -303,10 +303,10 @@ public class SquadController {
             @RequestBody SquadMember member,
             HttpServletRequest request) {
         if (isSelfClaimOnly(member)) {
-            // "Sou eu": qualquer membro da squad liga a PRÓPRIA conta a uma linha livre do roster.
-            requireSquadWriteAccess(squadId, request);
-            String callerIdentifier = claimIdentifierOf(member, request);
-            return ResponseEntity.ok(squadService.claimMember(squadId, jiraAccountId, callerIdentifier));
+            // Rota antiga do "Sou eu" do roster, aposentada: o vínculo é feito no onboarding (POST /api/onboarding/claim/{id})
+            // ou por pedido de vínculo (POST /api/link-requests). Nada é gravado.
+            throw new ResponseStatusException(HttpStatus.GONE,
+                    "Esta forma de vincular a conta foi desativada. Use o \"Sou eu\" do onboarding ou peça o vínculo.");
         }
         requireSquadManageAccess(squadId, request);
         // O vínculo de conta nunca é gravado por aqui (só por "Sou eu"): senão a liderança poderia vincular
@@ -398,24 +398,12 @@ public class SquadController {
                 || sq.getPhases() != null || sq.getSyncOwnerUserId() != null;
     }
 
-    /** Payload só com claimedByUid (e, no máximo, updatedAt/ids): é o "Sou eu". */
+    /** Payload só com claimedByUid (e, no máximo, updatedAt/ids): era o "Sou eu" do roster (hoje responde 410). */
     private static boolean isSelfClaimOnly(SquadMember m) {
         return m.getClaimedByUid() != null && !m.getClaimedByUid().isBlank()
                 && m.getDisplayName() == null && m.getEmail() == null && m.getRole() == null
                 && m.getCapacityHoursPerDay() == null && m.getSystemCalculatedCapacityHoursPerDay() == null
                 && m.getCalibrationNotes() == null && m.getOverrideType() == null;
-    }
-
-    /** O claimedByUid enviado tem que ser a identidade de quem chama (id da conta ou e-mail). */
-    private String claimIdentifierOf(SquadMember member, HttpServletRequest request) {
-        String userId = callerId(request);
-        User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
-        String sent = member.getClaimedByUid().trim();
-        if (caller == null || !(sent.equalsIgnoreCase(caller.getId())
-                || (caller.getEmail() != null && sent.equalsIgnoreCase(caller.getEmail().trim())))) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Você só pode vincular a sua própria conta.");
-        }
-        return caller.getId();
     }
 
     @DeleteMapping("/{squadId}/members/{jiraAccountId}")

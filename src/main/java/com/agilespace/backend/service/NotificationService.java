@@ -133,6 +133,19 @@ public class NotificationService {
         return targets;
     }
 
+    /**
+     * Retira um aviso que deixou de fazer sentido (ex.: pedido de vínculo cancelado): marca como lida, para todos, a
+     * notificação com esta chave e manda o sinal de não lidas a quem a tinha pendente. A linha continua no histórico.
+     */
+    @Transactional
+    public void retireByDedupeKey(String dedupeKey) {
+        if (dedupeKey == null || dedupeKey.isBlank()) return;
+        List<String> holders = notificationRepository.findUnreadUserIdsByDedupeKey(dedupeKey);
+        if (holders.isEmpty()) return;
+        notificationRepository.markReadByDedupeKey(dedupeKey, ServerTime.now());
+        signalService.signal(holders, UserSignalService.UNREAD);
+    }
+
     // --- internos ---
 
     static List<String> kindsOf(String category, boolean nullMeansAll) {

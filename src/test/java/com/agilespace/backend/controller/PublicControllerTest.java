@@ -42,8 +42,12 @@ public class PublicControllerTest {
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals(
-                java.util.Set.of("companyName", "primaryColor", "logoUrl", "allowAnonymous", "maintenanceMode"),
+                java.util.Set.of("companyName", "primaryColor"),
                 response.getBody().keySet());
+        // Chaves aposentadas não vazam mesmo que ainda existam gravadas no banco.
+        verify(adminService, never()).getConfig("logoUrl");
+        verify(adminService, never()).getConfig("allowAnonymous");
+        verify(adminService, never()).getConfig("maintenanceMode");
         // Nenhuma chave sensivel pode ser lida pelo endpoint pre-login.
         verify(adminService, never()).getConfig("jiraApiToken");
         verify(adminService, never()).getConfig("openAiApiKey");
@@ -66,7 +70,7 @@ public class PublicControllerTest {
 
         controller.getSystemConfig();
 
-        verify(adminService, times(5)).getConfig(anyString());
+        verify(adminService, times(2)).getConfig(anyString());
         verifyNoMoreInteractions(adminService);
     }
 

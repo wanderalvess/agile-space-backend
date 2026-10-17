@@ -614,7 +614,7 @@ Aposentado como fonte de vínculo/acesso (a coluna **fica**; a capacidade segue 
 
 | Uso restante | Onde | Por que ficou | Recomendação |
 |---|---|---|---|
-| Escrita do "Sou eu" do roster | `SquadService.claimMember` (`POST /api/squads/{id}/members/{jira}` só com `claimedByUid`); o frontend ainda chama (`useSquadStore.ts:196`) | remover quebra o botão antigo sem o frontend sair antes | quando o `vinc5-front` parar de chamar, devolver `410` e apagar o método |
+| ~~Escrita do "Sou eu" do roster~~ (resolvido) | `POST /api/squads/{id}/members/{jira}` só com `claimedByUid` | `SquadService.claimMember` foi apagado; a rota responde **`410 Gone`** (`"Esta forma de vincular a conta foi desativada. Use o \"Sou eu\" do onboarding ou peça o vínculo."`) e não grava nada. O "Sou eu" válido é `POST /api/onboarding/claim/{id}`; o pedido é `POST /api/link-requests`. Salvar linha pela liderança (payload sem ser só `claimedByUid`) segue igual | feito |
 | Gravação em login/registro/convite/import | `AuthService.login` (fallback do roster), `register`; `InviteService.acceptInvite`; `SquadTeamService.addMember`; `JiraAdminService.confirmSync` | marcam a linha do roster com a conta; sem leitor em `new` | parar de gravar junto do DROP da coluna |
 | Leitura no caminho **legado** (só `authz`≠`new`) | `SquadAccessService.rosterMatches`, `SquadAudienceService` (`legacyContext`, links do roster), `AuthzDiffService.rosterRows`, `JiraAccountIdGuard` (guarda de posse do id do Jira) | são o próprio modo legado/sombra que ainda existe | cai quando o modo legado for removido; `JiraAccountIdGuard` é segurança (impede sequestro do id), mantenha |
 | Diagnóstico | `MembershipReportService` (várias categorias), `MembershipService.hasLegacyTraces` | só leitura | idem |

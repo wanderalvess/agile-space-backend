@@ -126,4 +126,19 @@ class NotificationServiceTest {
                 new NotificationService.Draft("INVITE", null, "x", null, "ana", null, null), null).isEmpty());
         verify(notificationRepository, never()).saveAll(any());
     }
+
+    @Test
+    @DisplayName("retireByDedupeKey: marca como lido o aviso pendente da chave e sinaliza quem o tinha; sem pendência não faz nada")
+    void retireByDedupeKey() {
+        when(notificationRepository.findUnreadUserIdsByDedupeKey("LINK_REQUEST_CREATED:lr1")).thenReturn(List.of("am", "pl"));
+        service.retireByDedupeKey("LINK_REQUEST_CREATED:lr1");
+        verify(notificationRepository).markReadByDedupeKey(eq("LINK_REQUEST_CREATED:lr1"), any());
+        verify(signalService).signal(List.of("am", "pl"), UserSignalService.UNREAD);
+
+        when(notificationRepository.findUnreadUserIdsByDedupeKey("vazia")).thenReturn(List.of());
+        service.retireByDedupeKey("vazia");
+        service.retireByDedupeKey(" ");
+        service.retireByDedupeKey(null);
+        verify(notificationRepository, times(1)).markReadByDedupeKey(any(), any());
+    }
 }

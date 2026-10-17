@@ -35,6 +35,12 @@ public class LinkRequestController {
         return ResponseEntity.ok(linkRequestService.mine(currentUser(request).getId()));
     }
 
+    /** Cancela o próprio pedido pendente (só o solicitante). Ver docs/link-requests-squad-api.md. */
+    @PostMapping("/{id}/cancel")
+    public ResponseEntity<LinkRequestDto> cancel(@PathVariable String id, HttpServletRequest request) {
+        return ResponseEntity.ok(linkRequestService.cancel(id, currentUser(request).getId()));
+    }
+
     private User currentUser(HttpServletRequest request) {
         String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
         if (userId == null || userId.isBlank()) {

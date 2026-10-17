@@ -50,6 +50,8 @@ public class LinkRequestService {
     public static final String AUDIT_CREATED = "LINK_REQUEST_CREATED";
     public static final String AUDIT_APPROVED = "LINK_REQUEST_APPROVED";
     public static final String AUDIT_REJECTED = "LINK_REQUEST_REJECTED";
+    /** O solicitante cancelou o próprio pedido pendente; só ids (sem e-mail/nome). */
+    public static final String AUDIT_CANCELLED = "LINK_REQUEST_CANCELLED";
     /** Quem decidiu, só ids (sem e-mail/nome): ver docs/link-requests-squad-api.md. */
     public static final String AUDIT_APPROVED_BY = "LINK_REQUEST_APPROVED_BY";
     public static final String AUDIT_REJECTED_BY = "LINK_REQUEST_REJECTED_BY";
@@ -64,7 +66,7 @@ public class LinkRequestService {
     static final int MAX_PENDING_PER_USER = 10;
 
     private static final Pattern EMAIL = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
-    private static final Set<String> STATUSES = Set.of(LinkRequest.PENDING, LinkRequest.APPROVED, LinkRequest.REJECTED);
+    private static final Set<String> STATUSES = Set.of(LinkRequest.PENDING, LinkRequest.APPROVED, LinkRequest.REJECTED, LinkRequest.CANCELLED);
 
     private static final String DUPLICATE_PENDING = "Você já tem um pedido pendente para esta squad";
 
@@ -200,10 +202,49 @@ public class LinkRequestService {
     public List<LinkRequestDto> mine(String userId) {
         List<LinkRequest> rows = linkRequestRepository.findByRequesterUserIdOrderByCreatedAtDesc(userId);
         Map<String, String> names = memberNames(rows);
-        return rows.stream().map(r -> new LinkRequestDto(r.getId(), r.getProjectKey(), r.getMemberId(),
-                names.get(r.getMemberId()), r.getEmailInJira(), r.getMessage(), r.getStatus(),
-                ServerTime.toInstant(r.getCreatedAt()), ServerTime.toInstant(r.getDecidedAt()), r.getDecisionNote(),
-                r.effectiveKind(), r.getRequestedRoleName())).toList();
+        return rows.stream().map(r -> toMineDto(r, names.get(r.getMemberId()))).toList();
+    }
+
+    /**
+     * O solicitante cancela o próprio pedido ainda PENDING (status final {@code CANCELLED}). Só o dono (403); pedido
+     * inexistente 404; já APPROVED/REJECTED 409. Repetir o cancelamento de um pedido já cancelado é idempotente (200,
+     * sem nova auditoria). Libera o pedido pendente único da squad e retira o aviso dos aprovadores. Não depende da
+     * flag de aprovação por squad: é uma rota do próprio solicitante.
+     */
+    @Transactional
+    public LinkRequestDto cancel(String id, String requesterId) {
+        if (requesterId == null || requesterId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão inválida ou expirada");
+        }
+        LinkRequest request = linkRequestRepository.findByIdForUpdate(id == null ? "" : id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pedido não encontrado"));
+        if (!requesterId.equals(request.getRequesterUserId())) {
+            log.warn("Pedido de vínculo {}: cancelamento negado (conta {} não é a solicitante)", request.getId(), requesterId);
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só quem fez o pedido pode cancelá-lo.");
+        }
+        if (LinkRequest.CANCELLED.equals(request.getStatus())) {
+            return toMineDto(request, memberNames(List.of(request)).get(request.getMemberId()));
+        }
+        if (!LinkRequest.PENDING.equals(request.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Esse pedido já foi decidido.");
+        }
+        request.setStatus(LinkRequest.CANCELLED);
+        request.setDecidedAt(ServerTime.now());
+        request.setDecidedBy(null);
+        request.setDecisionNote(null);
+        linkRequestRepository.save(request);
+
+        audit(AUDIT_CANCELLED, requesterId, "pedido=" + request.getId() + " squad=" + request.getProjectKey()
+                + " solicitante=" + requesterId + " tipo=" + request.effectiveKind());
+        notificationTriggers.linkRequestCancelled(request.getId());
+        log.info("Pedido de vínculo {} cancelado pelo solicitante {}", request.getId(), requesterId);
+        return toMineDto(request, memberNames(List.of(request)).get(request.getMemberId()));
+    }
+
+    private static LinkRequestDto toMineDto(LinkRequest r, String memberName) {
+        return new LinkRequestDto(r.getId(), r.getProjectKey(), r.getMemberId(), memberName, r.getEmailInJira(),
+                r.getMessage(), r.getStatus(), ServerTime.toInstant(r.getCreatedAt()), ServerTime.toInstant(r.getDecidedAt()),
+                r.getDecisionNote(), r.effectiveKind(), r.getRequestedRoleName());
     }
 
     // --- admin ---
@@ -217,7 +258,7 @@ public class LinkRequestService {
         } else {
             String normalized = status.trim().toUpperCase(Locale.ROOT);
             if (!STATUSES.contains(normalized)) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Status inválido: use PENDING, APPROVED ou REJECTED.");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Status inválido: use PENDING, APPROVED, REJECTED ou CANCELLED.");
             }
             rows = linkRequestRepository.findByStatusOrderByCreatedAtDesc(normalized);
         }
@@ -262,7 +303,7 @@ public class LinkRequestService {
         }
         String normalized = status == null || status.isBlank() ? LinkRequest.PENDING : status.trim().toUpperCase(Locale.ROOT);
         if (!"ALL".equals(normalized) && !STATUSES.contains(normalized)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Status inválido: use PENDING, APPROVED, REJECTED ou ALL.");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Status inválido: use PENDING, APPROVED, REJECTED, CANCELLED ou ALL.");
         }
         int pageSize = size == null ? DEFAULT_PAGE_SIZE : size;
         int pageIndex = page == null ? 0 : page;

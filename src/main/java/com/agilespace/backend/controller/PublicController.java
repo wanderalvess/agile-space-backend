@@ -21,9 +21,11 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class PublicController {
 
-    private static final List<String> SYSTEM_CONFIG_KEYS = List.of(
-            "companyName", "primaryColor", "logoUrl", "allowAnonymous", "maintenanceMode"
-    );
+    /**
+     * Só o que o front de fato lê antes do login. {@code logoUrl}, {@code allowAnonymous} e {@code maintenanceMode} saíram
+     * (nenhum código do backend os lê; valores já gravados em {@code system_configs} ficam no banco, sem efeito).
+     */
+    private static final List<String> SYSTEM_CONFIG_KEYS = List.of("companyName", "primaryColor");
 
     private final AdminService adminService;
     private final AnnouncementService announcementService;
