@@ -206,4 +206,71 @@ public class UserProjectResolverServiceTest {
 
         assertEquals("DDWMISSI", service.resolveUserAccess(user).getPrimaryProjectId());
     }
+
+    // ---- Precedência: a mesma pessoa com duas linhas na mesma squad (liderança vence) ----
+
+    @Test
+    public void testLeadershipWinsOverContributorInSameSquadRegardlessOfRowOrder() {
+        ProjectMemberRole po = role("r-po", "DDWMISSI", "PRODUCT_OWNER", "Product Owner", true);
+        ProjectMemberRole dev = role("r-dev", "DDWMISSI", "DEVELOPER", "Developer", false);
+        when(projectConfigRepository.findById("DDWMISSI"))
+                .thenReturn(Optional.of(project("DDWMISSI", "Missao", "Seg", "Tribo")));
+
+        for (List<ProjectMemberRole> order : List.of(List.of(po, dev), List.of(dev, po))) {
+            when(projectMemberRoleRepository.findByEmailIgnoreCase(anyString())).thenReturn(order);
+
+            UserProjectAccessDto access = service.resolveUserAccess(user("joao@empresa.com.br", null));
+
+            assertEquals(1, access.getProjects().size(), "um item por squad");
+            UserProjectAccessDto.ProjectAccessItem item = access.getProjects().get(0);
+            assertTrue(item.isLeadership(), "a última linha (Developer) não pode apagar a liderança");
+            assertEquals("PRODUCT_OWNER", item.getRoleKey());
+            assertEquals("Product Owner", item.getRoleName());
+        }
+    }
+
+    @Test
+    public void testLeadershipFromManualRowWinsOverJiraRowFoundByDifferentKeys() {
+        // Linha do Jira achada por e-mail (Developer) e linha cadastrada à mão achada por user_id (People Lead).
+        ProjectMemberRole jiraDev = role("r-dev", "DDWMISSI", "DEVELOPER", "Developer", false);
+        ProjectMemberRole manualPl = role("r-pl", "DDWMISSI", "PEOPLE_LEAD", "People Lead", true);
+        when(projectMemberRoleRepository.findByEmailIgnoreCase(anyString())).thenReturn(List.of(jiraDev));
+        when(projectMemberRoleRepository.findByUserId("u1")).thenReturn(List.of(manualPl));
+        when(projectConfigRepository.findById("DDWMISSI"))
+                .thenReturn(Optional.of(project("DDWMISSI", "Missao", "Seg", "Tribo")));
+        when(projectConfigRepository.findAll()).thenReturn(List.of(project("DDWMISSI", "Missao", "Seg", "Tribo")));
+
+        UserProjectAccessDto access = service.resolveUserAccess(user("joao@empresa.com.br", null));
+
+        assertEquals(1, access.getProjects().size());
+        assertEquals("PEOPLE_LEAD", access.getProjects().get(0).getRoleKey());
+        assertTrue(access.getProjects().get(0).isLeadership());
+        assertTrue(access.isTransversalLeader(), "a liderança transversal olha todas as linhas");
+    }
+
+    @Test
+    public void testAmongLeadershipRowsBroaderRoleWinsDeterministically() {
+        ProjectMemberRole am = role("a", "DDWMISSI", "AGILE_MASTER", "Agile Master", true);
+        ProjectMemberRole po = role("b", "DDWMISSI", "PRODUCT_OWNER", "Product Owner", true);
+        when(projectConfigRepository.findById("DDWMISSI")).thenReturn(Optional.empty());
+
+        for (List<ProjectMemberRole> order : List.of(List.of(am, po), List.of(po, am))) {
+            when(projectMemberRoleRepository.findByEmailIgnoreCase(anyString())).thenReturn(order);
+            assertEquals("PRODUCT_OWNER", service.resolveUserAccess(user("x@empresa.com.br", null)).getProjects().get(0).getRoleKey());
+        }
+    }
+
+    @Test
+    public void testSquadOrderStillFollowsFirstAppearanceWhenPickingPrimary() {
+        // Sem projeto padrão, o primário é a primeira squad que aparece; a precedência não pode reordenar squads.
+        when(projectMemberRoleRepository.findByEmailIgnoreCase(anyString())).thenReturn(List.of(
+                role("r1", "PRIMEIRA", "DEVELOPER", "Developer", false),
+                role("r2", "SEGUNDA", "PRODUCT_OWNER", "Product Owner", true)));
+        when(projectConfigRepository.findById(anyString())).thenReturn(Optional.empty());
+
+        UserProjectAccessDto access = service.resolveUserAccess(user("x@empresa.com.br", null));
+
+        assertEquals("PRIMEIRA", access.getPrimaryProjectId());
+        assertEquals(List.of("PRIMEIRA", "SEGUNDA"), access.getProjects().stream().map(UserProjectAccessDto.ProjectAccessItem::getProjectId).toList());
+    }
 }

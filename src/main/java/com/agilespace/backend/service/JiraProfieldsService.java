@@ -65,65 +65,37 @@ public class JiraProfieldsService {
     }
 
     /**
-     * Grava projeto + time numa transação curta (troca o time inteiro). `jiraMembers` é tudo o que o Jira devolveu
-     * (inclusive quem a pessoa desmarcou na prévia): serve só para não apagar quem entrou por outro caminho.
+     * Grava projeto + time numa transação curta. `jiraMembers` é tudo o que o Jira devolveu (inclusive quem a pessoa
+     * desmarcou na prévia): serve para distinguir "o Jira deixou de listar" de "desmarcado na prévia".
+     *
+     * <p>O time NÃO é mais apagado e recriado: {@link TeamImportPlanner} faz upsert pela chave natural (conta do Jira /
+     * e-mail), mantendo o id das linhas (link_requests.member_id aponta para ele), preservando liderança cadastrada à mão
+     * e toda linha com user_id, e removendo só linha legado/JIRA sem conta que o Jira deixou de listar.
      */
-    private ProjectDetailDto persistImport(ProjectConfig project, List<ProjectMemberRole> members, List<ProjectMemberRole> jiraMembers) {
+    ProjectDetailDto persistImport(ProjectConfig project, List<ProjectMemberRole> members, List<ProjectMemberRole> jiraMembers) {
         return new org.springframework.transaction.support.TransactionTemplate(transactionManager).execute(status -> {
             String cleanKey = project.getId();
             ProjectConfig saved = projectConfigRepository.save(project);
             List<ProjectMemberRole> existing = projectMemberRoleRepository.findByProjectId(cleanKey);
-            List<ProjectMemberRole> toSave = mergeWithExistingTeam(existing == null ? List.of() : existing, members, jiraMembers);
             // Quem a liderança removeu à mão do time não volta só porque o Jira ainda lista a pessoa.
             SquadMemberExclusions.Removed removedByHand = SquadMemberExclusions.of(squadMemberExclusions, cleanKey);
-            if (!removedByHand.isEmpty()) {
-                toSave = new ArrayList<>(toSave);
-                toSave.removeIf(r -> removedByHand.matches(r.getJiraAccountId(), r.getEmail()));
+            TeamImportPlanner.Plan plan = TeamImportPlanner.plan(existing == null ? List.of() : existing, members, jiraMembers,
+                    removedByHand.isEmpty() ? null : removedByHand::matches);
+            if (!plan.toDelete().isEmpty()) {
+                projectMemberRoleRepository.deleteAll(plan.toDelete());
             }
-            projectMemberRoleRepository.deleteByProjectId(cleanKey);
-            projectMemberRoleRepository.flush(); // Garante que a exclusão ocorreu antes do insert
-            List<ProjectMemberRole> savedMembers = projectMemberRoleRepository.saveAll(toSave);
+            List<ProjectMemberRole> toWrite = new ArrayList<>(plan.toUpdate());
+            toWrite.addAll(plan.toInsert());
+            projectMemberRoleRepository.saveAll(toWrite);
             projectMemberRoleRepository.flush();
-            return toDetailDto(saved, savedMembers);
+            log.info("Reimportação do time {}: {} linha(s) nova(s), {} atualizada(s) no lugar, {} removida(s) (do Jira, sem conta), {} no total",
+                    cleanKey, plan.toInsert().size(), plan.toUpdate().size(), plan.toDelete().size(), plan.finalRows().size());
+            return toDetailDto(saved, plan.finalRows());
         });
     }
 
     /**
-     * Reimportar troca o time pelo que o Jira devolveu, mas não pode apagar duas coisas que o Jira não sabe:
-     * (1) o vínculo conta -> linha (userId) de quem já entrou/foi reconhecido: copia para a linha nova da mesma pessoa
-     * (conta do Jira ou e-mail); (2) quem entrou por "Sou eu"/"join" e nem aparece no Jira (linha sem liderança com
-     * userId): continua no time. Quem o Jira devolveu e a pessoa desmarcou na prévia continua fora.
-     */
-    static List<ProjectMemberRole> mergeWithExistingTeam(List<ProjectMemberRole> existing, List<ProjectMemberRole> incoming,
-                                                         List<ProjectMemberRole> jiraMembers) {
-        List<ProjectMemberRole> result = new ArrayList<>(incoming);
-        for (ProjectMemberRole row : result) {
-            if (row.getUserId() != null) continue;
-            for (ProjectMemberRole old : existing) {
-                if (old.getUserId() != null && sameIdentity(old, row)) { row.setUserId(old.getUserId()); break; }
-            }
-        }
-        for (ProjectMemberRole old : existing) {
-            if (old.getUserId() == null || old.isLeadership()) continue;
-            boolean inIncoming = result.stream().anyMatch(r -> old.getUserId().equals(r.getUserId()) || sameIdentity(old, r));
-            boolean inJira = jiraMembers.stream().anyMatch(r -> sameIdentity(old, r));
-            if (inIncoming || inJira) continue;
-            result.add(ProjectMemberRole.builder()
-                    .projectId(old.getProjectId()).roleName(old.getRoleName()).roleKey(old.getRoleKey())
-                    .jiraAccountId(old.getJiraAccountId()).displayName(old.getDisplayName()).email(old.getEmail())
-                    .avatarUrl(old.getAvatarUrl()).userId(old.getUserId()).isLeadership(false).build());
-        }
-        return result;
-    }
-
-    /** Mesma pessoa por conta do Jira ou e-mail (sem caixa). Nome não conta: homônimos são pessoas diferentes. */
-    private static boolean sameIdentity(ProjectMemberRole a, ProjectMemberRole b) {
-        if (!isBlank(a.getJiraAccountId()) && a.getJiraAccountId().equals(b.getJiraAccountId())) return true;
-        return !isBlank(a.getEmail()) && !isBlank(b.getEmail()) && a.getEmail().trim().equalsIgnoreCase(b.getEmail().trim());
-    }
-
-    /**
-     * Sync/confirm apagam e recriam o time do projeto. Projeto que já tem time só pode ser reimportado
+     * Sync/confirm reescrevem o time do projeto (upsert, ver TeamImportPlanner). Projeto que já tem time só pode ser reimportado
      * por ADMIN ou por quem já é liderança dele — senão qualquer usuário logado sobrescreveria time e
      * liderança de um projeto alheio apontando o sync para um "Jira" que ele controla.
      */
@@ -283,8 +255,10 @@ public class JiraProfieldsService {
             }
             String upper = finalRole.toUpperCase(java.util.Locale.ROOT);
             String userId = base.getUserId();
+            String rowSource = com.agilespace.backend.domain.MembershipSource.JIRA;
             if (req.isLinkToMe() && creator != null && (userId == null || userId.equals(creator.getId()))
                     && (!base.isLeadership() || rowMatchesUser(base, creator))) {
+                if (userId == null) rowSource = com.agilespace.backend.domain.MembershipSource.CLAIM; // "sou eu" na prévia
                 userId = creator.getId();
             }
             if (creator != null && creator.getId().equals(userId)) creatorLinked = true;
@@ -299,6 +273,7 @@ public class JiraProfieldsService {
                     .avatarUrl(base.getAvatarUrl())
                     .userId(userId)
                     .isLeadership(LEADERSHIP_ROLE_NAMES.contains(upper))
+                    .source(rowSource)
                     .build());
         }
 
@@ -312,6 +287,7 @@ public class JiraProfieldsService {
                     .email(creator.getEmail())
                     .userId(creator.getId())
                     .isLeadership(false)
+                    .source(com.agilespace.backend.domain.MembershipSource.MANUAL)
                     .build());
         }
 
@@ -439,6 +415,7 @@ public class JiraProfieldsService {
                     .email(creator.getEmail())
                     .userId(creator.getId())
                     .isLeadership(true)
+                    .source(com.agilespace.backend.domain.MembershipSource.MANUAL)
                     .build());
         }
 
@@ -1160,6 +1137,7 @@ public class JiraProfieldsService {
                 .email(creator.getEmail())
                 .userId(creator.getId())
                 .isLeadership(isTeamManagerRow(ProjectMemberRole.builder().roleKey(founderRole[1]).build()))
+                .source(com.agilespace.backend.domain.MembershipSource.MANUAL)
                 .build();
         projectMemberRoleRepository.save(founder);
 
@@ -1233,6 +1211,7 @@ public class JiraProfieldsService {
                 .email(user.getEmail())
                 .userId(user.getId())
                 .isLeadership(false)
+                .source(com.agilespace.backend.domain.MembershipSource.CLAIM)
                 .build();
         projectMemberRoleRepository.save(member);
     }

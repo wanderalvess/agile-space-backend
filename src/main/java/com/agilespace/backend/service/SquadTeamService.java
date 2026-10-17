@@ -152,7 +152,7 @@ public class SquadTeamService {
                 .projectId(squadId).roleName(role.name()).roleKey(role.key())
                 .jiraAccountId(user != null ? user.getJiraAccountId() : null)
                 .displayName(name).email(email).userId(user != null ? user.getId() : null)
-                .isLeadership(role.leadership()).build());
+                .isLeadership(role.leadership()).source(com.agilespace.backend.domain.MembershipSource.MANUAL).build());
 
         exclusionRepository.deleteById(squadId + "_" + jiraAccountId);
         audit(caller, "SQUAD_TEAM_MEMBER_ADDED", squadId, name + " (" + (email != null ? email : jiraAccountId) + ") como " + role.name());
@@ -187,12 +187,14 @@ public class SquadTeamService {
                     .projectId(squadId).roleName(role.name()).roleKey(role.key())
                     .jiraAccountId(linked != null ? linked.getJiraAccountId() : null)
                     .displayName(member.getDisplayName()).email(member.getEmail()).userId(linked != null ? linked.getId() : null)
-                    .isLeadership(role.leadership()).build());
+                    .isLeadership(role.leadership()).source(com.agilespace.backend.domain.MembershipSource.MANUAL).build());
         } else {
             for (ProjectMemberRole r : rows) {
                 r.setRoleName(role.name());
                 r.setRoleKey(role.key());
                 r.setLeadership(role.leadership());
+                // Papel trocado à mão deixa de seguir o Jira: a reimportação não o desfaz.
+                r.setSource(com.agilespace.backend.domain.MembershipSource.MANUAL);
             }
             projectMemberRoleRepository.saveAll(rows);
         }

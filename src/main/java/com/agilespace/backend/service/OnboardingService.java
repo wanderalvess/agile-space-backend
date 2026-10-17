@@ -212,7 +212,7 @@ public class OnboardingService {
                             + "Peça um link de convite a quem lidera o time.");
         }
 
-        applyLink(row, user);
+        applyLink(row, user, com.agilespace.backend.domain.MembershipSource.CLAIM);
 
         log.info("Onboarding: usuário {} reivindicou a linha {} ({}) no projeto {}",
                 user.getId(), row.getId(), row.getRoleName(), row.getProjectId());
@@ -231,13 +231,16 @@ public class OnboardingService {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Essa pessoa já está vinculada a outra conta. Peça pra quem administra o projeto desfazer o vínculo antes.");
         }
-        applyLink(row, user);
+        applyLink(row, user, com.agilespace.backend.domain.MembershipSource.APPROVED);
         log.info("Vínculo aprovado por admin: usuário {} ligado à linha {} ({}) no projeto {}",
                 user.getId(), row.getId(), row.getRoleName(), row.getProjectId());
     }
 
     /** Grava o vínculo: userId na linha, accountId do Jira herdado e roster da squad apontando para a conta. */
-    private void applyLink(ProjectMemberRole row, User user) {
+    private void applyLink(ProjectMemberRole row, User user, String linkSource) {
+        // Registra como a conta entrou na linha. Linha de decisão humana (MANUAL/INVITE/MIGRATION) mantém a origem.
+        boolean alreadyMine = user.getId() != null && user.getId().equals(row.getUserId());
+        if (!alreadyMine) row.setSource(com.agilespace.backend.domain.MembershipSource.afterLink(row.getSource(), linkSource));
         row.setUserId(user.getId());
         projectMemberRoleRepository.save(row);
 

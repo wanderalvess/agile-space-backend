@@ -80,7 +80,7 @@ class InviteServiceTest {
         User u = user();
         service.acceptInvite("tok", u);
 
-        verify(projectMemberRoleRepository).save(argThat(m -> "SQ".equals(m.getProjectId()) && "u1".equals(m.getUserId()) && !m.isLeadership()));
+        verify(projectMemberRoleRepository).save(argThat(m -> "SQ".equals(m.getProjectId()) && "u1".equals(m.getUserId()) && !m.isLeadership() && "INVITE".equals(m.getSource())));
         assertEquals("SQ", u.getSquadId());
         verify(userRepository).save(u);
     }

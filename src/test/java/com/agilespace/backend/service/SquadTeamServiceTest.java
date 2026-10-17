@@ -91,6 +91,7 @@ class SquadTeamServiceTest {
         assertEquals("QA", role.getValue().getRoleKey());
         assertFalse(role.getValue().isLeadership());
         assertEquals("u-ana", role.getValue().getUserId());
+        assertEquals("MANUAL", role.getValue().getSource(), "cadastrada à mão: a reimportação do Jira não a apaga");
         verify(exclusionRepository).deleteById("SQ1_jira-ana");
         verify(auditLogRepository).save(any(AuditLog.class));
         verify(userRepository, never()).save(any());
@@ -208,6 +209,7 @@ class SquadTeamServiceTest {
         ProjectMemberRole devRow = rows.get(1);
         assertEquals("PRODUCT_OWNER", devRow.getRoleKey());
         assertTrue(devRow.isLeadership());
+        assertEquals("MANUAL", devRow.getSource(), "papel trocado à mão não volta ao do Jira na reimportação");
         verify(projectRoles).saveAll(any());
         verify(auditLogRepository).save(any(AuditLog.class));
         verify(userRepository, never()).save(any());

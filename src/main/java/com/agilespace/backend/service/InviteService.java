@@ -232,6 +232,7 @@ public class InviteService {
                     .email(user.getEmail())
                     .userId(user.getId())
                     .isLeadership(false)
+                    .source(com.agilespace.backend.domain.MembershipSource.INVITE)
                     .build());
         }
         if (user.getDefaultProjectId() == null || user.getDefaultProjectId().isBlank()) {

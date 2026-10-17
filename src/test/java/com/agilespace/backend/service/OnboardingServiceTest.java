@@ -53,6 +53,7 @@ class OnboardingServiceTest {
         stubClaim(r, List.of(r));
         assertEquals("P1", service.claim("r1", user()));
         assertEquals("u1", r.getUserId());
+        assertEquals("CLAIM", r.getSource());
         verify(projectMemberRoleRepository).save(r);
     }
 
@@ -173,5 +174,29 @@ class OnboardingServiceTest {
         mine.setUserId("u1");
         assertDoesNotThrow(() -> service.linkApproved(mine, user()));
         assertEquals("u1", mine.getUserId());
+    }
+
+    @Test
+    @DisplayName("origem da linha: claim grava CLAIM, linkApproved grava APPROVED, e linha manual mantém MANUAL")
+    void linkRecordsHowTheAccountEnteredTheRow() {
+        ProjectMemberRole viaApproval = row("r1", "x@y.com", null, "Fulano");
+        service.linkApproved(viaApproval, user());
+        assertEquals("APPROVED", viaApproval.getSource());
+
+        ProjectMemberRole legacyJira = row("r2", "x@y.com", null, "Fulano");
+        legacyJira.setSource("JIRA");
+        service.linkApproved(legacyJira, user());
+        assertEquals("APPROVED", legacyJira.getSource());
+
+        ProjectMemberRole manual = row("r3", "x@y.com", null, "Fulano");
+        manual.setSource("MANUAL");
+        service.linkApproved(manual, user());
+        assertEquals("MANUAL", manual.getSource(), "decisão humana mantém a origem");
+
+        ProjectMemberRole mine = row("r4", "x@y.com", null, "Fulano");
+        mine.setUserId("u1");
+        mine.setSource("CLAIM");
+        service.linkApproved(mine, user());
+        assertEquals("CLAIM", mine.getSource(), "já era dele: a origem não muda");
     }
 }

@@ -160,6 +160,9 @@ class JiraProfieldsServiceTest {
             assertEquals(1, result.getMembers().size());
             assertEquals("AGILE_MASTER", result.getMembers().get(0).getRoleKey());
             assertTrue(result.getMembers().get(0).isLeadership());
+            ArgumentCaptor<ProjectMemberRole> founder = ArgumentCaptor.forClass(ProjectMemberRole.class);
+            verify(projectMemberRoleRepository).save(founder.capture());
+            assertEquals("MANUAL", founder.getValue().getSource(), "o fundador não vem do Jira: a reimportação não o apaga");
         }
 
         @Test
@@ -305,6 +308,7 @@ class JiraProfieldsServiceTest {
             verify(projectMemberRoleRepository).save(captor.capture());
             assertFalse(captor.getValue().isLeadership());
             assertEquals("DEVELOPER", captor.getValue().getRoleKey());
+            assertEquals("CLAIM", captor.getValue().getSource());
         }
     }
 
