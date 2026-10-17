@@ -146,6 +146,7 @@ Para a Retro, quem não é participante recebe `403` (não `404`), como acontece
 
 - Métrica Micrometer `presence.sessions{module}`: conexões WebSocket abertas por módulo (gauge). Só aparece num backend de
   métricas (OTLP/SigNoz) ou se `metrics` for exposto no actuator.
+- Varredura de zumbis: `app.presence.sweep-interval-ms` (padrão `30000`).
 - Log em nível `DEBUG`: módulo, sala, total de usuários online e de sessões. Nunca userId, nome ou e-mail.
 
 ## Reverter
