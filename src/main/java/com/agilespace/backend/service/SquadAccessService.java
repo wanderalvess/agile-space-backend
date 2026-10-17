@@ -459,7 +459,7 @@ public class SquadAccessService {
     public void compareSquadSets(String check, User user, Set<String> legacy, Set<String> neu) {
         for (String s : legacy) {
             if (neu.stream().noneMatch(n -> MembershipService.sameSquad(n, s))) {
-                authz.record(check, user.getId(), s, true, false, lossReasonFor(user, s));
+                authz.recordLazy(check, user.getId(), s, true, false, () -> lossReasonFor(user, s));
             }
         }
         for (String s : neu) {

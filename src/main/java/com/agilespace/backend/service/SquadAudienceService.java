@@ -119,7 +119,7 @@ public class SquadAudienceService {
     private void compareContexts(User user, UserContext legacy, UserContext neu) {
         for (String s : legacy.squadIds()) {
             if (!neu.hasSquad(s)) {
-                authz.record("audience", user.getId(), s, true, false,
+                authz.recordLazy("audience", user.getId(), s, true, false, () ->
                         squadAccessService != null ? squadAccessService.lossReasonFor(user, s) : "UNKNOWN");
             }
         }

@@ -365,9 +365,18 @@ class AuthzOtherPointsTest {
         assertEquals(1, world.divergenceLines().size(), "uma linha dentro da janela");
         assertEquals(5.0, world.meters.counter(AuthzShadow.METRIC, "check", "matchesSquad", "direction", "LOSS").count());
 
+        int[] reasonCalls = { 0 };
+        for (int i = 0; i < 5; i++) {
+            shadow.recordLazy("matchesSquad", "u7", "SQ1", true, false, () -> {
+                reasonCalls[0]++;
+                return "ONLY_ROSTER";
+            });
+        }
+        assertEquals(1, reasonCalls[0], "o motivo (que pode custar consultas) só é calculado quando a linha vai para o log");
+
         now[0] += 61_000;
         shadow.record("matchesSquad", "u1", "SQ1", true, false, "ONLY_ROSTER");
-        assertEquals(2, world.divergenceLines().size(), "passada a janela, loga de novo");
+        assertEquals(3, world.divergenceLines().size(), "passada a janela, loga de novo (u1 de novo + u7 da janela anterior)");
 
         shadow.record("matchesSquad", "u2", "sq\n9 x@y.com", false, true, "NEW_ONLY_MEMBERSHIP");
         String last = world.divergenceLines().get(world.divergenceLines().size() - 1);

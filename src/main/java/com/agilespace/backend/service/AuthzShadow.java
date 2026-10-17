@@ -87,7 +87,7 @@ public class AuthzShadow {
                 try {
                     boolean fresh = neu.getAsBoolean();
                     if (fresh != old) {
-                        record(check, userId, squad, old, fresh, safeReason(reason, old));
+                        emit(check, userId, squad, old, fresh, () -> safeReason(reason, old));
                     }
                 } catch (RuntimeException e) {
                     shadowError(check, userId, squad, e);
@@ -119,6 +119,18 @@ public class AuthzShadow {
 
     /** Registra uma divergência: log estruturado (com janela de repetição) e contador (sempre). */
     public void record(String check, String userId, String squad, boolean legacyAllowed, boolean newAllowed, String reason) {
+        emit(check, userId, squad, legacyAllowed, newAllowed, () -> reason);
+    }
+
+    /**
+     * O motivo costuma exigir consultas extras (roster, resolvedor): só é calculado quando a linha vai mesmo para o log,
+     * não a cada requisição repetida dentro da janela (o contador, esse sim, conta todas).
+     */
+    public void recordLazy(String check, String userId, String squad, boolean legacyAllowed, boolean newAllowed, Supplier<String> reasonSupplier) {
+        emit(check, userId, squad, legacyAllowed, newAllowed, reasonSupplier);
+    }
+
+    private void emit(String check, String userId, String squad, boolean legacyAllowed, boolean newAllowed, Supplier<String> reasonSupplier) {
         String direction = legacyAllowed && !newAllowed ? DIRECTION_LOSS : DIRECTION_GAIN;
         MeterRegistry registry = meterRegistry.getIfAvailable();
         if (registry != null) {
@@ -127,6 +139,7 @@ public class AuthzShadow {
         if (!shouldLog(userId, check, squad, direction)) {
             return;
         }
+        String reason = reasonSupplier.get();
         String line = "authz_divergence user={} check={} squad={} legacy={} new={} reason={}";
         if (DIRECTION_LOSS.equals(direction)) {
             log.warn(line, sanitize(userId), sanitize(check), sanitize(squad), legacyAllowed, newAllowed, sanitize(reason));
