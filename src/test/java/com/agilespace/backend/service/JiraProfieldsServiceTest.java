@@ -166,8 +166,8 @@ class JiraProfieldsServiceTest {
         }
 
         @Test
-        @DisplayName("Admin sem papel de AM/PL cria a equipe sem virar liderança")
-        void createManualProjectDoesNotPromoteAdmin() {
+        @DisplayName("Admin sem papel de AM/PL cria a equipe e entra como Agile Master com liderança (a squad nasce com liderança)")
+        void createManualProjectMakesAdminTheAgileMaster() {
             when(projectConfigRepository.existsById("MEUTIME")).thenReturn(false);
             when(projectConfigRepository.save(any(ProjectConfig.class))).thenAnswer(i -> i.getArgument(0));
             when(projectMemberRoleRepository.save(any(ProjectMemberRole.class))).thenAnswer(i -> i.getArgument(0));
@@ -176,8 +176,8 @@ class JiraProfieldsServiceTest {
             ProjectDetailDto result = service.createManualProject(
                     CreateProjectRequestDto.builder().id("meutime").name("Meu Time").build(), admin);
 
-            assertEquals("DEVELOPER", result.getMembers().get(0).getRoleKey());
-            assertFalse(result.getMembers().get(0).isLeadership());
+            assertEquals("AGILE_MASTER", result.getMembers().get(0).getRoleKey());
+            assertTrue(result.getMembers().get(0).isLeadership());
         }
 
         @Test
