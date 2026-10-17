@@ -29,6 +29,7 @@ public class MembershipReportService {
     private static final int BREAKDOWN_LIMIT = 50;
 
     private final JdbcTemplate jdbc;
+    private final AuthzDiffService authzDiff;
 
     /**
      * CTE que espelha o resolvedor (UserProjectResolverService.resolveUserAccess): a linha pmr pertence à conta por
@@ -358,7 +359,45 @@ public class MembershipReportService {
         for (CategoryDef def : CATEGORIES) {
             categories.add(run(def));
         }
+        if (authzDiff != null) {
+            categories.add(wouldLoseAccess());
+        }
         return new MembershipReportDto(Instant.now(), SAMPLE_LIMIT, totals(), categories);
+    }
+
+    static final String WOULD_LOSE_ACCESS = "WOULD_LOSE_ACCESS";
+
+    /**
+     * Etapa 2: quem o legado deixa acessar uma squad e a regra nova (só vínculos) NÃO deixaria. Calculada em Java com as
+     * mesmas regras puras do modo sombra e do authz-diff ({@link AuthzDiffService}), não em SQL, porque precisa da
+     * expansão por tribo/segmento e do roster por vaga/e-mail/conta do Jira. Uma linha por (pessoa, squad, ponto de
+     * decisão); o rótulo é {@code ponto:motivo} (ex.: {@code matchesSquad:ONLY_ROSTER}).
+     */
+    private MembershipReportDto.Category wouldLoseAccess() {
+        List<AuthzDiffService.Row> rows = authzDiff.wouldLoseAccess();
+        Map<String, Long> breakdown = new LinkedHashMap<>();
+        rows.stream().map(r -> r.check() + ":" + r.reason())
+                .collect(java.util.stream.Collectors.groupingBy(s -> s, java.util.TreeMap::new, java.util.stream.Collectors.counting()))
+                .entrySet().stream().sorted(Map.Entry.<String, Long>comparingByValue().reversed().thenComparing(Map.Entry.comparingByKey()))
+                .limit(BREAKDOWN_LIMIT).forEach(e -> breakdown.put(e.getKey(), e.getValue()));
+        List<MembershipReportDto.Row> sample = rows.stream()
+                .sorted(java.util.Comparator.comparing((AuthzDiffService.Row r) -> r.squad() == null ? "" : r.squad())
+                        .thenComparing(r -> r.email() == null ? "" : r.email())
+                        .thenComparing(AuthzDiffService.Row::userId)
+                        .thenComparing(AuthzDiffService.Row::check))
+                .limit(SAMPLE_LIMIT)
+                .map(r -> new MembershipReportDto.Row(r.userId(), r.email(), r.squad(), r.check() + ":" + r.reason()))
+                .toList();
+        return new MembershipReportDto.Category(WOULD_LOSE_ACCESS,
+                "Perderia acesso quando a autorização passar só para os vínculos",
+                "Pessoa que o legado deixa acessar a squad (users.squad_id, roster squad_members, cargo de liderança ou o fallback "
+                        + "de squad sem liderança) e que a regra nova (app.membership.authz=new: só project_member_roles, ADMIN/LEAD) "
+                        + "NEGARIA. Trate antes de virar a chave: crie o vínculo (convite, pedido de vínculo, importação do Jira) ou aceite a "
+                        + "perda. Uma linha por pessoa, squad e ponto de decisão (matchesSquad = ler; canManageSquad = gerenciar; "
+                        + "isSquadLeadership = liderança estrita). Rótulos: ONLY_ROSTER, ONLY_SQUAD_ID, ROSTER_AND_SQUAD_ID (acesso de leitura "
+                        + "sem vínculo), ONLY_JOB_TITLE (gestão só pelo cargo), NO_LEADERSHIP_FALLBACK (gestão só porque a squad não tem "
+                        + "liderança cadastrada), RESOLVER_ONLY (inconsistência entre os dois cálculos; investigar).",
+                rows.size(), breakdown, sample, rows.size() > sample.size());
     }
 
     private MembershipReportDto.Category run(CategoryDef def) {

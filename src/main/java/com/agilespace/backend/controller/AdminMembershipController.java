@@ -1,8 +1,10 @@
 package com.agilespace.backend.controller;
 
+import com.agilespace.backend.dto.AuthzDiffDto;
 import com.agilespace.backend.dto.MembershipReportDto;
 import com.agilespace.backend.dto.MembershipShadowDiffDto;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
+import com.agilespace.backend.service.AuthzDiffService;
 import com.agilespace.backend.service.MembershipReportService;
 import com.agilespace.backend.service.MembershipShadowService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -32,6 +34,7 @@ public class AdminMembershipController {
 
     private final MembershipReportService reportService;
     private final MembershipShadowService shadowService;
+    private final AuthzDiffService authzDiffService;
 
     @GetMapping("/report")
     public ResponseEntity<MembershipReportDto> report(HttpServletRequest request) {
@@ -58,6 +61,16 @@ public class AdminMembershipController {
     public ResponseEntity<MembershipShadowDiffDto> shadowDiff(HttpServletRequest request) {
         requireAdmin(request);
         return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store").body(shadowService.report());
+    }
+
+    /**
+     * Autorização por squad legada x nova para todos os usuários ativos x squads (Etapa 2, docs/membership-api.md).
+     * Somente leitura. Contagens por sentido/ponto/motivo e amostra de até 20 divergências (ids e rótulos, sem e-mail).
+     */
+    @GetMapping("/authz-diff")
+    public ResponseEntity<AuthzDiffDto> authzDiff(HttpServletRequest request) {
+        requireAdmin(request);
+        return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store").body(authzDiffService.report());
     }
 
     private static void requireAdmin(HttpServletRequest request) {
