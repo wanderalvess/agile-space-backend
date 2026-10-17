@@ -305,7 +305,7 @@ public class ShowcaseSessionService {
             return;
         }
         // Decisão nova ou trocada: quem decidiu é quem está autenticado, não o que o cliente escreveu.
-        String now = Instant.now().toString();
+        String now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS).toString();
         task.setDecidedBy(callerId);
         String name = callerName(callerId);
         if (name != null) {

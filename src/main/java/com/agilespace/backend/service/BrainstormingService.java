@@ -167,7 +167,7 @@ public class BrainstormingService {
     }
 
     private static String now() {
-        return Instant.now().toString();
+        return Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS).toString();
     }
 
     private static String cleanText(String value, int max, String fieldLabel, boolean required) {

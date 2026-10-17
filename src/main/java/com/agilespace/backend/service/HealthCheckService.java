@@ -107,7 +107,7 @@ public class HealthCheckService {
     }
 
     private static String now() {
-        return Instant.now().toString();
+        return Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS).toString();
     }
 
     private static String clean(String value, int max, String label, boolean required) {

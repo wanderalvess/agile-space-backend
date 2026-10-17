@@ -275,3 +275,9 @@ conhece) e o Hibernate em `validate` aceita colunas extras no banco. Se quiser d
 voltar o código: `ALTER TABLE health_check_boards DROP COLUMN finished_at, DROP COLUMN presentation_stage;`
 `ALTER TABLE retro_boards DROP COLUMN finished_at, DROP COLUMN lifecycle;`
 `ALTER TABLE retro_participants DROP COLUMN checkin_note;`
+
+## Notas de operação (achadas no QA com duas pessoas)
+
+- **Assumir o controle da Retro:** responde 409 enquanto a facilitação está conectada e também por 45 s depois que ela sai da sala (`ABSENCE_GRACE_MS` em `RetroWebSocketHandler`). Só passado esse prazo outra pessoa assume.
+- **`finishedAt` da Retro e dos demais quadros:** é gravado com precisão de microssegundos, igual ao que o banco devolve, para a mesma string valer na primeira chamada e nas chamadas idempotentes seguintes.
+- **Poker com votos às cegas (`blindVotes`):** o `VOTE_SAVED` em tempo real chega mascarado para quem não votou, inclusive para a facilitação; a tela da facilitação lê o valor por `GET /votes`.

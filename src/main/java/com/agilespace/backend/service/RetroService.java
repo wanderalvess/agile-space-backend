@@ -190,7 +190,7 @@ public class RetroService implements RetroTypingGate {
             return board;
         }
         board.setLifecycle(RetroBoard.LIFECYCLE_FINISHED);
-        board.setFinishedAt(java.time.LocalDateTime.now());
+        board.setFinishedAt(java.time.LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS));
         RetroBoard saved = boardRepository.save(board);
         publish(boardId, "BOARD_UPDATED", saved);
         return saved;
