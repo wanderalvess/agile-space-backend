@@ -67,6 +67,8 @@ services:
       # Pedido de vínculo aprovado pela liderança da squad (Etapa 3): on (padrão) | off (só ADMIN aprova; rotas por squad 404).
       # Ver docs/link-requests-squad-api.md.
       APP_LINK_REQUESTS_SQUAD_APPROVAL: ${APP_LINK_REQUESTS_SQUAD_APPROVAL:-on}
+      # Bootstrap de squad vazia em authz=new: off (padrão) | on. on deixa qualquer conta sem vínculo virar Agile Master de uma squad nova.
+      APP_MEMBERSHIP_BOOTSTRAP: ${APP_MEMBERSHIP_BOOTSTRAP:-off}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
       # OpenTelemetry: agente sempre presente na imagem (ver Dockerfile), inerte até
       # OTEL_JAVAAGENT_ENABLED=true. Vendor-neutro (OTLP) — funciona com SigNoz ou qualquer

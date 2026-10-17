@@ -29,6 +29,7 @@ public class SquadController {
     private final com.agilespace.backend.service.UserProjectResolverService userProjectResolverService;
     private final com.agilespace.backend.service.SquadAccessService squadAccessService;
     private final com.agilespace.backend.service.SquadTeamService squadTeamService;
+    private final com.agilespace.backend.service.SquadBootstrapService squadBootstrapService;
 
     /**
      * Leitura: qualquer membro real da squad (ou admin/liderança) — nunca auto-vincula.
@@ -74,28 +75,10 @@ public class SquadController {
      * Primeiro uso em ambiente limpo: a squad ainda não existe (nem config, nem pessoas) e quem chama não tem
      * squad. Só nesse caso vincula quem chama à squad nova. Antes, qualquer usuário sem squad se vinculava a
      * QUALQUER squad já existente só chamando uma escrita, e passava a ler os dados dela.
+     * Em app.membership.authz=new o vínculo (project_member_roles, liderança) também é criado; ver SquadBootstrapService.
      */
     private boolean bootstrapNewSquad(String squadId, HttpServletRequest request) {
-        String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
-        User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
-        if (caller == null) {
-            return false;
-        }
-        boolean hasNoSquad = caller.getSquadId() == null || caller.getSquadId().isBlank() || "Sem Time".equalsIgnoreCase(caller.getSquadId().trim());
-        if (!hasNoSquad) {
-            return false;
-        }
-        boolean squadAlreadyExists = squadService.getSquad(squadId).isPresent() || !squadService.getMembers(squadId).isEmpty();
-        if (squadAlreadyExists) {
-            return false;
-        }
-        boolean hasNoProject = caller.getDefaultProjectId() == null || caller.getDefaultProjectId().isBlank() || "Sem Time".equalsIgnoreCase(caller.getDefaultProjectId().trim());
-        caller.setSquadId(squadId);
-        if (hasNoProject) {
-            caller.setDefaultProjectId(squadId);
-        }
-        userRepository.save(caller);
-        return true;
+        return squadBootstrapService.bootstrap(squadId, callerId(request));
     }
 
     private User callerUser(HttpServletRequest request) {

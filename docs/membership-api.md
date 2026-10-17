@@ -233,9 +233,34 @@ continuam sendo gravados pelos sincronizadores (dual-write) em todos os modos.
 `UserService.requireProjectAccess` já usa o resolvedor de vínculos. **A base de conhecimento continua compartilhada de propósito**:
 só mudou de onde vem a squad gravada no documento (que decide quem edita), nunca quem lê.
 
-**Deliberadamente NÃO migrado (continua legado, sem chave)**: `SquadController.bootstrapNewSquad` (primeiro uso em ambiente limpo:
-decide pelo `users.squad_id` vazio e grava `squad_id` na pessoa). Em `new` essa gravação não vira vínculo, então a pessoa passaria na
-primeira chamada e seria negada na seguinte. Precisa de decisão de produto (que papel o criador da squad recebe) antes de migrar.
+**Bootstrap de squad nova em ambiente limpo** (`SquadBootstrapService`, chamado por `SquadController` quando a pessoa não passa
+na leitura/escrita/gestão): é o primeiro uso de uma squad que ainda não existe (sem linha em `squads`, sem roster) por quem não tem
+`users.squad_id`. Chave própria **`app.membership.bootstrap`** (env `APP_MEMBERSHIP_BOOTSTRAP`, também no `docker-compose.yml`),
+**padrão `off`**; só `on` liga (vazio ou valor desconhecido = `off`, com aviso no log).
+
+| `authz` | `bootstrap=off` (padrão) | `bootstrap=on` |
+|---|---|---|
+| `legacy` / `shadow` | como sempre: grava `users.squad_id` (e `default_project_id`, se vazio); não cria vínculo | idem (a chave é ignorada) |
+| `new` | **não concede nada**: squad vazia é 403 para quem não é ADMIN; nada é gravado | cria o vínculo (abaixo) |
+
+**Por que `off` por padrão:** com `on`, qualquer conta sem vínculo pode inventar uma chave de squad que não existe e virar Agile
+Master dela; como `canManageTeams` vale para quem é AM/PL em qualquer pmr, essa conta passa a criar e importar equipes no sistema
+inteiro. É uma auto-promoção, então só se liga conscientemente (por exemplo, numa instalação de demonstração).
+
+Com `on` em `authz=new`:
+
+- cria o projeto (`projects`, nome = chave) se faltar e a linha de `project_member_roles` da pessoa: `source=MANUAL`,
+  `is_leadership=true`, papel do fundador de `createManualProject` (Agile Master; People Lead se a pessoa já é). `squad_id` e
+  `default_project_id` continuam gravados (dual-write);
+- só no primeiro uso: exige que a squad **não tenha nenhum vínculo nem projeto cadastrado** (sem caixa) e que a pessoa **não tenha
+  vínculo em lugar nenhum**. Squad importada do Jira (só pmr, sem linha em `squads`) nunca é concedida a ninguém por aqui;
+- o cache de vínculos é invalidado pelo listener JPA (`MembershipCacheEvictionListener`) na própria gravação; há teste;
+- auditoria: log INFO `authz_bootstrap user=<id da conta> squad=<chave>` (sem e-mail nem nome), **só quando concede**;
+- ADMIN não passa por aqui (já tem acesso) e não ganha vínculo.
+
+Limites conhecidos: a serialização do primeiro uso é por processo (`synchronized`); com várias instâncias do backend, duas pessoas
+chegando no mesmo instante a uma squad vazia podem virar as duas liderança. Em `legacy`/`shadow` (comportamento antigo, mantido) toda
+pessoa sem squad entra numa squad ainda sem `squads`/roster, ou seja, várias podem entrar na mesma até alguém salvar a configuração.
 
 ## Modo sombra: `authz_divergence`
 
@@ -298,3 +323,40 @@ ficam de fora (decisão idêntica). Custo: algumas consultas por usuário; rode 
 3. Nenhum `authz_squad_without_leadership` de squad que ainda precise de configuração (cadastrar a liderança antes).
 4. Nenhum chamado de "perdi acesso" na janela do `shadow`.
 5. Virar `new` em horário de baixo uso, com o plano de reversão à mão (`APP_MEMBERSHIP_AUTHZ=legacy` + reinício; nada a restaurar no banco).
+
+## Instalação limpa com `mode=new` e `authz=new` (sem passar pelo modo sombra)
+
+Sistema novo, sem dado nenhum, com `app.membership.bootstrap=off` (padrão). O login é e-mail corporativo + senha
+(`POST /api/auth/register|login`); não há login Google no backend (o Google só é usado para o Calendar).
+
+**O caminho oficial:**
+
+1. O **primeiro ADMIN** não nasce no código: é promovido por SQL (`UPDATE users SET role = 'ADMIN' ...`, README) depois de se cadastrar.
+2. Ele cria a equipe por `POST /api/projects` (ou importa do Jira). **O criador da equipe entra como liderança**: `createManualProject`
+   grava o vínculo `source=MANUAL`, `is_leadership=true`, como AM/PL se já é, senão Agile Master. Isso não amplia privilégio de ninguém
+   (só quem já passou por `canManageTeams` chega ali) e a squad nasce com liderança cadastrada, então não dispara
+   `authz_squad_without_leadership`.
+3. Os **demais entram por convite** (`POST /api/squads/{id}/invites` + `/api/invites/{token}/accept`), **pedido de vínculo**
+   (Etapa 3, `/link-requests`) ou **importação** do Jira (que cria o roster/pmr; depois "Sou eu"). Membro comum não cria equipe
+   (403) nem inventa squad (403 com o bootstrap desligado).
+
+Decisões de acesso em cada passo (teste: `PrimeiroUsuarioInstalacaoLimpaTest`):
+
+| Passo | Chamada | Quem decide | Depende de roster / `users.squad_id` / cargo? |
+|---|---|---|---|
+| Cadastro e sessão | `POST /api/auth/register`, `GET /api/auth/me`, `GET /api/me/memberships` | `MembershipService` (pmr); conta sem vínculo e sem rastro vai para o onboarding | não (rastros só marcam `legacyOnly`) |
+| Onboarding | `GET /api/onboarding/suggestions\|search\|roster`, `POST /claim/{id}` | só autenticação; o "Sou eu" liga a conta a uma linha existente | lê o roster por desenho (reconhecer a pessoa), não decide acesso |
+| Criar a equipe | `POST /api/projects` | `JiraProfieldsService.canManageTeams`: ADMIN, AM/PL em pmr, **ou `jobTitle` AM/PL atribuído por admin** | **cargo (`jobTitle`) ainda vale aqui**; membro comum recebe 403 |
+| Entrar por "join" | `POST /api/projects/{k}/join` | ADMIN, ou constar no roster/Jira do projeto | **roster** (por desenho: é o reconhecimento da pessoa) |
+| Telas da squad | `/api/squads/**`, poker, retro, showcase, WebSocket... | `SquadAccessService.matchesSquad/canManageSquad/isSquadLeadership` | não (só pmr, ADMIN e LEAD) |
+| Equipe | `/api/squads/{id}/team/**` | `SquadTeamService`: ADMIN ou AM/PL em pmr | não |
+| Convite | `POST /api/squads/{id}/invites` | ADMIN/LEAD ou liderança em linha própria de pmr | não |
+| Home, avisos, notificações | `GET /api/home` | `SquadAudienceService` (só vínculos) | não |
+
+**Onboarding de membro comum na UI** (leitura de `agile-space-frontend-wt/integration`, `src/components/onboarding`): os caminhos que
+uma pessoa sem vínculo tem são (1) "Sou eu" (`onboardingService.suggestions/search/roster` + `claimRosterMember`, exige linha no
+roster), (2) entrar numa squad com papel (`joinProject`, exige constar no roster/Jira ou ser ADMIN), (3) criar squad (`createProject`,
+só AM/PL/ADMIN), (4) colar link/código de convite (`/invite/{token}`), (5) pedir vínculo (`RequestLinkStep` -> `link-requests`),
+(6) importar do Jira (`ImportPreview`/`projectService`, só AM/PL/quem o Jira lista como tal) e (7) exploração pública. **Nenhum deles
+chama o bootstrap**: todas as escritas em `/api/squads/{id}` da UI (`src/app/squad/api.ts`, painéis, sync) ficam atrás de quem já
+está numa squad. Portanto o bootstrap pode ficar `off` sem quebrar o onboarding.

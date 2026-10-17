@@ -1102,7 +1102,7 @@ public class JiraProfieldsService {
 
     /**
      * Cria um projeto do zero, sem depender do Jira — para quem quer começar sem sincronizar nada.
-     * O criador entra com o papel que já tem (Agile Master ou People Lead); criar não promove ninguém.
+     * O criador (que já gerencia equipes) entra como liderança: Agile Master ou People Lead se já é, senão Agile Master.
      */
     @Transactional
     public ProjectDetailDto createManualProject(com.agilespace.backend.dto.CreateProjectRequestDto request, User creator) {
@@ -1125,11 +1125,28 @@ public class JiraProfieldsService {
                 .build();
         project = projectConfigRepository.save(project);
 
-        // Criar a equipe não dá papel a ninguém: o fundador entra com o papel que já tem (o Jira diz).
-        // Sem papel de AM/PL conhecido (ex.: admin puro), entra sem liderança.
+        // O criador da equipe é a liderança dela: entra com o papel de gestão que já tem (AM ou PL) ou, sem nenhum
+        // (ADMIN puro), como Agile Master, com is_leadership=true. Só chega aqui quem JÁ pode criar equipes
+        // (canManageTeams), então não amplia o privilégio de ninguém; e a squad nova nasce com liderança cadastrada.
+        ProjectMemberRole founder = founderRow(key, creator, true);
+        projectMemberRoleRepository.save(founder);
+
+        return toDetailDto(project, List.of(founder));
+    }
+
+    /**
+     * Linha de vínculo (pmr) do fundador de uma squad, a mesma que {@link #createManualProject} grava: papel que a pessoa já
+     * tem como AM/PL (ou Developer sem liderança), origem MANUAL. Com {@code ensureLeadership} (criação de equipe e
+     * bootstrap de squad vazia) quem não tem papel de gestão entra como Agile Master com liderança, porque a squad nova
+     * não tem mais ninguém para configurá-la.
+     */
+    ProjectMemberRole founderRow(String projectKey, User creator, boolean ensureLeadership) {
         String[] founderRole = founderRoleFor(creator);
-        ProjectMemberRole founder = ProjectMemberRole.builder()
-                .projectId(key)
+        if (ensureLeadership && "DEVELOPER".equals(founderRole[1])) {
+            founderRole = new String[] {"Agile Master", "AGILE_MASTER"};
+        }
+        return ProjectMemberRole.builder()
+                .projectId(projectKey)
                 .roleName(founderRole[0])
                 .roleKey(founderRole[1])
                 .jiraAccountId(creator.getJiraAccountId())
@@ -1139,9 +1156,6 @@ public class JiraProfieldsService {
                 .isLeadership(isTeamManagerRow(ProjectMemberRole.builder().roleKey(founderRole[1]).build()))
                 .source(com.agilespace.backend.domain.MembershipSource.MANUAL)
                 .build();
-        projectMemberRoleRepository.save(founder);
-
-        return toDetailDto(project, List.of(founder));
     }
 
     /**

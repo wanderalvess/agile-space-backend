@@ -119,6 +119,12 @@ app:
     # Repetição do MESMO log authz_divergence (conta, ponto, squad, sentido): no máximo a cada N segundos (0 = toda vez).
     # O contador authz.divergence conta todas.
     authz-log-dedupe-seconds: ${APP_MEMBERSHIP_AUTHZ_LOG_DEDUPE_SECONDS:60}
+    # Bootstrap de squad vazia (SquadBootstrapService). Só importa com authz=new:
+    #   off = padrão (valor desconhecido também): ninguém ganha acesso a squad vazia por aqui (403 para não-ADMIN).
+    #   on  = a primeira pessoa sem vínculo que escreve numa squad inexistente vira Agile Master dela (cria projeto + pmr).
+    #         ATENÇÃO: qualquer conta sem vínculo pode inventar uma chave de squad e ganhar poder de gerir equipes.
+    # Em authz=legacy|shadow o bootstrap segue como sempre (grava users.squad_id), independente desta chave.
+    bootstrap: ${APP_MEMBERSHIP_BOOTSTRAP:off}
   link-requests:
     # Pedido de vínculo (docs/link-requests-squad-api.md, Etapa 3 do vínculo): AM/SM/PO/People Lead da squad aprovam
     # contribuidores e People/Tribe Lead (ou ADMIN) aprovam liderança, pelas rotas /api/squads/{id}/link-requests*.
