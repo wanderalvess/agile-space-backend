@@ -61,8 +61,7 @@ Para o "N de M já responderam" e, para o facilitador, a lista de quem falta.
   facilitador** (criador do radar ou ADMIN). Para qualquer outra pessoa o campo **não existe** na resposta.
 - A lista traz só ids: o apelido vem de `GET /{id}/participants`, que o cliente já carrega.
 - Nunca traz o que alguém votou. O facilitador passa a saber **quem ainda não participou** (é o pedido), mas não o voto
-  de ninguém; quem votou é, por exclusão, deduzível só por ele, e só enquanto a coleta está aberta ou depois (a lista
-  usa as participações atuais).
+  de ninguém. Os valores seguem anônimos; só a participação deixa de ser invisível para ele.
 - `404` radar inexistente. `401` sem token. Cabeçalho `Cache-Control: no-store`.
 
 ### 1.3 Tempo real: contagem de respostas
@@ -197,7 +196,7 @@ Só em memória, nunca persistido. Opt-in nos dois sentidos: **só sessões aber
 wss://<host>/ws/retro/{boardId}?token=<jwt>&typing=1
 ```
 
-**Cliente → servidor** (mensagem de texto do próprio WebSocket, até 512 bytes):
+**Cliente → servidor** (mensagem de texto do próprio WebSocket, até 512 caracteres):
 
 ```json
 { "type": "TYPING", "scope": "card", "columnKey": "good" }
