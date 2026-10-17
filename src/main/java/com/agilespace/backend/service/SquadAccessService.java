@@ -6,6 +6,7 @@ import com.agilespace.backend.dto.MembershipDto;
 import com.agilespace.backend.dto.UserProjectAccessDto;
 import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
+import com.agilespace.backend.security.LeadPolicy;
 import com.agilespace.backend.security.SquadLeadership;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
@@ -31,7 +32,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * ({@link AuthzMode}, padrão {@code legacy}). Em {@code legacy} as decisões são as de sempre (código abaixo, intacto);
  * em {@code shadow} o legado decide e a regra nova roda em paralelo registrando divergências ({@link AuthzShadow});
  * em {@code new} decide a regra nova, que lê SÓ dos vínculos (project_member_roles, via {@link MembershipService}):
- * ADMIN; LEAD (mantido até a Etapa 4); vínculo na squad, inclusive a expansão por tribo/segmento. Deixam de dar
+ * ADMIN; LEAD só com app.membership.lead-level=legacy (Etapa 4: em off não concede nada); vínculo na squad, inclusive a expansão por tribo/segmento. Deixam de dar
  * acesso: users.squad_id/default_project_id, o roster squad_members e o cargo (jobTitle) como autoridade.
  */
 @Service
@@ -48,6 +49,14 @@ public class SquadAccessService {
     private final AuthzShadow authz;
 
     private final Set<String> warnedWithoutLeadership = ConcurrentHashMap.newKeySet();
+
+    /** Etapa 4 (app.membership.lead-level). Montagem manual: legacy (LEAD concede, como antes). */
+    private LeadPolicy leadPolicy = LeadPolicy.LEGACY;
+
+    @Autowired(required = false)
+    public void setLeadPolicy(LeadPolicy leadPolicy) {
+        if (leadPolicy != null) this.leadPolicy = leadPolicy;
+    }
 
     /** Só o legado (testes e montagens manuais). */
     public SquadAccessService(UserRepository userRepository, SquadService squadService,
@@ -80,10 +89,10 @@ public class SquadAccessService {
     // =====================================================================================================
 
     /**
-     * Núcleo comum de leitura E escrita: ADMIN/LEAD, ou um caller já vinculado a esta squad
+     * Núcleo comum de leitura E escrita: ADMIN (LEAD só em lead-level=legacy), ou um caller já vinculado a esta squad
      * (User.squadId/defaultProjectId, papel em projeto resolvido, ou membro no roster
      * squad_members). Não tem efeito colateral nenhum — nunca grava nada.
-     * <p>Em {@code app.membership.authz=new}: ADMIN/LEAD, ou vínculo (project_member_roles) nesta squad.
+     * <p>Em {@code app.membership.authz=new}: ADMIN (LEAD só em lead-level=legacy), ou vínculo (project_member_roles) nesta squad.
      */
     public boolean matchesSquad(String squadId, HttpServletRequest request) {
         return matchesSquad(squadId,
@@ -103,7 +112,7 @@ public class SquadAccessService {
     }
 
     private boolean legacyMatchesSquad(String squadId, String userId, String role) {
-        if ("ADMIN".equalsIgnoreCase(role) || "LEAD".equalsIgnoreCase(role)) {
+        if (leadPolicy.isPrivileged(role)) {
             return true;
         }
         User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
@@ -112,7 +121,7 @@ public class SquadAccessService {
         }
 
         // 0. Papel administrativo no registro do banco (caso o token JWT não esteja atualizado)
-        if ("ADMIN".equalsIgnoreCase(caller.getRole()) || "LEAD".equalsIgnoreCase(caller.getRole())) {
+        if (leadPolicy.isPrivileged(caller.getRole())) {
             return true;
         }
 
@@ -211,7 +220,7 @@ public class SquadAccessService {
      * Squad que ainda não tem NENHUMA liderança cadastrada (projeto importado sem Profields, ambiente novo)
      * mantém a regra antiga: qualquer membro gerencia. Sem isso ninguém conseguiria configurar a squad.
      * <p>
-     * Em {@code app.membership.authz=new}: ADMIN/LEAD, ou vínculo com {@code is_leadership} na squad (inclusive a
+     * Em {@code app.membership.authz=new}: ADMIN (LEAD só em lead-level=legacy), ou vínculo com {@code is_leadership} na squad (inclusive a
      * liderança transversal); o cargo (jobTitle) deixa de valer. O fallback "sem liderança cadastrada" passa a exigir
      * VÍNCULO na squad (não mais qualquer membro do roster/users.squad_id) e é o bootstrap de ambiente novo: cada
      * squad nessa situação gera um aviso {@code authz_squad_without_leadership} (uma vez por squad e processo) e
@@ -234,14 +243,14 @@ public class SquadAccessService {
     }
 
     private boolean legacyCanManageSquad(String squadId, String userId, String role) {
-        if ("ADMIN".equalsIgnoreCase(role) || "LEAD".equalsIgnoreCase(role)) {
+        if (leadPolicy.isPrivileged(role)) {
             return true;
         }
         User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
         if (caller == null) {
             return false;
         }
-        if ("ADMIN".equalsIgnoreCase(caller.getRole()) || "LEAD".equalsIgnoreCase(caller.getRole())) {
+        if (leadPolicy.isPrivileged(caller.getRole())) {
             return true;
         }
         if (!legacyMatchesSquad(squadId, userId, role)) {
@@ -403,6 +412,23 @@ public class SquadAccessService {
     }
 
     /**
+     * Etapa 4: liderança por VÍNCULO na squad (project_member_roles com {@code is_leadership}, direta ou por expansão de
+     * tribo/segmento), sem considerar ADMIN/LEAD, cargo (jobTitle), roster nem users.squad_id. Usada onde LEAD deixou de
+     * conceder poder (ex.: facilitador do Poker) e quem lidera a squad assume o papel.
+     */
+    public boolean hasLeadershipLink(String userId, String squadId) {
+        if (membershipService == null || userId == null || squadId == null || squadId.isBlank()) {
+            return false;
+        }
+        User caller = userRepository.findById(userId).orElse(null);
+        if (caller == null) {
+            return false;
+        }
+        MembershipDto m = membershipService.membershipIn(caller, squadId);
+        return m != null && m.leadership();
+    }
+
+    /**
      * Squad "do usuário" para quem precisa de UMA (autoria de documento, chave de API, atribuição do Prompt Hub).
      * Legado: {@code users.squad_id}. Novo: a squad ativa validada contra os vínculos (null sem vínculo nenhum).
      * Em {@code shadow} devolve o legado e registra a diferença com {@code check} no log.
@@ -514,7 +540,13 @@ public class SquadAccessService {
                 m != null, m != null && m.leadership(), hasLeadership);
     }
 
-    private static boolean isPrivileged(String role) {
-        return "ADMIN".equalsIgnoreCase(role) || "LEAD".equalsIgnoreCase(role);
+    /** ADMIN, e LEAD só com {@code app.membership.lead-level=legacy} (Etapa 4). */
+    private boolean isPrivileged(String role) {
+        return leadPolicy.isPrivileged(role);
+    }
+
+    /** Política do nível LEAD em vigor (legacy nas montagens manuais). */
+    public LeadPolicy leadPolicy() {
+        return leadPolicy;
     }
 }

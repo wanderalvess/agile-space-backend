@@ -112,10 +112,17 @@ app:
     #   legacy = decisão exatamente como antes (padrão; valor desconhecido também cai aqui, nunca em new).
     #   shadow = a decisão continua a do legado; a regra nova roda em paralelo e cada divergência vira o log
     #            authz_divergence e o contador authz.divergence{check,direction}.
-    #   new    = decide a regra nova: ADMIN, LEAD (até a Etapa 4) e vínculos de project_member_roles.
+    #   new    = decide a regra nova: ADMIN e vínculos de project_member_roles (LEAD só com lead-level=legacy).
     # Antes de virar new: GET /api/admin/membership/authz-diff e a categoria WOULD_LOSE_ACCESS de /report. Reverter =
     # APP_MEMBERSHIP_AUTHZ=legacy e reiniciar; não há migração de banco.
     authz: ${APP_MEMBERSHIP_AUTHZ:legacy}
+    # O que o nível de conta LEAD ainda concede (Etapa 4; docs/membership-api.md). Níveis de conta viram ADMIN|MEMBER: quem
+    # lidera uma squad tem um VÍNCULO de liderança (project_member_roles.is_leadership).
+    #   off    = LEAD não concede NADA (tratado como MEMBER em toda decisão de acesso). Padrão (instalação nova).
+    #   legacy = comportamento de antes (LEAD acessa/gerencia todas as squads, convida, facilita Poker, chaves de API).
+    # Valor desconhecido cai em legacy (errar a digitação nunca REMOVE acesso); para desligar escreva off. Reverter =
+    # APP_MEMBERSHIP_LEAD_LEVEL=legacy e reiniciar (contas já rebaixadas: POST /api/admin/membership/lead-restore).
+    lead-level: ${APP_MEMBERSHIP_LEAD_LEVEL:off}
     # Repetição do MESMO log authz_divergence (conta, ponto, squad, sentido): no máximo a cada N segundos (0 = toda vez).
     # O contador authz.divergence conta todas.
     authz-log-dedupe-seconds: ${APP_MEMBERSHIP_AUTHZ_LOG_DEDUPE_SECONDS:60}

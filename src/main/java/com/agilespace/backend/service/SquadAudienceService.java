@@ -11,7 +11,9 @@ import com.agilespace.backend.repository.ProjectConfigRepository;
 import com.agilespace.backend.repository.ProjectMemberRoleRepository;
 import com.agilespace.backend.repository.SquadMemberRepository;
 import com.agilespace.backend.repository.SquadRepository;
+import com.agilespace.backend.domain.UserRole;
 import com.agilespace.backend.repository.UserRepository;
+import com.agilespace.backend.security.LeadPolicy;
 import com.agilespace.backend.security.SquadLeadership;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -42,6 +44,17 @@ public class SquadAudienceService {
     private final AuthzShadow authz;
     private final SquadAccessService squadAccessService;
 
+    /** Etapa 4 (app.membership.lead-level). Montagem manual: legacy (LEAD concede, como antes). */
+    private LeadPolicy leadPolicy = LeadPolicy.LEGACY;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setLeadPolicy(LeadPolicy leadPolicy) {
+        if (leadPolicy != null) this.leadPolicy = leadPolicy;
+    }
+
+    /** Chave derivada do público de aviso/segmentação "liderança": quem tem alguma linha de liderança em project_member_roles. */
+    public static final String LEADERSHIP_KEY = "LEADERSHIP";
+
     private boolean legacyOnly() {
         return authz == null || membershipService == null || authz.isLegacy();
     }
@@ -51,8 +64,9 @@ public class SquadAudienceService {
      *
      * @param currentSquadId squad da sessão (defaultProjectId → squadId → projeto primário), pode ser null
      * @param squadIds       squads acessíveis, a atual primeiro (sem duplicatas, sem caixa)
-     * @param roleKeys       UserRole + roleKeys de project_member_roles, em MAIÚSCULAS
-     * @param leadership     ADMIN/LEAD, cargo de liderança, papel de liderança em algum projeto ou liderança transversal
+     * @param roleKeys       nível de conta (ADMIN/MEMBER; LEAD só em lead-level=legacy) + roleKeys de project_member_roles
+     *                       + a chave derivada LEADERSHIP (alguma linha de liderança), em MAIÚSCULAS
+     * @param leadership     ADMIN (LEAD só em lead-level=legacy), cargo de liderança, papel de liderança em algum projeto ou liderança transversal
      */
     public record UserContext(User user, String currentSquadId, List<String> squadIds, Set<String> roleKeys, boolean leadership) {
 
@@ -100,15 +114,13 @@ public class SquadAudienceService {
             addSquad(squads, m.projectId());
         }
 
-        Set<String> roleKeys = new LinkedHashSet<>();
-        String role = isPrivileged(tokenRole) ? tokenRole : user.getRole();
-        if (role != null) roleKeys.add(role.toUpperCase(Locale.ROOT));
-        if (user.getRole() != null) roleKeys.add(user.getRole().toUpperCase(Locale.ROOT));
+        Set<String> roleKeys = accountRoleKeys(user, tokenRole);
         for (MembershipDto m : memberships) {
             for (MembershipDto.RoleDto r : m.roles()) {
                 if (r.roleKey() != null && !r.roleKey().isBlank()) roleKeys.add(r.roleKey().toUpperCase(Locale.ROOT));
             }
         }
+        if (memberships.stream().anyMatch(MembershipDto::leadership)) roleKeys.add(LEADERSHIP_KEY);
 
         boolean leadership = isPrivileged(tokenRole) || isPrivileged(user.getRole())
                 || memberships.stream().anyMatch(MembershipDto::leadership);
@@ -169,12 +181,13 @@ public class SquadAudienceService {
             }
         }
 
-        Set<String> roleKeys = new LinkedHashSet<>();
-        String role = isPrivileged(tokenRole) ? tokenRole : user.getRole();
-        if (role != null) roleKeys.add(role.toUpperCase(Locale.ROOT));
-        if (user.getRole() != null) roleKeys.add(user.getRole().toUpperCase(Locale.ROOT));
+        Set<String> roleKeys = accountRoleKeys(user, tokenRole);
         for (UserProjectAccessDto.ProjectAccessItem p : projects) {
             if (p.getRoleKey() != null && !p.getRoleKey().isBlank()) roleKeys.add(p.getRoleKey().toUpperCase(Locale.ROOT));
+        }
+        if (projects.stream().anyMatch(UserProjectAccessDto.ProjectAccessItem::isLeadership)
+                || (access != null && access.isTransversalLeader())) {
+            roleKeys.add(LEADERSHIP_KEY);
         }
 
         boolean leadership = isPrivileged(tokenRole) || isPrivileged(user.getRole())
@@ -296,7 +309,10 @@ public class SquadAudienceService {
         return all;
     }
 
-    /** Usuários ativos com algum dos papéis: UserRole (ADMIN/LEAD/MEMBER) ou roleKey de project_member_roles. */
+    /**
+     * Usuários ativos com algum dos papéis: nível de conta (ADMIN/MEMBER), roleKey de project_member_roles ou a chave
+     * derivada {@link #LEADERSHIP_KEY} (alguma linha de liderança). Com lead-level=off, "LEAD" não casa ninguém.
+     */
     @Transactional(readOnly = true)
     public Set<String> userIdsWithRoles(Collection<String> roles) {
         Set<String> keys = upper(roles);
@@ -304,10 +320,25 @@ public class SquadAudienceService {
         if (keys.isEmpty()) {
             return result;
         }
-        result.addAll(userRepository.findActiveIdsByRoles(keys));
+        Set<String> accountRoles = new LinkedHashSet<>(keys);
+        if (keys.contains(LEADERSHIP_KEY) && leadPolicy.isLegacy()) {
+            accountRoles.add("LEAD"); // legacy: LEAD ainda vale "liderança" (os avisos foram migrados de LEAD para LEADERSHIP)
+        }
+        if (leadPolicy.isOff()) {
+            accountRoles.remove("LEAD"); // off: LEAD é MEMBER; o rótulo antigo não casa ninguém
+        }
+        if (!accountRoles.isEmpty()) {
+            result.addAll(userRepository.findActiveIdsByRoles(accountRoles));
+        }
         List<Link> links = new ArrayList<>();
         for (ProjectMemberRole r : projectMemberRoleRepository.findByRoleKeysUpper(keys)) {
             links.add(new Link(r.getProjectId(), r.getUserId(), r.getEmail(), r.getJiraAccountId()));
+        }
+        if (keys.contains(LEADERSHIP_KEY)) {
+            // Chave derivada: qualquer linha de liderança de project_member_roles (squad própria ou transversal).
+            for (ProjectMemberRole r : projectMemberRoleRepository.findLeadershipRows()) {
+                links.add(new Link(r.getProjectId(), r.getUserId(), r.getEmail(), r.getJiraAccountId()));
+            }
         }
         Resolved resolved = resolve(links);
         for (Link l : links) {
@@ -403,8 +434,31 @@ public class SquadAudienceService {
         return out;
     }
 
-    private static boolean isPrivileged(String role) {
-        return "ADMIN".equalsIgnoreCase(role) || "LEAD".equalsIgnoreCase(role);
+    /** ADMIN (e LEAD só em lead-level=legacy, Etapa 4). */
+    private boolean isPrivileged(String role) {
+        return leadPolicy.isPrivileged(role);
+    }
+
+    /**
+     * Chaves de papel vindas do NÍVEL DE CONTA. Em legacy: o valor gravado (ADMIN/LEAD/MEMBER) e, para o LEAD, também
+     * LEADERSHIP (os avisos migrados de LEAD para LEADERSHIP continuam alcançando-o). Com off, LEAD vale MEMBER.
+     */
+    private Set<String> accountRoleKeys(User user, String tokenRole) {
+        Set<String> keys = new LinkedHashSet<>();
+        String role = isPrivileged(tokenRole) ? tokenRole : user.getRole();
+        addAccountKey(keys, role);
+        addAccountKey(keys, user.getRole());
+        return keys;
+    }
+
+    private void addAccountKey(Set<String> keys, String role) {
+        if (role == null) return;
+        if (leadPolicy.isLegacy()) {
+            keys.add(role.toUpperCase(Locale.ROOT));
+            if (UserRole.isLegacyLead(role)) keys.add(LEADERSHIP_KEY);
+        } else {
+            keys.add(UserRole.parse(role).name());
+        }
     }
 
     private static String firstNonBlank(String... values) {

@@ -10,6 +10,7 @@ import com.agilespace.backend.domain.PokerParticipant;
 import com.agilespace.backend.domain.PokerVote;
 import com.agilespace.backend.domain.PokerRound;
 import com.agilespace.backend.domain.PokerChatMessage;
+import com.agilespace.backend.security.LeadPolicy;
 import com.agilespace.backend.repository.PokerChatMessageRepository;
 import com.agilespace.backend.repository.PokerRoomRepository;
 import com.agilespace.backend.repository.PokerParticipantRepository;
@@ -43,6 +44,21 @@ public class PokerService {
     private final PokerRoundRepository roundRepository;
     private final PokerChatMessageRepository chatMessageRepository;
     private final PokerWebSocketHandler webSocketHandler;
+
+    /** Etapa 4 (app.membership.lead-level). Montagem manual: legacy (LEAD concede, como antes). */
+    private LeadPolicy leadPolicy = LeadPolicy.LEGACY;
+    /** Liderança por vínculo na squad da sala (só consultada com lead-level=off). Opcional em montagens manuais. */
+    private SquadAccessService squadAccessService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setLeadPolicy(LeadPolicy leadPolicy) {
+        if (leadPolicy != null) this.leadPolicy = leadPolicy;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setSquadAccessService(SquadAccessService squadAccessService) {
+        this.squadAccessService = squadAccessService;
+    }
 
     /** Gatilhos de notificação (opcional: testes que montam o serviço à mão seguem sem eles). */
     private NotificationTriggers notificationTriggers;
@@ -252,18 +268,31 @@ public class PokerService {
         return saved;
     }
 
+    /** ADMIN (e LEAD só com {@code app.membership.lead-level=legacy}, Etapa 4): poder de sistema sobre qualquer sala. */
     private boolean isPrivilegedRole(String role) {
-        return "ADMIN".equalsIgnoreCase(role) || "LEAD".equalsIgnoreCase(role);
+        return leadPolicy.isPrivileged(role);
+    }
+
+    /**
+     * Autoridade sobre a sala: poder de sistema ({@link #isPrivilegedRole}) OU, com {@code lead-level=off}, liderança por
+     * VÍNCULO (project_member_roles com is_leadership) na squad da sala. Em legacy a regra é a de sempre (LEAD global).
+     */
+    private boolean hasRoomAuthority(PokerRoom room, String callerId, String callerRole) {
+        if (isPrivilegedRole(callerRole)) {
+            return true;
+        }
+        return leadPolicy.isOff() && squadAccessService != null && callerId != null && room.getTeam() != null
+                && squadAccessService.hasLeadershipLink(callerId, room.getTeam());
     }
 
     /**
      * Facilitador é transferível (ex.: host cai e outro participante assume), então o gate
-     * aqui é "já entrou na sala" (creatorId, participante com join registrado, ou ADMIN/LEAD) —
+     * aqui é "já entrou na sala" (creatorId, participante com join registrado, ou ADMIN; LEAD só em lead-level=legacy) —
      * não "só o criador original". Isso fecha o buraco real (outsider que nunca entrou na sala
      * mexendo via roomId adivinhado) sem travar o claim-facilitator do frontend.
      */
     private void requireRoomParticipant(PokerRoom room, String callerId, String callerRole) {
-        if (isPrivilegedRole(callerRole)) {
+        if (hasRoomAuthority(room, callerId, callerRole)) {
             return;
         }
         if (callerId != null && callerId.equals(room.getCreatorId())) {
@@ -291,7 +320,7 @@ public class PokerService {
     /**
      * Entrada/atualização de participante. A identidade vem do JWT, não do corpo:
      * o próprio usuário se registra, mas só vira facilitador se for o criador da sala,
-     * ADMIN/LEAD ou já for facilitador (o "assumir controle" do frontend grava o creatorId
+     * ADMIN (LEAD só em lead-level=legacy) ou já for facilitador (o "assumir controle" do frontend grava o creatorId
      * da sala antes). Editar outro participante (papel, rebaixar facilitador antigo) é coisa de facilitador.
      * A entrada também registra o usuário em participantIds da sala, com a sala travada, para que
      * entradas simultâneas não se atropelem nem tomem 409.
@@ -370,11 +399,12 @@ public class PokerService {
     }
 
     /**
-     * Facilitador no servidor: criador, ADMIN/LEAD, participante marcado como facilitador ou com papel
+     * Facilitador no servidor: criador, ADMIN (LEAD só em lead-level=legacy; com off, liderança da squad da sala por vínculo),
+     * participante marcado como facilitador ou com papel
      * "organizador" (é o mesmo critério que o cliente usa para mostrar os controles de facilitação).
      */
     private boolean isRoomFacilitator(PokerRoom room, String callerId, String callerRole) {
-        if (isPrivilegedRole(callerRole) || callerId.equals(room.getCreatorId())) {
+        if (hasRoomAuthority(room, callerId, callerRole) || callerId.equals(room.getCreatorId())) {
             return true;
         }
         return participantRepository.findById(room.getId() + "_" + callerId)
@@ -622,7 +652,7 @@ public class PokerService {
 
     /**
      * Exclui a sala inteira (votos, rodadas, chat, participantes). Mais restrito que as ações de facilitação:
-     * só quem criou a sala ou ADMIN/LEAD, igual à exclusão de quadro da Retro. Quem estiver na sala recebe
+     * só quem criou a sala ou ADMIN (LEAD só em lead-level=legacy), igual à exclusão de quadro da Retro. Quem estiver na sala recebe
      * ROOM_DELETED para sair dela.
      */
     @Transactional

@@ -8,6 +8,7 @@ import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.security.ApiKeyHashing;
 import com.agilespace.backend.security.ApiKeyLifecycle;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
+import com.agilespace.backend.security.LeadPolicy;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -22,13 +23,13 @@ import java.util.stream.Collectors;
 /**
  * Self-service de API key: qualquer usuário autenticado por JWT cria/lista/
  * revoga só as próprias chaves — fora de /api/admin, então não passa pelo
- * gate de ADMIN/LEAD do JwtAuthenticationFilter (qualquer papel autenticado
+ * gate de ADMIN do JwtAuthenticationFilter (qualquer papel autenticado
  * chega aqui). Escopo oferecido na criação é limitado pelo papel do chamador
  * (ver allowedScopesFor) — MEMBER só consegue os dois escopos de leitura menos
  * sensíveis, e squad:read é sempre travado na própria squad, nunca escolhível.
  *
  * /api/admin/api-keys (ApiKeyAdminController) continua existindo, pra visão
- * global de ADMIN/LEAD sobre as chaves de todo mundo — os dois controllers
+ * global de ADMIN sobre as chaves de todo mundo — os dois controllers
  * coexistem, este aqui não substitui aquele.
  */
 @RestController
@@ -40,6 +41,14 @@ public class ApiKeyController {
     private final UserRepository userRepository;
     private final ApiKeyLifecycle apiKeyLifecycle;
     private final com.agilespace.backend.service.SquadAccessService squadAccessService;
+
+    /** Etapa 4 (app.membership.lead-level). Montagem manual: legacy (LEAD concede, como antes). */
+    private LeadPolicy leadPolicy = LeadPolicy.LEGACY;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setLeadPolicy(LeadPolicy leadPolicy) {
+        if (leadPolicy != null) this.leadPolicy = leadPolicy;
+    }
 
     @GetMapping
     public ResponseEntity<List<ApiKey>> listMine(HttpServletRequest request) {
@@ -82,7 +91,7 @@ public class ApiKeyController {
 
         String squadId;
         if (privileged) {
-            // ADMIN/LEAD escolhe livremente (null = sem restrição, igual toda chave deles hoje).
+            // ADMIN (e LEAD em lead-level=legacy) escolhe livremente (null = sem restrição, igual toda chave deles hoje).
             Object squadIdRaw = body.get("squadId");
             squadId = squadIdRaw instanceof String s && !s.isBlank() ? s.trim() : null;
         } else if (normalizedScopes.contains(ApiKeyScope.SQUAD_READ.name())) {
@@ -188,8 +197,8 @@ public class ApiKeyController {
         return (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
     }
 
-    private static boolean isPrivileged(String role) {
-        return "ADMIN".equalsIgnoreCase(role) || "LEAD".equalsIgnoreCase(role);
+    private boolean isPrivileged(String role) {
+        return leadPolicy.isPrivileged(role);
     }
 
     /** MEMBER só pode auto-emitir os escopos de leitura menos sensíveis. */

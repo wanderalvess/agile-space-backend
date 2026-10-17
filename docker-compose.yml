@@ -69,6 +69,8 @@ services:
       APP_LINK_REQUESTS_SQUAD_APPROVAL: ${APP_LINK_REQUESTS_SQUAD_APPROVAL:-on}
       # Bootstrap de squad vazia em authz=new: off (padrão) | on. on deixa qualquer conta sem vínculo virar Agile Master de uma squad nova.
       APP_MEMBERSHIP_BOOTSTRAP: ${APP_MEMBERSHIP_BOOTSTRAP:-off}
+      # Nível de conta LEAD (Etapa 4): off (padrão) = não concede nada | legacy = como antes. Reverter = legacy. Ver docs/membership-api.md.
+      APP_MEMBERSHIP_LEAD_LEVEL: ${APP_MEMBERSHIP_LEAD_LEVEL:-off}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
       # OpenTelemetry: agente sempre presente na imagem (ver Dockerfile), inerte até
       # OTEL_JAVAAGENT_ENABLED=true. Vendor-neutro (OTLP) — funciona com SigNoz ou qualquer

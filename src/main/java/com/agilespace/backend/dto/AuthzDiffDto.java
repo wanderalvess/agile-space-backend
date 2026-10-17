@@ -10,7 +10,7 @@ import java.util.Map;
  *
  * @param mode                    {@code app.membership.authz} em vigor (a comparação é a mesma em qualquer modo)
  * @param usersChecked            usuários ativos comparados
- * @param usersSkippedPrivileged  ADMIN/LEAD (decisão idêntica nos dois modos; não entram na comparação)
+ * @param usersSkippedPrivileged  ADMIN (e LEAD em lead-level=legacy; decisão idêntica nos dois modos; não entram na comparação)
  * @param usersFailed             usuários cujo cálculo lançou exceção (também vão para o log)
  * @param pairsChecked            pares (usuário, squad) avaliados
  * @param usersWithDivergence     usuários com ao menos uma divergência

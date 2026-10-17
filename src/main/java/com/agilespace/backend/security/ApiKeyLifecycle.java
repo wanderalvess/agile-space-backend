@@ -39,6 +39,14 @@ public class ApiKeyLifecycle {
         this.userRepository = userRepository;
     }
 
+    /** Etapa 4 (app.membership.lead-level). Montagem manual: legacy (LEAD concede, como antes). */
+    private LeadPolicy leadPolicy = LeadPolicy.LEGACY;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setLeadPolicy(LeadPolicy leadPolicy) {
+        if (leadPolicy != null) this.leadPolicy = leadPolicy;
+    }
+
     /** Autorização por squad via vínculos (Etapa 2). Opcional: sem ela só vale users.squad_id, como sempre. */
     private com.agilespace.backend.service.SquadAccessService squadAccessService;
 
@@ -84,8 +92,9 @@ public class ApiKeyLifecycle {
         return Set.of(ApiKeyScope.KNOWLEDGE_READ.name(), ApiKeyScope.SQUAD_READ.name());
     }
 
-    public static boolean isPrivileged(String role) {
-        return "ADMIN".equalsIgnoreCase(role) || "LEAD".equalsIgnoreCase(role);
+    /** ADMIN, e LEAD só com {@code app.membership.lead-level=legacy} (Etapa 4): quem tem escopos amplos e squad livre. */
+    public boolean isPrivileged(String role) {
+        return leadPolicy.isPrivileged(role);
     }
 
     /**
@@ -122,13 +131,15 @@ public class ApiKeyLifecycle {
             key.setScopes(current);
             if (!privileged && current.contains(ApiKeyScope.SQUAD_READ.name())
                     && (key.getSquadId() == null || key.getSquadId().isBlank())) {
-                // SQUAD_READ sem restrição é privilégio de ADMIN/LEAD: trava na squad atual da pessoa.
+                // SQUAD_READ sem restrição é privilégio de ADMIN (e do LEAD em lead-level=legacy): trava na squad atual da pessoa.
                 // Etapa 2 (app.membership.authz): em new a "squad atual" é a ativa validada contra os vínculos.
                 String squad = squadAccessService != null ? squadAccessService.activeSquadFor("apikey", owner) : owner.getSquadId();
                 key.setSquadId(squad);
-                if ((squad == null || squad.isBlank()) && squadAccessService != null
-                        && squadAccessService.authzMode() == com.agilespace.backend.service.AuthzMode.NEW) {
+                boolean authzNew = squadAccessService != null
+                        && squadAccessService.authzMode() == com.agilespace.backend.service.AuthzMode.NEW;
+                if ((squad == null || squad.isBlank()) && (authzNew || leadPolicy.isOff())) {
                     // Sem vínculo nenhum não há squad para travar: a chave perde o escopo em vez de ficar sem restrição.
+                    // Etapa 4 (lead-level=off): é o caso da chave de um ex-LEAD, que era irrestrita (squadId nulo).
                     current.remove(ApiKeyScope.SQUAD_READ.name());
                     key.setScopes(current);
                 }

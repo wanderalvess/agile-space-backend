@@ -38,6 +38,19 @@ public class AuthService {
     private final JwtTokenUtil jwtTokenUtil;
     private final JiraAccountIdGuard jiraAccountIdGuard;
 
+    /** Etapa 4 (app.membership.lead-level). Montagem manual: legacy (o nível da conta sai como está gravado). */
+    private com.agilespace.backend.security.LeadPolicy leadPolicy = com.agilespace.backend.security.LeadPolicy.LEGACY;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setLeadPolicy(com.agilespace.backend.security.LeadPolicy leadPolicy) {
+        if (leadPolicy != null) this.leadPolicy = leadPolicy;
+    }
+
+    /** Com lead-level=off o nível de conta só tem dois valores: um LEAD legado sai como MEMBER no token e na sessão. */
+    private String sessionRole(String role) {
+        return leadPolicy.isOff() ? com.agilespace.backend.domain.UserRole.parse(role).name() : role;
+    }
+
     /**
      * Modelo novo de vínculo (opcionais, fora do construtor: o modo decide se entram em jogo; ausentes = legacy).
      * Ver app.membership.mode em application.yml e docs/membership-api.md.
@@ -474,7 +487,7 @@ public class AuthService {
                 user.getId(),
                 user.getEmail(),
                 user.getName(),
-                user.getRole(),
+                sessionRole(user.getRole()),
                 activeProjId,
                 segment,
                 tribe,
@@ -488,7 +501,7 @@ public class AuthService {
                 .id(user.getId())
                 .email(user.getEmail())
                 .name(user.getName())
-                .role(user.getRole())
+                .role(sessionRole(user.getRole()))
                 .jobTitle(user.getJobTitle())
                 .authProvider(user.getAuthProvider())
                 .jiraAccountId(user.getJiraAccountId())

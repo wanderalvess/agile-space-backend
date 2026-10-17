@@ -154,7 +154,7 @@ public class PokerController {
         return ResponseEntity.noContent().build();
     }
 
-    /** Exclui a sala e tudo dela. Só quem criou a sala ou ADMIN/LEAD. */
+    /** Exclui a sala e tudo dela. Só quem criou a sala ou ADMIN (LEAD só em lead-level=legacy). */
     @DeleteMapping("/{roomId}")
     public ResponseEntity<Void> deleteRoom(@PathVariable("roomId") String roomId, HttpServletRequest request) {
         pokerService.deleteRoom(roomId, callerId(request), callerRole(request));

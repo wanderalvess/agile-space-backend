@@ -13,6 +13,7 @@ import com.agilespace.backend.repository.ProjectMemberRoleRepository;
 import com.agilespace.backend.repository.SquadMemberRepository;
 import com.agilespace.backend.repository.SquadRepository;
 import com.agilespace.backend.repository.UserRepository;
+import com.agilespace.backend.security.LeadPolicy;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.slf4j.LoggerFactory;
@@ -206,6 +207,13 @@ public final class AuthzWorld {
         return new SquadAccessService(userRepository, squadService, resolver, membership, shadow(mode));
     }
 
+    /** Etapa 4: o mesmo serviço com a política de LEAD escolhida ({@code lead-level}). */
+    public SquadAccessService access(AuthzMode mode, LeadPolicy policy) {
+        SquadAccessService access = access(mode);
+        access.setLeadPolicy(policy);
+        return access;
+    }
+
     public SquadAudienceService audience(AuthzMode mode) {
         AuthzShadow shadow = shadow(mode);
         SquadAccessService access = new SquadAccessService(userRepository, squadService, resolver, membership, shadow);
@@ -213,9 +221,21 @@ public final class AuthzWorld {
                 projectRepository, membership, shadow, access);
     }
 
+    public SquadAudienceService audience(AuthzMode mode, LeadPolicy policy) {
+        SquadAudienceService audience = audience(mode);
+        audience.setLeadPolicy(policy);
+        return audience;
+    }
+
     public AuthzDiffService diff() {
         return new AuthzDiffService(userRepository, projectRepository, pmrRepository, rosterRepository, resolver, membership,
                 shadow(AuthzMode.SHADOW));
+    }
+
+    public AuthzDiffService diff(LeadPolicy policy) {
+        AuthzDiffService diff = diff();
+        diff.setLeadPolicy(policy);
+        return diff;
     }
 
     // ---------- logs ----------

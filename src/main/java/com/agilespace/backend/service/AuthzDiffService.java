@@ -11,6 +11,7 @@ import com.agilespace.backend.repository.ProjectConfigRepository;
 import com.agilespace.backend.repository.ProjectMemberRoleRepository;
 import com.agilespace.backend.repository.SquadMemberRepository;
 import com.agilespace.backend.repository.UserRepository;
+import com.agilespace.backend.security.LeadPolicy;
 import com.agilespace.backend.security.SquadLeadership;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -38,7 +39,8 @@ import java.util.TreeMap;
  * Um teste cruza essas regras com as decisões reais do {@link SquadAccessService}.
  *
  * <p>Universo: todas as squads que existem em {@code projects} mais as que aparecem para o usuário em users.squad_id,
- * roster ou vínculos (squads só do roster também perderiam acesso). ADMIN/LEAD são iguais nos dois modos e ficam de fora.
+ * roster ou vínculos (squads só do roster também perderiam acesso). ADMIN (e LEAD, só com lead-level=legacy) são iguais nos
+ * dois modos e ficam de fora; com lead-level=off o LEAD é um MEMBER e entra na comparação.
  */
 @Service
 @Slf4j
@@ -60,6 +62,14 @@ public class AuthzDiffService {
     private final UserProjectResolverService legacyResolver;
     private final MembershipService membershipService;
     private final AuthzShadow authz;
+
+    /** Etapa 4 (app.membership.lead-level). Montagem manual: legacy (LEAD fora da comparação, como antes). */
+    private LeadPolicy leadPolicy = LeadPolicy.LEGACY;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setLeadPolicy(LeadPolicy leadPolicy) {
+        if (leadPolicy != null) this.leadPolicy = leadPolicy;
+    }
 
     public AuthzDiffService(UserRepository userRepository, ProjectConfigRepository projectConfigRepository,
                             ProjectMemberRoleRepository projectMemberRoleRepository, SquadMemberRepository squadMemberRepository,
@@ -241,7 +251,8 @@ public class AuthzDiffService {
         return "MISSI".equals(k) ? "DDWMISSI" : k;
     }
 
-    private static boolean isPrivileged(String role) {
-        return "ADMIN".equalsIgnoreCase(role) || "LEAD".equalsIgnoreCase(role);
+    /** ADMIN (e LEAD só em lead-level=legacy, Etapa 4: com off o LEAD é tratado como MEMBER e entra na comparação). */
+    private boolean isPrivileged(String role) {
+        return leadPolicy.isPrivileged(role);
     }
 }

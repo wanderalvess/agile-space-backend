@@ -15,7 +15,7 @@ package com.agilespace.backend.service;
  *   <li>{@code newLinked}/{@code newLeader}: o {@link MembershipService} devolve a squad (e com liderança);</li>
  *   <li>{@code squadHasLeadership}: a squad tem alguma linha pmr de liderança cadastrada (de qualquer pessoa).</li>
  * </ul>
- * ADMIN e LEAD não aparecem: são resolvidos antes, iguais nos dois modos (LEAD fica até a Etapa 4).
+ * ADMIN (e LEAD, só com app.membership.lead-level=legacy) não aparecem: são resolvidos antes, iguais nos dois modos.
  */
 final class AuthzRules {
 

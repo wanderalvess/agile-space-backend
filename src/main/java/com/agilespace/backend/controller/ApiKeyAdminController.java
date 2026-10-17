@@ -20,7 +20,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * CRUD de API keys pra ADMIN/LEAD — /api/admin/** já exige esse papel via
+ * CRUD de API keys pra ADMIN — /api/admin/** já exige esse papel via
  * JwtAuthenticationFilter, nenhum gate extra necessário aqui. Visão global:
  * lista/revoga as chaves de todo mundo, não só as próprias (diferente de
  * ApiKeyController, o self-service em /api/api-keys). A chave crua só existe

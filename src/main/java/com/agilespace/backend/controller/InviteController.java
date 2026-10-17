@@ -8,6 +8,7 @@ import com.agilespace.backend.dto.AuthResponseDto;
 import com.agilespace.backend.repository.ProjectMemberRoleRepository;
 import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
+import com.agilespace.backend.security.LeadPolicy;
 import com.agilespace.backend.security.SquadLeadership;
 import com.agilespace.backend.service.AuthService;
 import com.agilespace.backend.service.AuthzShadow;
@@ -39,8 +40,16 @@ public class InviteController {
     private final SquadAccessService squadAccessService;
     private final AuthzShadow authzShadow;
 
+    /** Etapa 4 (app.membership.lead-level). Montagem manual: legacy (LEAD concede, como antes). */
+    private LeadPolicy leadPolicy = LeadPolicy.LEGACY;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setLeadPolicy(LeadPolicy leadPolicy) {
+        if (leadPolicy != null) this.leadPolicy = leadPolicy;
+    }
+
     /**
-     * ADMIN/LEAD (tier de sistema) entram em qualquer squad; liderança de negócio só
+     * ADMIN (tier de sistema; LEAD só com app.membership.lead-level=legacy) entra em qualquer squad; liderança de negócio só
      * entra no squad ao qual já está vinculada — ao contrário do SquadController.
      * requireSquadWriteAccess legado, não aceita liderança pra qualquer squadId.
      *
@@ -54,13 +63,13 @@ public class InviteController {
         String userId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
         User caller = userId != null ? userRepository.findById(userId).orElse(null) : null;
 
-        if ("ADMIN".equalsIgnoreCase(role) || "LEAD".equalsIgnoreCase(role)) {
+        if (leadPolicy.isPrivileged(role)) {
             return caller;
         }
         if (caller == null) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a administradores ou lideranças do squad.");
         }
-        if ("ADMIN".equalsIgnoreCase(caller.getRole()) || "LEAD".equalsIgnoreCase(caller.getRole())) {
+        if (leadPolicy.isPrivileged(caller.getRole())) {
             return caller;
         }
 

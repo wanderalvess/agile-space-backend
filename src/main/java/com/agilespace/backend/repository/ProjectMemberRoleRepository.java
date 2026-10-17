@@ -32,6 +32,10 @@ public interface ProjectMemberRoleRepository extends JpaRepository<ProjectMember
     @Query("SELECT pmr FROM ProjectMemberRole pmr WHERE UPPER(pmr.projectId) IN :ids")
     List<ProjectMemberRole> findByProjectIdsUpper(@Param("ids") Collection<String> upperProjectIds);
 
+    /** Todas as linhas de liderança (is_leadership), de qualquer squad: base do público de aviso LEADERSHIP (Etapa 4). */
+    @Query("SELECT pmr FROM ProjectMemberRole pmr WHERE pmr.isLeadership = true")
+    List<ProjectMemberRole> findLeadershipRows();
+
     @Query("SELECT pmr FROM ProjectMemberRole pmr WHERE UPPER(pmr.roleKey) IN :keys")
     List<ProjectMemberRole> findByRoleKeysUpper(@Param("keys") Collection<String> upperRoleKeys);
 }
