@@ -92,6 +92,10 @@ app:
     # (profile "proxy") use TRUSTED_PROXIES=172.16.0.0/12 (faixa padrão das redes Docker); sem isso todos
     # compartilham o balde do proxy. Ver DEPLOYMENT.md.
     trusted-proxies: ${TRUSTED_PROXIES:}
+  brainstorming:
+    # Segundos que o facilitador precisa estar offline (sem WebSocket na sala) para outro participante assumir a facilitação.
+    # Criador do mural e ADMIN assumem sempre. Ver docs/ceremony-brainstorming-api.md.
+    facilitator-offline-seconds: ${BRAINSTORMING_FACILITATOR_OFFLINE_SECONDS:60}
   cors:
     # Lista separada por vírgula das origens que podem chamar a API com credenciais
     # (ver WebCorsConfig/WebSocketConfig). Default cobre só o frontend em dev local

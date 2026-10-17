@@ -16,7 +16,7 @@ import java.util.Optional;
  *   <li>POKER: sessionEndedAt → FINISHED; modo assíncrono → ASYNC_OPEN; sessionStartedAt → LIVE; senão PLANNING.</li>
  *   <li>SHOWCASE: planning (ou outro status desconhecido) → PLANNING; active → LIVE; finished → FINISHED.</li>
  *   <li>HEALTH_CHECK: collecting → ASYNC_OPEN; finished → FINISHED.</li>
- *   <li>RETRO / BRAINSTORMING: não têm estado de encerramento no modelo. LIVE se houve atividade nas últimas
+ *   <li>RETRO / BRAINSTORMING: sem estado de encerramento próprio (o Brainstorming encerrado pelo facilitador, V80, é FINISHED). LIVE se houve atividade nas últimas
  *       {@link #BOARD_ACTIVITY_WINDOW} (3 h), senão FINISHED.</li>
  *   <li>Sessão abandonada: LIVE sem atividade há mais de {@link #STALE_LIVE} (12 h) vira FINISHED.</li>
  *   <li>Sala aguardando (PLANNING) sem nenhum sinal há mais de {@link #PLANNING_WINDOW} (24 h) não entra em "ao vivo"
@@ -92,6 +92,11 @@ public class SessionStatusResolver {
 
     public SessionStatus brainstorming(Instant lastActivity, Instant now) {
         return recentBoard(lastActivity, now);
+    }
+
+    /** Mural encerrado pelo facilitador (V80) é FINISHED na hora; os demais seguem a regra de atividade recente. */
+    public SessionStatus brainstorming(Instant lastActivity, Instant now, boolean finishedByFacilitator) {
+        return finishedByFacilitator ? SessionStatus.FINISHED : recentBoard(lastActivity, now);
     }
 
     private static SessionStatus recentBoard(Instant lastActivity, Instant now) {

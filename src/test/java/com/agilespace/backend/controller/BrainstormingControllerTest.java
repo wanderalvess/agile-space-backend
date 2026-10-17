@@ -134,4 +134,33 @@ public class BrainstormingControllerTest {
         assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
         assertEquals("Apenas o facilitador pode alterar a sessão.", response.getBody().get("message"));
     }
+
+    @Test
+    public void testFinishReopenClaim_delegateWithCallerFromToken() {
+        BrainstormingBoard board = new BrainstormingBoard();
+        when(service.finishBoard(eq("b1"), any(CeremonyCaller.class))).thenReturn(board);
+        when(service.reopenBoard(eq("b1"), any(CeremonyCaller.class))).thenReturn(board);
+        when(service.claimFacilitation(eq("b1"), any(CeremonyCaller.class))).thenReturn(board);
+
+        assertEquals(HttpStatus.OK, controller.finishBoard("b1", request("u1", "MEMBER")).getStatusCode());
+        assertEquals(HttpStatus.OK, controller.reopenBoard("b1", request("u1", "MEMBER")).getStatusCode());
+        assertEquals(HttpStatus.OK, controller.claimFacilitation("b1", request("u9", "MEMBER")).getStatusCode());
+
+        ArgumentCaptor<CeremonyCaller> caller = ArgumentCaptor.forClass(CeremonyCaller.class);
+        verify(service).claimFacilitation(eq("b1"), caller.capture());
+        assertEquals("u9", caller.getValue().id());
+    }
+
+    @Test
+    public void testTransfer_readsUserIdFromBodyAndToleratesMissingBody() throws Exception {
+        BrainstormingBoard board = new BrainstormingBoard();
+        when(service.transferFacilitation(eq("b1"), eq("bia"), any(CeremonyCaller.class))).thenReturn(board);
+        when(service.transferFacilitation(eq("b1"), isNull(), any(CeremonyCaller.class)))
+                .thenThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe a pessoa que vai facilitar."));
+        com.fasterxml.jackson.databind.ObjectMapper json = new com.fasterxml.jackson.databind.ObjectMapper();
+
+        assertEquals(HttpStatus.OK, controller.transferFacilitation("b1", json.readTree("{\"userId\":\"bia\"}"), request("u1", "MEMBER")).getStatusCode());
+        assertThrows(ResponseStatusException.class, () -> controller.transferFacilitation("b1", null, request("u1", "MEMBER")));
+        assertThrows(ResponseStatusException.class, () -> controller.transferFacilitation("b1", json.readTree("{\"userId\":null}"), request("u1", "MEMBER")));
+    }
 }

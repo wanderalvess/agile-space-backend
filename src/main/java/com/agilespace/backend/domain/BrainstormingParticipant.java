@@ -33,4 +33,12 @@ public class BrainstormingParticipant {
     private Boolean isCreator = false;
 
     private String lastActive;
+
+    /** Só na saída: o nome para exibir (hoje o apelido). Não é gravado. */
+    @Transient
+    private String displayName;
+
+    /** Só na saída: é o facilitador atual do mural. Não é gravado. */
+    @Transient
+    private Boolean facilitator;
 }

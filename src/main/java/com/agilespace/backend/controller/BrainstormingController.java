@@ -64,6 +64,34 @@ public class BrainstormingController {
         return ResponseEntity.ok(brainstormingService.patchBoard(id, patch, caller(request)));
     }
 
+    /** Encerra o mural (leitura continua; escritas viram 409). Facilitador, criador ou ADMIN; idempotente. */
+    @PostMapping("/{id}/finish")
+    public ResponseEntity<BrainstormingBoard> finishBoard(@PathVariable("id") String id, HttpServletRequest request) {
+        return ResponseEntity.ok(brainstormingService.finishBoard(id, caller(request)));
+    }
+
+    /** Reabre o mural encerrado. Mesma permissão de {@code /finish}; idempotente. */
+    @PostMapping("/{id}/reopen")
+    public ResponseEntity<BrainstormingBoard> reopenBoard(@PathVariable("id") String id, HttpServletRequest request) {
+        return ResponseEntity.ok(brainstormingService.reopenBoard(id, caller(request)));
+    }
+
+    /** Assume a facilitação (facilitador offline há mais de N s; criador e ADMIN sempre). */
+    @PostMapping("/{id}/facilitation/claim")
+    public ResponseEntity<BrainstormingBoard> claimFacilitation(@PathVariable("id") String id, HttpServletRequest request) {
+        return ResponseEntity.ok(brainstormingService.claimFacilitation(id, caller(request)));
+    }
+
+    /** Passa a facilitação a outra pessoa da sala (corpo: {@code {"userId": "..."}}). Facilitador atual ou ADMIN. */
+    @PostMapping("/{id}/facilitation/transfer")
+    public ResponseEntity<BrainstormingBoard> transferFacilitation(
+            @PathVariable("id") String id,
+            @RequestBody(required = false) JsonNode body,
+            HttpServletRequest request) {
+        String userId = body == null || !body.hasNonNull("userId") ? null : body.get("userId").asText(null);
+        return ResponseEntity.ok(brainstormingService.transferFacilitation(id, userId, caller(request)));
+    }
+
     @GetMapping
     public ResponseEntity<List<BrainstormingBoard>> listBoards(@RequestParam("squadId") String squadId, HttpServletRequest request) {
         squadAccessService.requireSquadReadAccess(squadId, request);

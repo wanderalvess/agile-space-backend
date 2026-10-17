@@ -7,16 +7,19 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
+import java.util.function.LongSupplier;
 
 /**
  * Quem está online em cada sala: {@code (módulo, sala) -> userId -> sessões WebSocket abertas}. Em memória, por processo
@@ -54,6 +57,12 @@ public class PresenceRegistry {
     private final Map<RoomKey, Room> rooms = new ConcurrentHashMap<>();
     private final AtomicLong versionSeq = new AtomicLong();
     private final Map<PresenceModule, AtomicInteger> sessionCounts = new EnumMap<>(PresenceModule.class);
+
+    /** Quando cada usuário ficou offline numa sala (epoch ms): só quem já esteve online e saiu. Ver {@link #offlineFor}. */
+    private final Map<LeftKey, Long> leftAt = new ConcurrentHashMap<>();
+    private static final long LEFT_AT_RETENTION_MS = Duration.ofHours(1).toMillis();
+    private volatile LongSupplier clock = System::currentTimeMillis;
+    private final long startedAt = System.currentTimeMillis();
 
     public PresenceRegistry() {
         this((MeterRegistry) null);
@@ -106,6 +115,9 @@ public class PresenceRegistry {
             result[0] = snapshotOf(key, next);
             return next;
         });
+        if (changed[0]) {
+            leftAt.remove(leftKey(module, roomId, userId));
+        }
         log.debug("Presence join module={} room={} changed={} online={}", module.path(), roomId, changed[0], result[0].total());
         return new Change(changed[0], result[0]);
     }
@@ -134,6 +146,9 @@ public class PresenceRegistry {
                     : snapshotOf(key, next);
             return next;
         });
+        if (changed[0]) {
+            leftAt.put(leftKey(module, roomId, userId), clock.getAsLong());
+        }
         log.debug("Presence leave module={} room={} changed={} online={}", module.path(), roomId, changed[0], result[0].total());
         return new Change(changed[0], result[0]);
     }
@@ -144,6 +159,8 @@ public class PresenceRegistry {
      */
     public List<Change> sweepDeadSessions() {
         List<Change> changes = new ArrayList<>();
+        long cutoff = clock.getAsLong() - LEFT_AT_RETENTION_MS;
+        leftAt.values().removeIf(t -> t < cutoff);
         for (RoomKey key : new ArrayList<>(rooms.keySet())) {
             boolean[] changed = {false};
             Snapshot[] result = new Snapshot[1];
@@ -157,6 +174,9 @@ public class PresenceRegistry {
                         current = without(current, user.getKey(), s.getKey(), userGone);
                         sessionCounts.get(k.module()).decrementAndGet();
                         changed[0] |= userGone[0];
+                        if (userGone[0]) {
+                            leftAt.put(leftKey(k.module(), k.roomId(), user.getKey()), clock.getAsLong());
+                        }
                         if (current == null) break outer;
                     }
                 }
@@ -171,6 +191,33 @@ public class PresenceRegistry {
             }
         }
         return changes;
+    }
+
+    /**
+     * Há quanto tempo o usuário está offline nesta sala, ou vazio se está online agora. Quem nunca foi visto online neste
+     * processo (ou saiu há mais de 1 h, quando o registro é descartado) conta como offline desde o início do processo (ou
+     * desde o descarte): conservador, para um reinício do servidor não parecer "facilitador sumiu há horas".
+     */
+    public Optional<Duration> offlineFor(PresenceModule module, String roomId, String userId) {
+        if (module == null || isBlank(roomId) || isBlank(userId)) return Optional.empty();
+        Room room = rooms.get(new RoomKey(module, roomId));
+        if (room != null && room.users().containsKey(userId)) return Optional.empty();
+        long now = clock.getAsLong();
+        Long since = leftAt.get(leftKey(module, roomId, userId));
+        long from = since != null ? since : startedAt;
+        return Optional.of(Duration.ofMillis(Math.max(0, now - from)));
+    }
+
+    /** Só para testes: troca o relógio (epoch ms). */
+    public void useClock(LongSupplier clock) {
+        this.clock = clock != null ? clock : System::currentTimeMillis;
+    }
+
+    private record LeftKey(PresenceModule module, String roomId, String userId) {
+    }
+
+    private static LeftKey leftKey(PresenceModule module, String roomId, String userId) {
+        return new LeftKey(module, roomId, userId);
     }
 
     /** Estado atual da sala (lista vazia e versão 0 se não há ninguém). */

@@ -264,4 +264,81 @@ class PresenceRegistryTest {
         assertEquals(1, changedCount, "só a última saída muda a lista");
         assertEquals(0, r.roomCount());
     }
+
+    // --- offlineFor (usado por "assumir a facilitação" do Brainstorming) ---
+
+    @Test
+    void offlineForIsEmptyWhileOnlineAndCountsFromTheLastSessionLeaving() {
+        PresenceRegistry r = new PresenceRegistry();
+        java.util.concurrent.atomic.AtomicLong now = new java.util.concurrent.atomic.AtomicLong(10_000);
+        r.useClock(now::get);
+        r.join(M, "room", "ana", "s1", null);
+        r.join(M, "room", "ana", "s2", null);
+        assertTrue(r.offlineFor(M, "room", "ana").isEmpty());
+
+        now.addAndGet(5_000);
+        r.leave(M, "room", "ana", "s1");
+        assertTrue(r.offlineFor(M, "room", "ana").isEmpty(), "ainda tem uma aba");
+
+        now.addAndGet(5_000);
+        r.leave(M, "room", "ana", "s2");
+        now.addAndGet(7_000);
+        assertEquals(java.time.Duration.ofSeconds(7), r.offlineFor(M, "room", "ana").orElseThrow());
+    }
+
+    @Test
+    void rejoiningClearsTheOfflineClockAndRoomsAreIndependent() {
+        PresenceRegistry r = new PresenceRegistry();
+        java.util.concurrent.atomic.AtomicLong now = new java.util.concurrent.atomic.AtomicLong(10_000);
+        r.useClock(now::get);
+        r.join(M, "room", "ana", "s1", null);
+        r.leave(M, "room", "ana", "s1");
+        now.addAndGet(60_000);
+        assertEquals(java.time.Duration.ofSeconds(60), r.offlineFor(M, "room", "ana").orElseThrow());
+        assertNotEquals(java.time.Duration.ofSeconds(60), r.offlineFor(M, "outra", "ana").orElseThrow(), "outra sala não herda a saída");
+
+        r.join(M, "room", "ana", "s2", null);
+        assertTrue(r.offlineFor(M, "room", "ana").isEmpty());
+        r.leave(M, "room", "ana", "s2");
+        now.addAndGet(1_000);
+        assertEquals(java.time.Duration.ofSeconds(1), r.offlineFor(M, "room", "ana").orElseThrow());
+        assertNotEquals(java.time.Duration.ofSeconds(1), r.offlineFor(PresenceModule.POKER, "room", "ana").orElseThrow(), "outro módulo não herda a saída");
+    }
+
+    @Test
+    void neverSeenUserIsOfflineSinceTheProcessStartAndBadInputIsEmpty() {
+        PresenceRegistry r = new PresenceRegistry();
+        java.time.Duration d = r.offlineFor(M, "room", "fantasma").orElseThrow();
+        assertTrue(d.toSeconds() < 5, "o processo acabou de subir");
+        assertTrue(r.offlineFor(null, "room", "ana").isEmpty());
+        assertTrue(r.offlineFor(M, " ", "ana").isEmpty());
+        assertTrue(r.offlineFor(M, "room", null).isEmpty());
+    }
+
+    @Test
+    void sweepRecordsTheDepartureOfZombieSessions() {
+        PresenceRegistry r = new PresenceRegistry();
+        java.util.concurrent.atomic.AtomicLong now = new java.util.concurrent.atomic.AtomicLong(10_000);
+        r.useClock(now::get);
+        AtomicBoolean alive = new AtomicBoolean(true);
+        r.join(M, "room", "ana", "s1", alive::get);
+        alive.set(false);
+        now.addAndGet(1_000);
+        assertEquals(1, r.sweepDeadSessions().size());
+        now.addAndGet(9_000);
+        assertEquals(java.time.Duration.ofSeconds(9), r.offlineFor(M, "room", "ana").orElseThrow());
+    }
+
+    @Test
+    void oldDepartureRecordsAreDiscardedBySweep() {
+        PresenceRegistry r = new PresenceRegistry();
+        java.util.concurrent.atomic.AtomicLong now = new java.util.concurrent.atomic.AtomicLong(10_000);
+        r.useClock(now::get);
+        r.join(M, "room", "ana", "s1", null);
+        r.leave(M, "room", "ana", "s1");
+        now.addAndGet(java.time.Duration.ofHours(2).toMillis());
+        r.sweepDeadSessions();
+        // sem o registro, cai no início do processo (muito mais recente que o relógio simulado: duração zero, nunca negativa)
+        assertFalse(r.offlineFor(M, "room", "ana").orElseThrow().isNegative());
+    }
 }
