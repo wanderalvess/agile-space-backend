@@ -207,7 +207,8 @@ Regras:
   `points`, `cardKind`, `chartType`, `chartTitle`, `chartDisplay`, `assignee`, `url`, `decision`, `preparationStatus`,
   `feedback`, `project`, `versionSuporte`, `versionMaster`, `versionRelease`, `versionDevelop`, `evidence`, `metrics`.
 - `evidence` é **mesclado campo a campo** (enviar só `{ "solution": "..." }` não apaga o `problem`); `metrics` é **substituído
-  por inteiro** quando enviado; os demais são trocados. Campo ausente = não mexe; campo `null` = limpa.
+  por inteiro** quando enviado (`"metrics": null` limpa a lista); os demais são trocados. Campo ausente = não mexe; campo
+  `null` = limpa (exceto `evidence`, que precisa ser um objeto: `null` é ignorado).
 - Ignorados em silêncio (como no POST): `id`, `sessionId`, `order`, `attachments`, `updatedAt`, `decidedBy`, `decidedByName`,
   `decidedAt`, `approvedAt` e qualquer campo desconhecido. A autoria da decisão é sempre do servidor.
 - A trava PO/SME (seção 1) vale para `decision` e `feedback`: `403` com `code: "DECISION_RESTRICTED"`.
@@ -277,7 +278,8 @@ antigo, "a última gravação vence"):
 | card novo (id inexistente na Review) | cria com `version` 1 |
 | card que não veio no corpo | continua sendo removido (como hoje: o POST é autoritativo sobre a lista) |
 
-`staleCardIds` só existe na resposta do POST, e só quando algo foi mantido. O cliente que usa o resultado do POST como verdade
+`staleCardIds` só existe na resposta do POST (e no `SESSION_UPDATED` desse mesmo salvamento, onde pode ser ignorado), e só quando
+algo foi mantido. O cliente que usa o resultado do POST como verdade
 (o atual faz) já mostra o card do servidor; um cliente novo pode avisar "o card X foi alterado por outra pessoa".
 
 Não mesclam: ordem dos cards, lista de integrantes e campos da sessão (continuam "última gravação vence"). A remoção de card
