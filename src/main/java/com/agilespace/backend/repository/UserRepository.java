@@ -16,6 +16,9 @@ public interface UserRepository extends JpaRepository<User, String> {
     List<User> findByEmailStartingWithIgnoreCase(String emailPrefix);
     Optional<User> findByJiraAccountId(String jiraAccountId);
 
+    /** Contas com o nível de conta informado (sem caixa). Usado pela ferramenta de rebaixamento de LEAD (Etapa 4). */
+    List<User> findByRoleIgnoreCase(String role);
+
     /** Quantos admins ativos existem (guarda do último admin). */
     long countByRoleIgnoreCaseAndActiveTrue(String role);
 

@@ -35,7 +35,7 @@ public class MembershipReportService {
      * CTE que espelha o resolvedor (UserProjectResolverService.resolveUserAccess): a linha pmr pertence à conta por
      * user_id OU e-mail OU conta do Jira. Uma linha que casa com duas contas aparece para as duas, como no resolvedor.
      */
-    private static final String PMR_U = """
+    static final String PMR_U = """
             WITH pmr_u AS (
               SELECT pmr.id AS pmr_id, UPPER(BTRIM(pmr.project_id)) AS project_up, pmr.role_name,
                      UPPER(pmr.role_key) AS role_key, pmr.is_leadership, u.id AS user_id
@@ -280,14 +280,27 @@ public class MembershipReportService {
                             """),
             new CategoryDef("LEAD_USERS",
                     "Usuários com nível de acesso LEAD",
-                    "Contas ativas com users.role = LEAD e em quantas squads elas têm liderança por vínculo "
-                            + "(squads_lideranca=0 perderia todo o acesso quando o LEAD sair).",
+                    "Contas ativas com users.role = LEAD (nível legado: com app.membership.lead-level=off não concede nada) e em "
+                            + "quantas squads elas têm liderança por vínculo (squads_lideranca=0 perderia todo o poder ao sair de LEAD; "
+                            + "veja LEAD_NO_LEADERSHIP_LINK).",
                     PMR_U + """
                             SELECT u.id AS id, u.email AS email, u.squad_id AS squad,
                                    'squads_lideranca=' || (COUNT(DISTINCT p.project_up) FILTER (WHERE p.is_leadership))::text AS detail
                             FROM users u LEFT JOIN pmr_u p ON p.user_id = u.id
                             WHERE UPPER(u.role) = 'LEAD' AND u.is_active IS TRUE
                             GROUP BY u.id, u.email, u.squad_id
+                            """),
+            new CategoryDef("LEAD_NO_LEADERSHIP_LINK",
+                    "LEAD sem nenhum vínculo de liderança",
+                    "Contas ativas com users.role = LEAD que não têm NENHUMA linha de liderança (is_leadership) em project_member_roles "
+                            + "(por conta, e-mail ou conta do Jira). Sair de LEAD tira todo o poder delas: crie o vínculo de liderança (ou "
+                            + "aceite a perda) antes de POST /api/admin/membership/lead-demotion?apply=true. Subconjunto de LEAD_USERS "
+                            + "(squads_lideranca=0).",
+                    PMR_U + """
+                            SELECT u.id AS id, u.email AS email, u.squad_id AS squad, 'sem_lideranca_por_vinculo' AS detail
+                            FROM users u
+                            WHERE UPPER(u.role) = 'LEAD' AND u.is_active IS TRUE
+                              AND NOT EXISTS (SELECT 1 FROM pmr_u p WHERE p.user_id = u.id AND p.is_leadership)
                             """),
             new CategoryDef("TRANSVERSAL_LEADERS",
                     "Liderança transversal (tribo/segmento)",
@@ -391,7 +404,7 @@ public class MembershipReportService {
         return new MembershipReportDto.Category(WOULD_LOSE_ACCESS,
                 "Perderia acesso quando a autorização passar só para os vínculos",
                 "Pessoa que o legado deixa acessar a squad (users.squad_id, roster squad_members, cargo de liderança ou o fallback "
-                        + "de squad sem liderança) e que a regra nova (app.membership.authz=new: só project_member_roles, ADMIN/LEAD) "
+                        + "de squad sem liderança) e que a regra nova (app.membership.authz=new: só project_member_roles, ADMIN; LEAD só com lead-level=legacy) "
                         + "NEGARIA. Trate antes de virar a chave: crie o vínculo (convite, pedido de vínculo, importação do Jira) ou aceite a "
                         + "perda. Uma linha por pessoa, squad e ponto de decisão (matchesSquad = ler; canManageSquad = gerenciar; "
                         + "isSquadLeadership = liderança estrita). Rótulos: ONLY_ROSTER, ONLY_SQUAD_ID, ROSTER_AND_SQUAD_ID (acesso de leitura "
