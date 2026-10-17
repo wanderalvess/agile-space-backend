@@ -99,6 +99,18 @@ public class RetroController {
         return ResponseEntity.ok(retroService.resetVotes(id, caller(request)));
     }
 
+    /** Encerra a sessão (facilitador/ADMIN): o quadro fica somente leitura para os participantes. Idempotente. */
+    @PostMapping("/{id}/finish")
+    public ResponseEntity<RetroBoard> finish(@PathVariable("id") String id, HttpServletRequest request) {
+        return ResponseEntity.ok(retroService.finish(id, caller(request)));
+    }
+
+    /** Reabre a sessão encerrada (facilitador/ADMIN). Idempotente. */
+    @PostMapping("/{id}/reopen")
+    public ResponseEntity<RetroBoard> reopen(@PathVariable("id") String id, HttpServletRequest request) {
+        return ResponseEntity.ok(retroService.reopen(id, caller(request)));
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteBoard(@PathVariable("id") String id, HttpServletRequest request) {
         retroService.deleteBoard(id, caller(request));

@@ -9,6 +9,7 @@ import com.agilespace.backend.repository.RetroBoardRepository;
 import com.agilespace.backend.repository.RetroCardRepository;
 import com.agilespace.backend.repository.RetroChatMessageRepository;
 import com.agilespace.backend.repository.RetroParticipantRepository;
+import com.agilespace.backend.websocket.RetroTypingGate;
 import com.agilespace.backend.websocket.RetroWebSocketHandler;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -38,7 +39,7 @@ import java.util.regex.Pattern;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class RetroService {
+public class RetroService implements RetroTypingGate {
 
     private final RetroBoardRepository boardRepository;
     private final RetroParticipantRepository participantRepository;
@@ -82,6 +83,7 @@ public class RetroService {
     static final int MAX_VOTES_LIMIT = 100;
     static final int MAX_IMPORT = 200;
     static final int MAX_SUMMARY_CHARS = 20_000;
+    static final int MAX_CHECKIN_NOTE = 500;
 
     // --- Publicação de eventos ---
 
@@ -165,6 +167,50 @@ public class RetroService {
         if (!isMember(board, caller)) {
             throw forbidden("Acesso restrito a participantes deste board.");
         }
+    }
+
+    /**
+     * Retro encerrada (POST /finish) é somente leitura para os participantes: cards e votos só mudam pelo facilitador ou
+     * ADMIN (que também pode reabrir). Retro nunca encerrada não é afetada. Chat, entrada na sala e check-in seguem livres.
+     */
+    private void requireWritable(RetroBoard board, RetroCaller caller) {
+        if (board.isFinished() && !isCreatorOrAdmin(board, caller)) {
+            throw conflict("Esta retrospectiva foi encerrada. Só o facilitador pode alterá-la.");
+        }
+    }
+
+    /** POST /api/retros/{id}/finish: encerra a sessão (facilitador/ADMIN). Idempotente: não muda o instante já gravado. */
+    @Transactional
+    public RetroBoard finish(String boardId, RetroCaller caller) {
+        RetroBoard board = requireBoardForUpdate(boardId);
+        if (!isCreatorOrAdmin(board, caller)) {
+            throw forbidden("Apenas o facilitador do board pode encerrar a retrospectiva.");
+        }
+        if (board.isFinished()) {
+            return board;
+        }
+        board.setLifecycle(RetroBoard.LIFECYCLE_FINISHED);
+        board.setFinishedAt(java.time.LocalDateTime.now());
+        RetroBoard saved = boardRepository.save(board);
+        publish(boardId, "BOARD_UPDATED", saved);
+        return saved;
+    }
+
+    /** POST /api/retros/{id}/reopen: volta a sessão para aberta (facilitador/ADMIN). Idempotente. */
+    @Transactional
+    public RetroBoard reopen(String boardId, RetroCaller caller) {
+        RetroBoard board = requireBoardForUpdate(boardId);
+        if (!isCreatorOrAdmin(board, caller)) {
+            throw forbidden("Apenas o facilitador do board pode reabrir a retrospectiva.");
+        }
+        if (!board.isFinished()) {
+            return board;
+        }
+        board.setLifecycle(null);
+        board.setFinishedAt(null);
+        RetroBoard saved = boardRepository.save(board);
+        publish(boardId, "BOARD_UPDATED", saved);
+        return saved;
     }
 
     /**
@@ -287,6 +333,8 @@ public class RetroService {
             }
             incoming.setVersion(null);
             incoming.setCreatorId(caller.id());
+            incoming.setLifecycle(null);   // encerrar é só por /finish
+            incoming.setFinishedAt(null);
             RetroBoard saved = boardRepository.save(incoming);
             publish(saved.getId(), "BOARD_UPDATED", saved);
             return new Saved<>(saved, true);
@@ -613,6 +661,11 @@ public class RetroService {
         if (incoming.getRole() != null && incoming.getRole().length() > 50) throw badRequest("role inválido.");
         if (incoming.getGlobalRole() != null && incoming.getGlobalRole().length() > 50) throw badRequest("globalRole inválido.");
         if (incoming.getHealthCheckAnswer() != null && incoming.getHealthCheckAnswer().length() > 50) throw badRequest("Resposta inválida.");
+        if (incoming.getCheckinNote() != null) {
+            String note = incoming.getCheckinNote().strip();
+            if (note.length() > MAX_CHECKIN_NOTE) throw badRequest("O texto do check-in excede " + MAX_CHECKIN_NOTE + " caracteres.");
+            incoming.setCheckinNote(note); // "" = limpar (tratado no merge)
+        }
 
         // ID composto implícito para garantir unicidade na tabela e evitar conflitos de restrição
         String dbId = incoming.getBoardId() + "_" + incoming.getId();
@@ -636,6 +689,7 @@ public class RetroService {
             throw badRequest("O apelido é obrigatório.");
         }
         incoming.setIsCreator(isCreator(board, caller));
+        if (incoming.getCheckinNote() != null && incoming.getCheckinNote().isEmpty()) incoming.setCheckinNote(null);
         RetroParticipant saved;
         try {
             saved = participantRepository.save(incoming);
@@ -657,6 +711,10 @@ public class RetroService {
         if (incoming.getRole() != null) existing.setRole(incoming.getRole());
         if (incoming.getGlobalRole() != null) existing.setGlobalRole(incoming.getGlobalRole());
         if (incoming.getHealthCheckAnswer() != null) existing.setHealthCheckAnswer(incoming.getHealthCheckAnswer());
+        // ausente/null não apaga; "" limpa
+        if (incoming.getCheckinNote() != null) {
+            existing.setCheckinNote(incoming.getCheckinNote().isEmpty() ? null : incoming.getCheckinNote());
+        }
         return existing;
     }
 
@@ -739,6 +797,7 @@ public class RetroService {
     public Saved<RetroCard> saveOrUpdateCard(RetroCard card, RetroCaller caller) {
         RetroBoard board = requireBoard(card.getBoardId());
         requireMember(board, caller);
+        requireWritable(board, caller);
 
         RetroCard existing = card.getId() == null || card.getId().isBlank()
                 ? null : cardRepository.findById(card.getId()).orElse(null);
@@ -818,6 +877,7 @@ public class RetroService {
     public void deleteCard(String boardId, String cardId, RetroCaller caller) {
         RetroBoard board = requireBoard(boardId);
         requireMember(board, caller);
+        requireWritable(board, caller);
         RetroCard card = cardRepository.findById(cardId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cartão não encontrado."));
         if (!card.getBoardId().equals(boardId)) {
@@ -845,6 +905,7 @@ public class RetroService {
     public List<RetroCard> importActions(String boardId, List<RetroCard> cards, RetroCaller caller) {
         RetroBoard board = requireBoard(boardId);
         requireMember(board, caller);
+        requireWritable(board, caller);
         if (cards == null) throw badRequest("Corpo inválido.");
         if (cards.size() > MAX_IMPORT) throw badRequest("Máximo de " + MAX_IMPORT + " cards por importação.");
         List<RetroCard> result = new ArrayList<>();
@@ -880,6 +941,7 @@ public class RetroService {
     public RetroCard toggleVote(String boardId, String cardId, RetroCaller caller) {
         RetroBoard board = requireBoardForUpdate(boardId);
         requireMember(board, caller);
+        requireWritable(board, caller);
         RetroCard card = cardRepository.findById(cardId)
                 .filter(c -> boardId.equals(c.getBoardId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cartão não encontrado."));
@@ -933,6 +995,7 @@ public class RetroService {
     public RetroCard mergeCards(String boardId, String targetId, String sourceId, RetroCaller caller) {
         RetroBoard board = requireBoardForUpdate(boardId);
         requireMember(board, caller);
+        requireWritable(board, caller);
         if (targetId.equals(sourceId)) throw badRequest("Origem e destino são o mesmo card.");
         if (!Boolean.TRUE.equals(board.getIsCardsRevealed())) {
             throw conflict("Não é possível fundir cards durante a fase anônima.");
@@ -1122,13 +1185,25 @@ public class RetroService {
      */
     private void publishChatEvent(RetroBoard board, String eventType, Object payload, String channelId, String callerId) {
         String boardId = board.getId();
+        Set<String> users = chatAudience(board, channelId, callerId);
+        if (users == null) {
+            publish(boardId, eventType, payload);
+        } else {
+            publishToUsers(boardId, eventType, payload, users);
+        }
+    }
+
+    /** Quem enxerga o canal: {@code null} = o board inteiro; senão só os userIds do conjunto (DM e canal por função). */
+    private Set<String> chatAudience(RetroBoard board, String channelId, String callerId) {
+        String boardId = board.getId();
         if (channelId != null && channelId.startsWith("dm_")) {
             String peer = resolveDmPeer(board, channelId, callerId);
             Set<String> users = new java.util.HashSet<>();
             users.add(callerId);
             if (peer != null) users.add(peer);
-            publishToUsers(boardId, eventType, payload, users);
-        } else if (channelId != null && channelId.startsWith("role-")) {
+            return users;
+        }
+        if (channelId != null && channelId.startsWith("role-")) {
             // Canal por função: só criador (modera) e participantes daquela função recebem o texto.
             String category = channelId.substring("role-".length());
             Set<String> users = new java.util.HashSet<>();
@@ -1139,10 +1214,31 @@ public class RetroService {
                     if (category.equals(RetroChatCategory.of(p))) users.add(p.getId());
                 }
             }
-            publishToUsers(boardId, eventType, payload, users);
-        } else {
-            publish(boardId, eventType, payload);
+            return users;
         }
+        return null;
+    }
+
+    /**
+     * "Escrevendo…" (TYPING): quem pode receber o evento de {@code userId}. Mesma regra do quadro e do chat: card = sala
+     * inteira, sem identificar o autor enquanto os autores não foram revelados; chat = só quem enxerga o canal.
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<RetroTypingGate.Route> route(String boardId, String userId, String role, String scope, String channelId) {
+        if (boardId == null || userId == null) return Optional.empty();
+        RetroBoard board = boardRepository.findById(boardId).orElse(null);
+        if (board == null || !isMember(board, new RetroCaller(userId, role))) return Optional.empty();
+        if ("chat".equals(scope)) {
+            try {
+                requireChatParticipant(board, userId);
+                requireChatChannelAccess(board, channelId, userId);
+            } catch (ResponseStatusException e) {
+                return Optional.empty();
+            }
+            return Optional.of(new RetroTypingGate.Route(chatAudience(board, channelId, userId), false));
+        }
+        return Optional.of(new RetroTypingGate.Route(null, !Boolean.TRUE.equals(board.getIsAuthorsRevealed())));
     }
 
     private void publishToUsers(String boardId, String eventType, Object payload, Set<String> users) {

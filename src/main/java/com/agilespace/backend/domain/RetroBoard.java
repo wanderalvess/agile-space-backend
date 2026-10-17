@@ -121,6 +121,29 @@ public class RetroBoard {
     @Column(name = "summary", columnDefinition = "text")
     private JsonNode summary;
 
+    // Encerramento da sessão inteira (POST /finish e /reopen); nulo = aberta (também todo board anterior à V79).
+    // `votingStatus` é outra coisa: a fase de votação dentro da sessão.
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    @Column(name = "finished_at")
+    private LocalDateTime finishedAt;
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @Column(name = "lifecycle", length = 20)
+    private String lifecycle;
+
+    /** OPEN|FINISHED. Só leitura no JSON: o corpo de POST/PATCH nunca encerra nem reabre. */
+    @JsonProperty(value = "lifecycleStatus", access = JsonProperty.Access.READ_ONLY)
+    public String getLifecycleStatus() {
+        return LIFECYCLE_FINISHED.equals(lifecycle) ? LIFECYCLE_FINISHED : "OPEN";
+    }
+
+    public static final String LIFECYCLE_FINISHED = "FINISHED";
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    public boolean isFinished() {
+        return LIFECYCLE_FINISHED.equals(lifecycle);
+    }
+
     // --- Nested Columns ---
     @ElementCollection(fetch = FetchType.EAGER)
     @Fetch(FetchMode.SUBSELECT)

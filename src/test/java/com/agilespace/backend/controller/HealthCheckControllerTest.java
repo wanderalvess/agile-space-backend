@@ -91,6 +91,40 @@ public class HealthCheckControllerTest {
     }
 
     @Test
+    public void testProgress_usesCallerFromTokenAndIsNotCached() {
+        HealthCheckService.HealthCheckProgress progress = new HealthCheckService.HealthCheckProgress("hc-1", 2, 5, 3, 1, null);
+        when(service.getProgress(eq("hc-1"), any(CeremonyCaller.class))).thenReturn(progress);
+
+        ResponseEntity<HealthCheckService.HealthCheckProgress> response = controller.getProgress("hc-1", request("u1", "MEMBER"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals("no-store", response.getHeaders().getCacheControl());
+        assertEquals(3, response.getBody().respondedCount());
+        verify(service).getProgress("hc-1", new CeremonyCaller("u1", "MEMBER"));
+    }
+
+    @Test
+    public void testPresentation_setAndClearUseCallerFromToken() {
+        HealthCheckBoard board = new HealthCheckBoard();
+        when(service.setPresentationStage(eq("hc-1"), eq("radar"), any(CeremonyCaller.class))).thenReturn(board);
+        when(service.clearPresentationStage(eq("hc-1"), any(CeremonyCaller.class))).thenReturn(board);
+
+        assertEquals(HttpStatus.OK, controller.setPresentation("hc-1", new HealthCheckController.PresentationRequest("radar"),
+                request("fac", "MEMBER")).getStatusCode());
+        assertEquals(HttpStatus.OK, controller.clearPresentation("hc-1", request("fac", "MEMBER")).getStatusCode());
+        verify(service).setPresentationStage("hc-1", "radar", new CeremonyCaller("fac", "MEMBER"));
+        verify(service).clearPresentationStage("hc-1", new CeremonyCaller("fac", "MEMBER"));
+    }
+
+    @Test
+    public void testPresentation_missingBodyReachesTheServiceAsNullStage() {
+        when(service.setPresentationStage(eq("hc-1"), isNull(), any(CeremonyCaller.class)))
+                .thenThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST));
+
+        assertThrows(ResponseStatusException.class, () -> controller.setPresentation("hc-1", null, request("fac", "MEMBER")));
+    }
+
+    @Test
     public void testFinish_usesCallerFromToken() {
         HealthCheckBoard board = new HealthCheckBoard();
         when(service.finish(eq("hc-1"), any(CeremonyCaller.class))).thenReturn(board);

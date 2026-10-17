@@ -35,4 +35,8 @@ public class RetroParticipant {
 
     // Resposta do check-in inicial (chave da opção da escala, ex.: "good") — null enquanto não responde.
     private String healthCheckAnswer;
+
+    // Texto livre do check-in (até 500). Visível a quem está na sala, como a própria resposta do check-in.
+    @Column(name = "checkin_note", length = 500)
+    private String checkinNote;
 }

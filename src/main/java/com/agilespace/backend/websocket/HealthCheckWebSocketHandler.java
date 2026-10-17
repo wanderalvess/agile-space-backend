@@ -15,4 +15,9 @@ public class HealthCheckWebSocketHandler extends BoardWebSocketHandler {
     public HealthCheckWebSocketHandler(ObjectMapper objectMapper) {
         this(objectMapper, new PresenceRegistry());
     }
+
+    /** Etapa da apresentação: só para as sessões que abriram o socket com {@code ?presentation=1}. */
+    public void broadcastPresentationStage(String boardId, Object payload) {
+        broadcastEventToSessions(boardId, "PRESENTATION_STAGE", payload, s -> WsOptIn.wants(s, WsOptIn.PRESENTATION));
+    }
 }
