@@ -39,6 +39,7 @@ public class ApiKeyController {
     private final ApiKeyRepository apiKeyRepository;
     private final UserRepository userRepository;
     private final ApiKeyLifecycle apiKeyLifecycle;
+    private final com.agilespace.backend.service.SquadAccessService squadAccessService;
 
     @GetMapping
     public ResponseEntity<List<ApiKey>> listMine(HttpServletRequest request) {
@@ -89,11 +90,13 @@ public class ApiKeyController {
             // (senão squadId ficaria null, que pro enforcement significa SEM restrição —
             // o oposto do que uma chave de MEMBER devia ganhar).
             User caller = userRepository.findById(ownerUserId).orElse(null);
-            if (caller == null || caller.getSquadId() == null || caller.getSquadId().isBlank()) {
+            // Etapa 2 (app.membership.authz): em new a squad da chave é a ATIVA validada contra os vínculos, não users.squad_id.
+            String ownSquad = caller == null ? null : squadAccessService.activeSquadFor("apikey", caller);
+            if (caller == null || ownSquad == null || ownSquad.isBlank()) {
                 return ResponseEntity.badRequest().body(Map.of(
                         "error", "Vincule-se a uma squad antes de gerar uma chave com escopo SQUAD_READ."));
             }
-            squadId = caller.getSquadId();
+            squadId = ownSquad;
         } else {
             squadId = null;
         }

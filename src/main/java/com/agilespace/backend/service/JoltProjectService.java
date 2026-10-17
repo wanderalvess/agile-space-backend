@@ -39,17 +39,45 @@ public class JoltProjectService {
     private final JoltProjectRepository projectRepository;
     private final JoltProjectVersionRepository versionRepository;
 
-    /** Quem está chamando, vindo do JWT (id e papel) e do cadastro (squad). */
-    public record Caller(String userId, String role, String squadId, String name, String email) {
+    /**
+     * Quem está chamando, vindo do JWT (id e papel) e do cadastro (squad).
+     *
+     * @param squadIds squads dos VÍNCULOS da pessoa (project_member_roles). {@code null} = autorização legada: vale só a
+     *                 squad única {@code squadId} (users.squad_id). Preenchido só com {@code app.membership.authz=new}.
+     */
+    public record Caller(String userId, String role, String squadId, String name, String email, Set<String> squadIds) {
+        public Caller(String userId, String role, String squadId, String name, String email) {
+            this(userId, role, squadId, name, email, null);
+        }
+
         public boolean isAdmin() {
             return "ADMIN".equalsIgnoreCase(role);
+        }
+
+        /** A squad é uma das da pessoa? Legado: igualdade exata com users.squad_id; novo: qualquer vínculo, sem caixa. */
+        boolean inSquad(String squad) {
+            if (squad == null || squad.isBlank()) return false;
+            if (squadIds == null) return squad.equals(squadId);
+            return squadIds.stream().anyMatch(s -> s.equalsIgnoreCase(squad.trim()));
+        }
+
+        /** Squads em MAIÚSCULAS para a consulta; nunca vazia (IN () é inválido), o sentinela não casa com squad nenhuma. */
+        Set<String> upperSquadIdsForQuery() {
+            Set<String> out = new java.util.LinkedHashSet<>();
+            for (String s : squadIds) out.add(s.trim().toUpperCase(java.util.Locale.ROOT));
+            if (out.isEmpty()) out.add("\u0000SEM-SQUAD");
+            return out;
         }
     }
 
     @Transactional(readOnly = true)
     public List<JoltProjectDto> listProjects(Caller caller, String search) {
         List<JoltProject> projects;
-        if (search != null && !search.trim().isEmpty()) {
+        if (caller.squadIds() != null) {
+            projects = search != null && !search.trim().isEmpty()
+                    ? projectRepository.searchAccessibleProjectsInSquads(caller.userId(), caller.upperSquadIdsForQuery(), search.trim())
+                    : projectRepository.findAccessibleProjectsInSquads(caller.userId(), caller.upperSquadIdsForQuery());
+        } else if (search != null && !search.trim().isEmpty()) {
             projects = projectRepository.searchAccessibleProjects(caller.userId(), caller.squadId(), search.trim());
         } else {
             projects = projectRepository.findAccessibleProjects(caller.userId(), caller.squadId());
@@ -205,7 +233,7 @@ public class JoltProjectService {
         if (c.isAdmin()) return true;
         if (c.userId() != null && c.userId().equals(p.getAuthorId())) return true;
         if (Boolean.TRUE.equals(p.getIsPublic())) return true;
-        return p.getSquadId() != null && !p.getSquadId().isBlank() && p.getSquadId().equals(c.squadId());
+        return c.inSquad(p.getSquadId());
     }
 
     static boolean canWrite(JoltProject p, Caller c) {
@@ -219,7 +247,7 @@ public class JoltProjectService {
     /** Só dá para compartilhar com a própria squad (admin escolhe qualquer uma). Vazio vira sem squad. */
     private static String validatedSquad(String requested, Caller caller) {
         if (requested == null || requested.isBlank()) return null;
-        if (caller.isAdmin() || requested.equals(caller.squadId())) return requested;
+        if (caller.isAdmin() || caller.inSquad(requested)) return requested;
         throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só é possível compartilhar o projeto com a sua própria squad.");
     }
 

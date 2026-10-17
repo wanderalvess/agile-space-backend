@@ -10,6 +10,8 @@ import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.security.SquadLeadership;
 import com.agilespace.backend.service.AuthService;
+import com.agilespace.backend.service.AuthzShadow;
+import com.agilespace.backend.service.SquadAccessService;
 import com.agilespace.backend.service.InviteService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -34,6 +36,8 @@ public class InviteController {
     private final UserRepository userRepository;
     private final ProjectMemberRoleRepository projectMemberRoleRepository;
     private final AuthService authService;
+    private final SquadAccessService squadAccessService;
+    private final AuthzShadow authzShadow;
 
     /**
      * ADMIN/LEAD (tier de sistema) entram em qualquer squad; liderança de negócio só
@@ -60,29 +64,34 @@ public class InviteController {
             return caller;
         }
 
+        boolean allowed = authzShadow.decide("invite", caller.getId(), squadId,
+                () -> legacyInviteAllowed(squadId, caller),
+                () -> squadAccessService.hasDirectLeadership(caller, squadId),
+                legacyAllowed -> legacyAllowed
+                        ? (SquadLeadership.isLeadershipJobTitle(caller.getJobTitle()) ? "ONLY_JOB_TITLE" : "RESOLVER_ONLY")
+                        : "NEW_ONLY_MEMBERSHIP");
+        if (allowed) {
+            return caller;
+        }
+        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a administradores ou lideranças deste squad.");
+    }
+
+    /**
+     * Regra LEGADA (app.membership.authz=legacy): quem tem a squad em users.squad_id/default_project_id e cargo de
+     * liderança, ou liderança em linha própria de project_member_roles (por conta ou e-mail), mesmo com outra squad
+     * ativa. A regra nova (new) só vale a liderança em linha PRÓPRIA do vínculo; o cargo e users.squad_id deixam de valer.
+     */
+    private boolean legacyInviteAllowed(String squadId, User caller) {
         boolean ownsSquad = (caller.getSquadId() != null && caller.getSquadId().equalsIgnoreCase(squadId))
                 || (caller.getDefaultProjectId() != null && caller.getDefaultProjectId().equalsIgnoreCase(squadId));
         if (!ownsSquad) {
             // Liderança de roster conta mesmo com outra squad ativa (ex.: AM que acabou de criar uma equipe manual).
-            if (isRosterLeader(squadId, caller)) {
-                return caller;
-            }
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a administradores ou lideranças deste squad.");
+            return isRosterLeader(squadId, caller);
         }
-
         if (SquadLeadership.isLeadershipJobTitle(caller.getJobTitle())) {
-            return caller;
+            return true;
         }
-
-        boolean isProjectLeadership = projectMemberRoleRepository.findByProjectId(squadId).stream()
-                .anyMatch(pmr -> pmr.isLeadership()
-                        && ((pmr.getUserId() != null && pmr.getUserId().equals(caller.getId()))
-                            || (pmr.getEmail() != null && caller.getEmail() != null && pmr.getEmail().equalsIgnoreCase(caller.getEmail()))));
-        if (isProjectLeadership) {
-            return caller;
-        }
-
-        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a administradores ou lideranças deste squad.");
+        return isRosterLeader(squadId, caller);
     }
 
     private boolean isRosterLeader(String squadId, User caller) {

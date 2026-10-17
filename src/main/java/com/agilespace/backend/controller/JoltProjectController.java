@@ -8,6 +8,7 @@ import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.JoltProjectService;
 import com.agilespace.backend.service.JoltProjectService.Caller;
+import com.agilespace.backend.service.SquadAccessService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -35,6 +36,7 @@ public class JoltProjectController {
 
     private final JoltProjectService joltProjectService;
     private final UserRepository userRepository;
+    private final SquadAccessService squadAccessService;
 
     /** Identidade vem do JWT (atributos do filtro); o cadastro só complementa nome, e-mail e squad. */
     private Caller caller(HttpServletRequest request) {
@@ -50,7 +52,9 @@ public class JoltProjectController {
                 role,
                 user != null ? user.getSquadId() : null,
                 user != null ? user.getName() : null,
-                user != null && user.getEmail() != null ? user.getEmail() : email);
+                user != null && user.getEmail() != null ? user.getEmail() : email,
+                // Etapa 2 (app.membership.authz): null = legado (squad única de users.squad_id); new = squads dos vínculos.
+                squadAccessService.squadsForSharing("jolt", user));
     }
 
     @Operation(summary = "Lista projetos JOLT acessíveis ao usuário")

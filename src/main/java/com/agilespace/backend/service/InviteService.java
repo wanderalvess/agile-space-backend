@@ -50,6 +50,16 @@ public class InviteService {
         this.notificationTriggers = notificationTriggers;
     }
 
+    /** Chave e regra nova da autorização por squad (Etapa 2). Opcional: sem elas só existe o legado. */
+    private SquadAccessService squadAccessService;
+    private AuthzShadow authzShadow;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setSquadAuthz(SquadAccessService squadAccessService, AuthzShadow authzShadow) {
+        this.squadAccessService = squadAccessService;
+        this.authzShadow = authzShadow;
+    }
+
     @Transactional
     public Invite createInvite(String squadId, String roleName, String email, String invitedByUserId) {
         roleName = roleName == null ? "" : roleName.trim();
@@ -137,6 +147,21 @@ public class InviteService {
     }
 
     private boolean isSquadMemberOrAdmin(String squadId, User caller) {
+        if (squadAccessService == null || authzShadow == null || authzShadow.isLegacy()) {
+            return legacyIsSquadMemberOrAdmin(squadId, caller);
+        }
+        // Etapa 2 (app.membership.authz): na regra nova só o vínculo (pmr, inclusive tribo/segmento) conta; users.squad_id deixa de valer.
+        return authzShadow.decide("inviteView", caller.getId(), squadId,
+                () -> legacyIsSquadMemberOrAdmin(squadId, caller),
+                () -> "ADMIN".equalsIgnoreCase(caller.getRole()) || "LEAD".equalsIgnoreCase(caller.getRole())
+                        || squadAccessService.isLinkedToSquad(caller, squadId),
+                legacyAllowed -> legacyAllowed
+                        ? (squadId.equalsIgnoreCase(caller.getSquadId()) || squadId.equalsIgnoreCase(caller.getDefaultProjectId())
+                                ? "ONLY_SQUAD_ID" : "RESOLVER_ONLY")
+                        : "NEW_ONLY_MEMBERSHIP");
+    }
+
+    private boolean legacyIsSquadMemberOrAdmin(String squadId, User caller) {
         if ("ADMIN".equalsIgnoreCase(caller.getRole()) || "LEAD".equalsIgnoreCase(caller.getRole())) return true;
         if (squadId.equalsIgnoreCase(caller.getSquadId()) || squadId.equalsIgnoreCase(caller.getDefaultProjectId())) return true;
         List<ProjectMemberRole> rows = projectMemberRoleRepository.findByProjectId(squadId);

@@ -332,7 +332,11 @@ public class KnowledgeService {
         if (userId == null || userRepository == null) {
             return null;
         }
-        return userRepository.findById(userId).map(User::getSquadId).filter(sq -> !sq.isBlank()).orElse(null);
+        // Só DE ONDE vem a squad muda com app.membership.authz (a base de conhecimento segue compartilhada: o escopo de leitura não muda).
+        return userRepository.findById(userId)
+                .map(u -> squadAccessService != null && squadAccessService.authzMode() != null && squadAccessService.authzMode() != AuthzMode.LEGACY
+                        ? squadAccessService.activeSquadFor("knowledge", u) : u.getSquadId())
+                .filter(sq -> !sq.isBlank()).orElse(null);
     }
 
     // ----- Histórico de versões

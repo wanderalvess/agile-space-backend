@@ -39,6 +39,14 @@ public class ApiKeyLifecycle {
         this.userRepository = userRepository;
     }
 
+    /** Autorização por squad via vínculos (Etapa 2). Opcional: sem ela só vale users.squad_id, como sempre. */
+    private com.agilespace.backend.service.SquadAccessService squadAccessService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setSquadAccessService(com.agilespace.backend.service.SquadAccessService squadAccessService) {
+        this.squadAccessService = squadAccessService;
+    }
+
     /**
      * Interpreta o pedido de validade. {@code raw} pode ser nulo (padrão 90), número/texto 30, 90 ou 180,
      * ou "never"/"sem-expiracao"/0 (sem expiração, só ADMIN). Devolve a data de vencimento, ou null para
@@ -115,7 +123,15 @@ public class ApiKeyLifecycle {
             if (!privileged && current.contains(ApiKeyScope.SQUAD_READ.name())
                     && (key.getSquadId() == null || key.getSquadId().isBlank())) {
                 // SQUAD_READ sem restrição é privilégio de ADMIN/LEAD: trava na squad atual da pessoa.
-                key.setSquadId(owner.getSquadId());
+                // Etapa 2 (app.membership.authz): em new a "squad atual" é a ativa validada contra os vínculos.
+                String squad = squadAccessService != null ? squadAccessService.activeSquadFor("apikey", owner) : owner.getSquadId();
+                key.setSquadId(squad);
+                if ((squad == null || squad.isBlank()) && squadAccessService != null
+                        && squadAccessService.authzMode() == com.agilespace.backend.service.AuthzMode.NEW) {
+                    // Sem vínculo nenhum não há squad para travar: a chave perde o escopo em vez de ficar sem restrição.
+                    current.remove(ApiKeyScope.SQUAD_READ.name());
+                    key.setScopes(current);
+                }
             }
         }
     }
