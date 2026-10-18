@@ -400,7 +400,6 @@ public class LinkRequestFlowIntegrationTest {
         assertEquals("Developer", created.getRoleName());
         assertEquals("DEVELOPER", created.getRoleKey());
         User devAfter = userRepository.findById("lr2-dev").orElseThrow();
-        assertNull(jdbc.queryForObject("SELECT squad_id FROM users WHERE id = 'lr2-dev'", String.class), "users.squad_id aposentada: a aprovação não grava");
         assertEquals("LRSQ", devAfter.getDefaultProjectId());
         // O cache de vínculos foi invalidado (o vazio de antes não sobrevive)
         mockMvc.perform(get("/api/me/memberships").header("Authorization", token(dev)))

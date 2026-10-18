@@ -13,12 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * LEGACY-SQUAD-ID-DIAGNOSTIC: este é o ÚNICO ponto do código de produção que ainda consulta a coluna users.squad_id (SQL
- * nativo de diagnóstico). Desde a Etapa 5 do vínculo (passo 1) nada mais a lê nem a grava: ela é um retrato congelado do
- * que havia no deploy. Remover estas categorias junto com o DROP COLUMN (passo 2, docs/membership-api.md); o teste
- * UsersSquadIdColumnRetiredTest trava qualquer outro uso.
- *
- * <p>Relatório de inconsistências do vínculo Pessoa x Squad x Papel, SOMENTE LEITURA (transação readOnly: o Postgres
+ * Relatório de inconsistências do vínculo Pessoa x Squad x Papel, SOMENTE LEITURA (transação readOnly: o Postgres
  * recusa qualquer escrita aqui). Executa as consultas da seção 3 de docs/vinculo-auditoria-e-plano.md e devolve contagem
  * por categoria mais uma amostra de até {@value #SAMPLE_LIMIT} linhas (id, e-mail, squad, rótulo). Contrato em
  * docs/membership-report.md.
@@ -59,13 +54,13 @@ public class MembershipReportService {
     private static final List<CategoryDef> CATEGORIES = List.of(
             new CategoryDef("USERS_WITH_SQUAD_WITHOUT_LINK",
                     "Usuário com squad e sem vínculo nela",
-                    "Conta ativa com users.squad_id (ou default_project_id) mas sem linha em project_member_roles nessa squad. "
+                    "Conta ativa com default_project_id (squad ativa preferida; a antiga coluna de squad da conta foi apagada na Etapa 5) mas sem linha em project_member_roles nessa squad. "
                             + "Rótulos: sentinela (Sem Time), squad_id_nao_e_projeto (nome/grafia/squad só do roster), so_squad_members "
                             + "(só o roster dá acesso) e sem_vinculo_nenhum. Perde o acesso quando a leitura passar só para os vínculos.",
                     PMR_U + """
                             , cur AS (
                               SELECT u.id, u.email, u.jira_account_id,
-                                     COALESCE(NULLIF(BTRIM(u.squad_id), ''), NULLIF(BTRIM(u.default_project_id), '')) AS squad_raw
+                                     NULLIF(BTRIM(u.default_project_id), '') AS squad_raw
                               FROM users u WHERE u.is_active IS TRUE
                             )
                             SELECT c.id AS id, c.email AS email, c.squad_raw AS squad,
@@ -109,22 +104,22 @@ public class MembershipReportService {
                             """),
             new CategoryDef("EXCLUDED_BUT_STILL_LINKED",
                     "Removido à mão que ainda tem vínculo",
-                    "Pessoa em squad_member_exclusions (removida do time) que ainda tem linha pmr ou users.squad_id nessa squad.",
+                    "Pessoa em squad_member_exclusions (removida do time) que ainda tem linha pmr ou default_project_id nessa squad.",
                     """
                             SELECT e.db_id AS id, e.email AS email, e.squad_id AS squad,
-                              CASE WHEN ainda_pmr AND ainda_squad_id THEN 'pmr_e_squad_id'
-                                   WHEN ainda_pmr THEN 'pmr' ELSE 'squad_id' END AS detail
+                              CASE WHEN ainda_pmr AND ainda_default THEN 'pmr_e_default_project_id'
+                                   WHEN ainda_pmr THEN 'pmr' ELSE 'default_project_id' END AS detail
                             FROM (
                               SELECT e.*,
                                 EXISTS (SELECT 1 FROM project_member_roles pmr WHERE UPPER(pmr.project_id) = UPPER(e.squad_id)
                                         AND (pmr.jira_account_id = e.jira_account_id
                                              OR (e.email IS NOT NULL AND LOWER(pmr.email) = LOWER(e.email)))) AS ainda_pmr,
-                                EXISTS (SELECT 1 FROM users u WHERE UPPER(u.squad_id) = UPPER(e.squad_id)
+                                EXISTS (SELECT 1 FROM users u WHERE UPPER(u.default_project_id) = UPPER(e.squad_id)
                                         AND (u.jira_account_id = e.jira_account_id
-                                             OR (e.email IS NOT NULL AND LOWER(u.email) = LOWER(e.email)))) AS ainda_squad_id
+                                             OR (e.email IS NOT NULL AND LOWER(u.email) = LOWER(e.email)))) AS ainda_default
                               FROM squad_member_exclusions e
                             ) e
-                            WHERE ainda_pmr OR ainda_squad_id
+                            WHERE ainda_pmr OR ainda_default
                             """),
             new CategoryDef("SAME_SQUAD_MULTIPLE_ROWS",
                     "Mesma pessoa com várias linhas na mesma squad",
@@ -141,7 +136,7 @@ public class MembershipReportService {
                             """),
             new CategoryDef("USER_IN_MULTIPLE_SQUADS",
                     "Pessoa em mais de uma squad",
-                    "A conta tem vínculo em 2 ou mais squads (esperado para quem atua em várias; confira o campo único users.squad_id). "
+                    "A conta tem vínculo em 2 ou mais squads (esperado para quem atua em várias; confira a squad ativa preferida, users.default_project_id). "
                             + "O rótulo traz a quantidade.",
                     PMR_U + """
                             SELECT p.user_id AS id, u.email AS email, LEFT(string_agg(DISTINCT p.project_up, ','), 200) AS squad,
@@ -233,7 +228,7 @@ public class MembershipReportService {
                     "Mesma conta do Jira em mais de um usuário",
                     "users.jira_account_id repetido: o casamento por conta do Jira pode ligar a pessoa errada.",
                     """
-                            SELECT u.id AS id, u.email AS email, u.squad_id AS squad, 'jira_account_duplicada' AS detail
+                            SELECT u.id AS id, u.email AS email, u.default_project_id AS squad, 'jira_account_duplicada' AS detail
                             FROM users u
                             WHERE u.jira_account_id IS NOT NULL AND u.jira_account_id <> ''
                               AND u.jira_account_id IN (
@@ -246,7 +241,7 @@ public class MembershipReportService {
                     "Usuário sem senha cujo e-mail termina em @empresa.com ou cujo id é a própria conta do Jira (criado pelo sync). "
                             + "Rótulos: ativa ou inativa.",
                     """
-                            SELECT u.id AS id, u.email AS email, u.squad_id AS squad,
+                            SELECT u.id AS id, u.email AS email, u.default_project_id AS squad,
                                    CASE WHEN u.is_active IS TRUE THEN 'ativa' ELSE 'inativa' END AS detail
                             FROM users u
                             WHERE u.password_hash IS NULL
@@ -289,11 +284,11 @@ public class MembershipReportService {
                             + "quantas squads elas têm liderança por vínculo (squads_lideranca=0 perderia todo o poder ao sair de LEAD; "
                             + "veja LEAD_NO_LEADERSHIP_LINK).",
                     PMR_U + """
-                            SELECT u.id AS id, u.email AS email, u.squad_id AS squad,
+                            SELECT u.id AS id, u.email AS email, u.default_project_id AS squad,
                                    'squads_lideranca=' || (COUNT(DISTINCT p.project_up) FILTER (WHERE p.is_leadership))::text AS detail
                             FROM users u LEFT JOIN pmr_u p ON p.user_id = u.id
                             WHERE UPPER(u.role) = 'LEAD' AND u.is_active IS TRUE
-                            GROUP BY u.id, u.email, u.squad_id
+                            GROUP BY u.id, u.email, u.default_project_id
                             """),
             new CategoryDef("LEAD_NO_LEADERSHIP_LINK",
                     "LEAD sem nenhum vínculo de liderança",
@@ -302,7 +297,7 @@ public class MembershipReportService {
                             + "aceite a perda) antes de POST /api/admin/membership/lead-demotion?apply=true. Subconjunto de LEAD_USERS "
                             + "(squads_lideranca=0).",
                     PMR_U + """
-                            SELECT u.id AS id, u.email AS email, u.squad_id AS squad, 'sem_lideranca_por_vinculo' AS detail
+                            SELECT u.id AS id, u.email AS email, u.default_project_id AS squad, 'sem_lideranca_por_vinculo' AS detail
                             FROM users u
                             WHERE UPPER(u.role) = 'LEAD' AND u.is_active IS TRUE
                               AND NOT EXISTS (SELECT 1 FROM pmr_u p WHERE p.user_id = u.id AND p.is_leadership)
@@ -319,27 +314,6 @@ public class MembershipReportService {
                             FROM project_member_roles pmr
                             JOIN projects p ON UPPER(p.id) = UPPER(pmr.project_id)
                             WHERE pmr.is_leadership AND UPPER(pmr.role_key) IN ('TRIBE_LEAD', 'AGILE_COACH', 'PEOPLE_LEAD')
-                            """),
-            new CategoryDef("SQUAD_KEY_CASE_VARIANTS",
-                    "Chave de squad com variação de caixa/espaço",
-                    "users.squad_id gravado de formas diferentes para a mesma squad (ex.: Compras x COMPRAS).",
-                    """
-                            SELECT UPPER(BTRIM(squad_id)) AS id, NULL::text AS email, UPPER(BTRIM(squad_id)) AS squad,
-                                   COUNT(DISTINCT squad_id) || ' variantes' AS detail
-                            FROM users
-                            WHERE squad_id IS NOT NULL AND BTRIM(squad_id) <> ''
-                            GROUP BY UPPER(BTRIM(squad_id))
-                            HAVING COUNT(DISTINCT squad_id) > 1
-                            """),
-            new CategoryDef("USER_SQUAD_DEFAULT_DIVERGENT",
-                    "users.squad_id diferente de default_project_id",
-                    "Os dois campos de squad da conta apontam para squads diferentes (last-write-wins entre eles).",
-                    """
-                            SELECT u.id AS id, u.email AS email, u.squad_id AS squad, 'default=' || u.default_project_id AS detail
-                            FROM users u
-                            WHERE u.squad_id IS NOT NULL AND u.squad_id <> ''
-                              AND u.default_project_id IS NOT NULL AND u.default_project_id <> ''
-                              AND UPPER(u.squad_id) <> UPPER(u.default_project_id)
                             """),
             new CategoryDef("PMR_ORPHAN_PROJECT",
                     "Vínculo em squad que não existe em projects",
@@ -408,7 +382,7 @@ public class MembershipReportService {
                 .toList();
         return new MembershipReportDto.Category(WOULD_LOSE_ACCESS,
                 "Perderia acesso quando a autorização passar só para os vínculos",
-                "Pessoa que o legado deixa acessar a squad (users.squad_id, roster squad_members, cargo de liderança ou o fallback "
+                "Pessoa que o legado deixa acessar a squad (default_project_id, roster squad_members, cargo de liderança ou o fallback "
                         + "de squad sem liderança) e que a regra nova (app.membership.authz=new: só project_member_roles, ADMIN; LEAD só com lead-level=legacy) "
                         + "NEGARIA. Trate antes de virar a chave: crie o vínculo (convite, pedido de vínculo, importação do Jira) ou aceite a "
                         + "perda. Uma linha por pessoa, squad e ponto de decisão (matchesSquad = ler; canManageSquad = gerenciar; "

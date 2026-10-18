@@ -117,7 +117,6 @@ class PrimeiroUsuarioInstalacaoLimpaTest {
         assertEquals(403, status(get("/api/squads/TIMEA/member-metrics").header("Authorization", auth)));
         assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM project_member_roles", Integer.class));
         assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM projects", Integer.class));
-        assertNull(jdbc.queryForObject("SELECT squad_id FROM users WHERE email = 'ana@totvs.com.br'", String.class));
 
         // O primeiro ADMIN (SQL, README) cria a equipe e entra como liderança (Agile Master).
         register("root");

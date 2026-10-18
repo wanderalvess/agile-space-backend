@@ -116,7 +116,7 @@ class AuthzDiffIntegrationTest {
             out.put(t, jdbc.queryForObject("SELECT COUNT(*) FROM " + t, Long.class));
         }
         out.put("pmr_hash", jdbc.queryForObject("SELECT COALESCE(SUM(hashtext(id || coalesce(user_id,'') || coalesce(source,'') || role_key)), 0) FROM project_member_roles", Long.class));
-        out.put("users_hash", jdbc.queryForObject("SELECT COALESCE(SUM(hashtext(id || coalesce(squad_id,'') || coalesce(default_project_id,''))), 0) FROM users", Long.class));
+        out.put("users_hash", jdbc.queryForObject("SELECT COALESCE(SUM(hashtext(id || coalesce(default_project_id,''))), 0) FROM users", Long.class));
         return out;
     }
 

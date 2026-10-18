@@ -74,8 +74,11 @@ class MembershipFoundationIntegrationTest {
     }
 
     private void user(String id, String email, String role, boolean active, String squadId, String defaultProject, String jira, boolean password) {
-        jdbc.update("INSERT INTO users (id, email, name, role, is_active, is_guest, squad_id, default_project_id, jira_account_id, password_hash) "
-                + "VALUES (?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?)", id, email, "Pessoa " + id, role, active, squadId, defaultProject, jira, password ? "hash" : null);
+        // users.squad_id foi apagada (V82): o parâmetro squadId das fixtures vira a squad ativa preferida (default_project_id)
+        // quando esta vier vazia.
+        String preferred = defaultProject != null ? defaultProject : squadId;
+        jdbc.update("INSERT INTO users (id, email, name, role, is_active, is_guest, default_project_id, jira_account_id, password_hash) "
+                + "VALUES (?, ?, ?, ?, ?, FALSE, ?, ?, ?)", id, email, "Pessoa " + id, role, active, preferred, jira, password ? "hash" : null);
     }
 
     private void pmr(String id, String project, String roleKey, boolean lead, String email, String jira, String userId, String source) {
@@ -378,8 +381,8 @@ class MembershipFoundationIntegrationTest {
         assertTrue(has(transversal, "m-lead1"));
         assertEquals("squads_alcancadas=2", transversal.sample().stream().filter(r -> "m-lead1".equals(r.id())).findFirst().orElseThrow().detail());
 
-        assertTrue(has(cat(report, "SQUAD_KEY_CASE_VARIANTS"), "COMPRAS"));
-        assertTrue(has(cat(report, "USER_SQUAD_DEFAULT_DIVERGENT"), "rp-multi"));
+        assertTrue(report.categories().stream().noneMatch(c -> c.code().equals("SQUAD_KEY_CASE_VARIANTS") || c.code().equals("USER_SQUAD_DEFAULT_DIVERGENT")),
+                "categorias que só faziam sentido com users.squad_id foram removidas");
         assertTrue(has(cat(report, "PMR_ORPHAN_PROJECT"), "RP_GHOSTSQ"));
         assertTrue(has(cat(report, "ROSTER_ONLY_SQUAD"), "RP_SOROSTER"));
         assertTrue(has(cat(report, "PROJECT_WITHOUT_TRIBE"), "RP_NOTRIBE"));

@@ -51,9 +51,9 @@ Datas e contagens vêm como números; campos ausentes vêm `null`.
 
 | code | O que acusa | Rótulos (`detail` / `breakdown`) |
 |---|---|---|
-| `USERS_WITH_SQUAD_WITHOUT_LINK` | Conta ativa com `squad_id`/`default_project_id` sem linha pmr nessa squad (alias DDWMISSI/MISSI considerado) | `sentinela` (Sem Time), `squad_id_nao_e_projeto`, `so_squad_members`, `sem_vinculo_nenhum` |
+| `USERS_WITH_SQUAD_WITHOUT_LINK` | Conta ativa com `default_project_id` (squad ativa preferida) sem linha pmr nessa squad (alias DDWMISSI/MISSI considerado) | `sentinela` (Sem Time), `squad_id_nao_e_projeto`, `so_squad_members`, `sem_vinculo_nenhum` |
 | `ROSTER_WITHOUT_LINK` | `squad_members` sem pmr correspondente (conta, e-mail ou Jira) e não removido à mão | `projeto_existe`, `squad_so_roster` |
-| `EXCLUDED_BUT_STILL_LINKED` | Em `squad_member_exclusions` mas ainda com pmr ou `users.squad_id` na squad | `pmr`, `squad_id`, `pmr_e_squad_id` |
+| `EXCLUDED_BUT_STILL_LINKED` | Em `squad_member_exclusions` mas ainda com pmr ou `default_project_id` na squad | `pmr`, `default_project_id`, `pmr_e_default_project_id` |
 | `SAME_SQUAD_MULTIPLE_ROWS` | Mesma conta com 2+ linhas pmr na mesma squad (o resolvedor mostra uma: liderança vence) | `lideranca_e_contribuidor`, `varias_liderancas`, `varios_contribuidores` |
 | `USER_IN_MULTIPLE_SQUADS` | Conta com vínculo em 2+ squads | `N squads` |
 | `ROSTER_DUPLICATE_CLAIMS` | Mesma `claimed_by_uid` em 2+ linhas do roster da mesma squad | `N linhas` |
@@ -69,15 +69,13 @@ Datas e contagens vêm como números; campos ausentes vêm `null`.
 | `LEAD_USERS` | Contas ativas com `role = LEAD` (nível legado; com `app.membership.lead-level=off` não concede nada) | `squads_lideranca=N` (0 = perderia todo o poder ao sair de LEAD) |
 | `LEAD_NO_LEADERSHIP_LINK` | **Etapa 4.** Subconjunto de `LEAD_USERS` sem NENHUMA linha de liderança (`is_leadership`) em `project_member_roles`: `POST /api/admin/membership/lead-demotion?apply=true` NÃO as rebaixa (crie o vínculo ou use `userId`+`forceDemote=true`) | `sem_lideranca_por_vinculo` |
 | `TRANSVERSAL_LEADERS` | Linhas TRIBE_LEAD/AGILE_COACH/PEOPLE_LEAD com liderança, que expandem para a tribo/segmento | `squads_alcancadas=N` |
-| `SQUAD_KEY_CASE_VARIANTS` | `users.squad_id` gravado com caixa/espaço diferentes para a mesma squad | `N variantes` |
-| `USER_SQUAD_DEFAULT_DIVERGENT` | `users.squad_id` ≠ `default_project_id` (**diagnóstico de legado**: desde a Etapa 5 a coluna não é mais gravada, é um retrato do deploy) | `default=<chave>` |
 | `PMR_ORPHAN_PROJECT` | pmr de `project_id` que não existe em `projects` (não há FK) | `N linhas` |
 | `ROSTER_ONLY_SQUAD` | `squad_members` de squad sem linha em `projects` | `N pessoas` |
 | `PROJECT_WITHOUT_TRIBE` | `projects.tribe_name` vazio | `sem_tribo` |
 | `WOULD_LOSE_ACCESS` | **Etapa 2.** Pessoa que o legado deixa acessar a squad e a regra nova (`app.membership.authz=new`: só vínculos e ADMIN; LEAD só com `lead-level=legacy`) NEGARIA. Uma linha por pessoa, squad e ponto de decisão | `matchesSquad:ONLY_ROSTER`, `matchesSquad:ONLY_SQUAD_ID`, `matchesSquad:ROSTER_AND_SQUAD_ID`, `canManageSquad:ONLY_JOB_TITLE`, `canManageSquad:NO_LEADERSHIP_FALLBACK`, `isSquadLeadership:ONLY_JOB_TITLE`, `*:RESOLVER_ONLY` |
 
 Observações:
-- `squad_id` que não é projeto (consulta 3.7b do plano) está dentro de `USERS_WITH_SQUAD_WITHOUT_LINK` (rótulo `squad_id_nao_e_projeto`).
+- Etapa 5, passo 2 (V82): a coluna `users.squad_id` foi apagada. As categorias `SQUAD_KEY_CASE_VARIANTS` e `USER_SQUAD_DEFAULT_DIVERGENT` (que só existiam por causa dela) foram REMOVIDAS; o que restava delas está em `users_squad_legacy_backup` (consulta manual). O campo `squad` das categorias de conta (`LEAD_USERS`, `JIRA_ACCOUNT_DUPLICATED`, `PHANTOM_ACCOUNTS`, `LEAD_NO_LEADERSHIP_LINK`) agora é `default_project_id`. O rótulo `squad_id_nao_e_projeto` (default_project_id que não é projeto, consulta 3.7b do plano) foi mantido por estabilidade.
 - Uma linha pmr que casa com duas contas (por `user_id` e por e-mail) conta para as duas, exatamente como o resolvedor de acesso.
 - `count` é exato; `breakdown` mostra até 50 rótulos.
 
@@ -89,7 +87,7 @@ Observações:
 - Cada linha da amostra é `id` (da conta), `email`, `squad` e `detalhe = ponto:motivo`. O `count` conta linhas (pessoa x squad x ponto de
   decisão), então a mesma pessoa pode aparecer até três vezes por squad; o que interessa à leitura de tela é `matchesSquad:*` (cada linha é
   uma pessoa que deixaria de ver a squad).
-- Motivos: `ONLY_ROSTER` (só no roster, ex.: responsável de issue), `ONLY_SQUAD_ID` (só `users.squad_id`/`default_project_id`),
+- Motivos: `ONLY_ROSTER` (só no roster, ex.: responsável de issue), `ONLY_SQUAD_ID` (só `default_project_id`; o nome é histórico),
   `ROSTER_AND_SQUAD_ID`, `ONLY_JOB_TITLE` (gestão só pelo cargo), `NO_LEADERSHIP_FALLBACK` (gestão só porque a squad não tem liderança
   cadastrada; veja também `SQUADS_WITHOUT_LEADERSHIP`), `RESOLVER_ONLY` (os dois cálculos de vínculo discordam: investigar).
 - Como tratar: crie o vínculo da pessoa na squad (convite, pedido de vínculo, importação do Jira, adição pela liderança) ou aceite a

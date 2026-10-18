@@ -198,7 +198,7 @@ virar. O padrão não muda nada.
 Valor vazio ou desconhecido (`nwe`, `true`...) cai em **`legacy`**, nunca em `new` (um aviso sai no log de inicialização). Reverter:
 `APP_MEMBERSHIP_AUTHZ=legacy` e reiniciar. **Sem migração de banco**, sem dump necessário. Desde a Etapa 5 só `default_project_id`
 é gravado pelos fluxos de entrada; nos modos `legacy`/`shadow` a antiga "squad da sessão" (`users.squad_id`) é lida como
-`default_project_id` (eram gravados juntos, então coincidem; a categoria `USER_SQUAD_DEFAULT_DIVERGENT` do relatório lista as exceções).
+`default_project_id` (eram gravados juntos, então coincidem; a categoria `USER_SQUAD_DEFAULT_DIVERGENT` listava as exceções e foi removida com a coluna na V82; consulte `users_squad_legacy_backup`).
 
 ## A regra nova (modo `new`)
 
@@ -585,7 +585,7 @@ a regressão (reflexão na entidade + varredura de `src/main/java` sem comentár
 | 46, 47 | `SquadAccessService.activeSquadFor` / `legacyShareSet`; `ApiKeyLifecycle.reevaluateOwner` (sem o serviço) | L | `squad_id` | `default_project_id` (em `new` segue a squad ativa validada) |
 | — (não estava na tabela) | `MembershipService.hasLegacyTraces` | L | `squad_id` ou `default_project_id` | só `default_project_id` (+ roster) |
 | — (não estava na tabela) | `AuthzDiffService.evaluateUser` | L | `squad_id` entrava no universo de squads | só `default_project_id`, roster e vínculos |
-| — | `MembershipReportService` (SQL nativo) | L | `users.squad_id` | **mantido de propósito**: diagnóstico de legado (`LEGACY-SQUAD-ID-DIAGNOSTIC`), sai com o DROP COLUMN |
+| — | `MembershipReportService` (SQL nativo) | L | `users.squad_id` | passo 2 (V82): categorias dependentes removidas, o resto usa `default_project_id` |
 
 Correções à tabela 1.A do plano: (a) os itens 9, 13-18, 27, 28 e 32 estão certos; o item 15 grava `squad_id` só no `removeMember` (a
 adição/troca de papel nunca escreveu); o item 27 tem **dois** pontos de escrita (criar e atualizar) mais o de zerar; (b) faltavam
@@ -630,54 +630,46 @@ Em `app.membership.authz=new` nenhuma decisão de acesso lê `claimed_by_uid`.
 - **Não confirmado:** relatórios/BI/consultas manuais direto no Postgres da homologação e do futuro Azure. Rodar `grep -rn "squad_id"` nos repositórios de BI e no
   histórico de consultas antes do passo 2.
 
-## Passo 2 (destrutivo, NÃO feito): backup e DROP da coluna
+## Passo 2 (destrutivo): backup e DROP da coluna: FEITO (migração V82)
 
-Só depois de N semanas em produção/homologação sem leituras (a trava de arquitetura garante o código; o resto é externo) e **aprovação explícita**.
-Script proposto (próxima migração livre, **não criada**):
+Autorizado explicitamente pelo usuário. `V82__retire_users_squad_id.sql`:
+
+1. cria `users_squad_legacy_backup(id PK, squad_id, default_project_id, backed_up_at)` e copia TODOS os usuários (`id, squad_id, default_project_id`);
+2. confere que o backup tem uma cópia fiel de cada usuário (linha presente e valores idênticos, `IS NOT DISTINCT FROM`); se não, `RAISE EXCEPTION`
+   e a migração inteira é revertida (nada é apagado, a V82 não fica registrada);
+3. só então `ALTER TABLE users DROP COLUMN squad_id` (SEM `CASCADE`).
+
+Segurança: todo o bloco só roda se a coluna existir (`information_schema`); numa base que já não a tem (restaurada, reexecução) nada é copiado nem
+apagado, e o backup existente nunca é apagado. Dependências da coluna conferidas no schema real (Postgres 17, após a V81): nenhum
+índice, constraint/FK, view ou trigger usa `users.squad_id`; por isso o DROP puro basta (se algo dependesse, ele falharia em vez de levar o objeto junto).
+Testes: `RetireUsersSquadIdMigrationTest` (migra de verdade até a V81, popula `users` com squad preenchida, nula, vazia, com caixa/espaço e divergente do
+`default_project_id`, aplica a V82; prova o aborto com backup incompleto, a reexecução segura e a reversão) e `UsersSquadIdRetiredIntegrationTest`.
+
+**O que mudou no mesmo PR:** `MembershipReportService` não consulta mais `users.squad_id`. Removidas as categorias `SQUAD_KEY_CASE_VARIANTS` e
+`USER_SQUAD_DEFAULT_DIVERGENT`; `USERS_WITH_SQUAD_WITHOUT_LINK` e `EXCLUDED_BUT_STILL_LINKED` usam só `default_project_id` e pmr (rótulo
+`squad_id` virou `default_project_id`, `pmr_e_squad_id` virou `pmr_e_default_project_id`); o campo `squad` de `LEAD_USERS`,
+`JIRA_ACCOUNT_DUPLICATED`, `PHANTOM_ACCOUNTS` e `LEAD_NO_LEADERSHIP_LINK` agora é `default_project_id`. `UsersSquadIdColumnRetiredTest` não tem mais exceção.
+Ver `docs/membership-report.md`.
+
+**Retenção:** mantenha `users_squad_legacy_backup` por pelo menos **30 dias** depois do deploy; qualquer limpeza é manual e posterior. Nenhuma migração a apaga.
+
+**Reverter** (coluna e valores de volta; o código novo continua sem usá-la):
 
 ```sql
--- V8x__retire_users_squad_id.sql  (exemplo; renumerar para a próxima livre)
-CREATE TABLE users_squad_legacy_backup (
-    id                 VARCHAR(255) PRIMARY KEY,
-    squad_id           VARCHAR(255),
-    default_project_id VARCHAR(255),
-    backed_up_at       TIMESTAMP NOT NULL DEFAULT now()
-);
-
-INSERT INTO users_squad_legacy_backup (id, squad_id, default_project_id)
-SELECT id, squad_id, default_project_id FROM users;
-
--- confere antes de dropar: a Flyway aborta a migração (e nada é dropado) se o backup não cobrir todos os usuários
-DO $$
-BEGIN
-  IF (SELECT COUNT(*) FROM users_squad_legacy_backup) <> (SELECT COUNT(*) FROM users) THEN
-    RAISE EXCEPTION 'backup de users.squad_id incompleto';
-  END IF;
-END $$;
-
-ALTER TABLE users DROP COLUMN squad_id;
+ALTER TABLE users ADD COLUMN squad_id VARCHAR(255);
+UPDATE users u SET squad_id = b.squad_id FROM users_squad_legacy_backup b WHERE b.id = u.id;
 ```
 
-No mesmo PR do passo 2: remover as categorias de `MembershipReportService` que usam `users.squad_id` (`USERS_WITH_SQUAD_WITHOUT_LINK` na parte
-`squad_id`, `SQUAD_KEY_CASE_VARIANTS`, `USER_SQUAD_DEFAULT_DIVERGENT`, `EXCLUDED_BUT_STILL_LINKED` na parte `squad_id`, `squad_id AS squad` de `LEAD_USERS`
-e dos duplicados), ajustar `docs/membership-report.md`, e tirar `MembershipReportService.java` da lista do `UsersSquadIdColumnRetiredTest`.
-Os índices da coluna, se existirem, caem com ela (conferir `\d users` antes). Reverter: `ALTER TABLE users ADD COLUMN squad_id VARCHAR(255);` e
-`UPDATE users u SET squad_id = b.squad_id FROM users_squad_legacy_backup b WHERE b.id = u.id;`.
-
-## Diagnóstico de legado: a coluna virou um retrato congelado
-
-`MembershipReportService` continua lendo `users.squad_id` por SQL nativo, mas desde esta etapa ninguém a atualiza: ela descreve o que havia no
-deploy. Efeitos a ter em mente ao interpretar `docs/membership-report.md`: `USERS_WITH_SQUAD_WITHOUT_LINK`, `SQUAD_KEY_CASE_VARIANTS` e
-`USER_SQUAD_DEFAULT_DIVERGENT` não crescem mais (contas novas têm a coluna `NULL`); `EXCLUDED_BUT_STILL_LINKED` pode listar com o rótulo `squad_id`
-quem foi removido do time depois do deploy (a remoção não limpa mais a coluna): ignore esse rótulo e confie em `pmr`.
+Contas criadas depois da V82 não têm linha no backup e ficam com `squad_id` NULL (sempre foram NULL nelas desde o passo 1).
+**Antes de aplicar em qualquer ambiente: `pg_dump` do banco.**
 
 ## Riscos de deploy e reversão
 
-- **Nenhuma migração**: a coluna não é tocada; o `ddl-auto=validate` tolera coluna a mais (provado pelo `UsersSquadIdRetiredIntegrationTest` contra o schema real).
+- **Passo 1 (ver acima, histórico)**: sem migração. **Passo 2**: V82 destrutiva, com backup e conferência; `pg_dump` obrigatório antes do deploy.
 - Quem lia `squad_id` por fora (BI, consultas manuais, outro serviço) continua lendo, mas o valor deixa de se mover; contas novas vêm com `NULL`.
 - Em `authz`≠`new` (rollback do modo), a "squad da sessão" passa a ser só `default_project_id`. Quem tinha `squad_id` ≠ `default_project_id` (lista em
   `USER_SQUAD_DEFAULT_DIVERGENT`) perde, **nesses modos**, o acesso que vinha só do `squad_id`; em `new` não muda nada.
 - Frontend antigo que ainda envia `squadId` em `saveUser` não quebra (ignorado). Quem dependia disso para TROCAR de squad passa a precisar de `/auth/switch-project`.
 - `GET /api/users` (lista) devolve `squadId` = `default_project_id` sem validar; `GET /api/users/{id}` e a resposta do `POST` devolvem a squad ativa validada.
-- Reverter: reinserir `@Column(name = "squad_id") private String squadId;` em `User`, desfazer os commits `refactor(vinculo): users.squad_id deixa de ser lida...`
+- Reverter o passo 1 (só valia antes da V82): reinserir `@Column(name = "squad_id") private String squadId;` em `User`, desfazer os commits `refactor(vinculo): users.squad_id deixa de ser lida...`
   e `test(vinculo)...` (a coluna nunca foi tocada, os dados antigos continuam lá).
