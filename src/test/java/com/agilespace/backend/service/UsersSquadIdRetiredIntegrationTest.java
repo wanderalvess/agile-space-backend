@@ -30,7 +30,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Etapa 5 do vínculo (passo 1): a coluna {@code users.squad_id} PERMANECE no banco, mas nenhum fluxo a lê ou grava.
+ * Etapa 5 do vínculo (passo 2): a coluna {@code users.squad_id} foi APAGADA pela V82 (com backup em users_squad_legacy_backup)
+ * e nenhum fluxo a lê ou grava.
  * Contra um Postgres real, com {@code ddl-auto=validate} (a subida do contexto já prova que o schema real fecha com a
  * entidade sem o campo) e os modos {@code new} ligados, como na homologação: registro, login (inclusive o fallback do
  * roster), troca de squad, "Sou eu", convite, roster, perfil e criação de squad nova deixam a coluna como estava
@@ -88,16 +89,9 @@ class UsersSquadIdRetiredIntegrationTest {
                 + "VALUES (?, ?, ?, ?, ?, ?, ?, false, 'MANUAL')", id, project, roleName, roleKey, "Pessoa " + id, email, userId);
     }
 
-    private String squadIdColumn(String userId) {
-        return jdbc.queryForObject("SELECT squad_id FROM users WHERE id = ?", String.class, userId);
-    }
 
     private String defaultProjectColumn(String userId) {
         return jdbc.queryForObject("SELECT default_project_id FROM users WHERE id = ?", String.class, userId);
-    }
-
-    private String squadIdColumnByEmail(String email) {
-        return jdbc.queryForObject("SELECT squad_id FROM users WHERE email = ?", String.class, email);
     }
 
     private JsonNode send(org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder req) throws Exception {
@@ -108,10 +102,13 @@ class UsersSquadIdRetiredIntegrationTest {
     // ---------- o schema real fecha com a entidade sem o campo ----------
 
     @Test
-    void aColunaPermaneceNoBanco_eAEntidadeNaoTemOCampo() {
+    void aColunaNaoExisteMais_eOBackupFoiCriado_eAEntidadeNaoTemOCampo() {
         Integer columns = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'squad_id'", Integer.class);
-        assertEquals(1, columns, "passo 1 é reversível: a coluna não foi tocada (o DROP é o passo 2, com backup)");
+        assertEquals(0, columns, "passo 2 (V82): a coluna foi apagada");
+        Integer backup = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'users_squad_legacy_backup'", Integer.class);
+        assertEquals(4, backup, "tabela de backup com id, squad_id, default_project_id, backed_up_at");
         assertThrows(NoSuchFieldException.class, () -> User.class.getDeclaredField("squadId"));
     }
 
@@ -126,7 +123,6 @@ class UsersSquadIdRetiredIntegrationTest {
                 .content("{\"email\":\"ana@totvs.com.br\",\"name\":\"Ana\",\"password\":\"" + PASSWORD + "\"}"));
 
         assertEquals("SQ1", session.get("activeProjectId").asText());
-        assertNull(squadIdColumnByEmail("ana@totvs.com.br"));
         assertEquals("SQ1", jdbc.queryForObject("SELECT default_project_id FROM users WHERE email = 'ana@totvs.com.br'", String.class));
     }
 
@@ -134,14 +130,14 @@ class UsersSquadIdRetiredIntegrationTest {
     void registroDeContaFantasma_naoToca_aColunaAntiga() throws Exception {
         project("SQ1");
         pmr("r-bia", "SQ1", "QA", "QA", "bia@totvs.com.br", null);
-        // Conta pré-provisionada pelo sync do Jira, com um valor ANTIGO na coluna: continua exatamente como estava.
-        jdbc.update("INSERT INTO users (id, email, name, role, auth_provider, is_active, is_guest, squad_id) "
-                + "VALUES ('bia', 'bia@totvs.com.br', 'Bia', 'MEMBER', 'LOCAL', true, false, 'VELHA')");
+        // Conta pré-provisionada pelo sync do Jira, sem squad.
+        jdbc.update("INSERT INTO users (id, email, name, role, auth_provider, is_active, is_guest) "
+                + "VALUES ('bia', 'bia@totvs.com.br', 'Bia', 'MEMBER', 'LOCAL', true, false)");
 
         send(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"email\":\"bia@totvs.com.br\",\"name\":\"Bia\",\"password\":\"" + PASSWORD + "\"}"));
 
-        assertEquals("VELHA", squadIdColumn("bia"), "ninguém mais grava a coluna, nem para 'completar'");
+        assertEquals("SQ1", defaultProjectColumn("bia"), "só a preferência é completada");
     }
 
     @Test
@@ -155,7 +151,6 @@ class UsersSquadIdRetiredIntegrationTest {
 
         assertEquals("SQ1", session.get("activeProjectId").asText());
         assertEquals("SQ1", defaultProjectColumn("carla"));
-        assertNull(squadIdColumn("carla"));
     }
 
     @Test
@@ -168,7 +163,6 @@ class UsersSquadIdRetiredIntegrationTest {
                 .content("{\"email\":\"davi@totvs.com.br\",\"password\":\"" + PASSWORD + "\"}"));
 
         assertEquals("ROSTERSQ", defaultProjectColumn("davi"), "preferência vinda do roster, como antes");
-        assertNull(squadIdColumn("davi"));
         assertTrue(session.get("accessibleProjects").isEmpty(), "sem linha em project_member_roles não há vínculo");
         assertTrue(session.get("legacyOnly").asBoolean());
     }
@@ -187,7 +181,6 @@ class UsersSquadIdRetiredIntegrationTest {
 
         assertEquals("SQ2", session.get("activeProjectId").asText());
         assertEquals("SQ2", defaultProjectColumn("eva"));
-        assertNull(squadIdColumn("eva"));
     }
 
     @Test
@@ -202,7 +195,6 @@ class UsersSquadIdRetiredIntegrationTest {
 
         assertEquals("SQ1", session.get("activeProjectId").asText());
         assertEquals("fabio", jdbc.queryForObject("SELECT user_id FROM project_member_roles WHERE id = 'r-fabio'", String.class));
-        assertNull(squadIdColumn("fabio"));
         assertNull(jdbc.queryForObject("SELECT claimed_by_uid FROM squad_members WHERE db_id = 'SQ1_fabio'", String.class),
                 "claimed_by_uid deixou de ser gravado pelo vínculo");
     }
@@ -218,7 +210,6 @@ class UsersSquadIdRetiredIntegrationTest {
         assertEquals("SQ1", session.get("activeProjectId").asText());
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM project_member_roles WHERE user_id = 'gabi' AND project_id = 'SQ1'", Integer.class));
         assertEquals("SQ1", defaultProjectColumn("gabi"));
-        assertNull(squadIdColumn("gabi"));
     }
 
     // ---------- importação do Jira e roster ----------
@@ -226,13 +217,12 @@ class UsersSquadIdRetiredIntegrationTest {
     @Test
     void removerDoRoster_naoRegravaAContaDeQuemSai() {
         user("hugo", "PROJ1", false);
-        jdbc.update("UPDATE users SET jira_account_id = 'jira-hugo', squad_id = 'ANTIGA' WHERE id = 'hugo'");
+        jdbc.update("UPDATE users SET jira_account_id = 'jira-hugo' WHERE id = 'hugo'");
         squadService.saveMember("PROJ1", "jira-hugo", SquadMember.builder().displayName("Hugo").email("hugo@totvs.com.br").build());
-        assertEquals("ANTIGA", squadIdColumn("hugo"), "salvar membro não sobrescreve mais a coluna (last-write-wins acabou)");
+        assertEquals("PROJ1", defaultProjectColumn("hugo"), "salvar membro não mexe na conta");
 
         squadService.deleteMember("PROJ1", "jira-hugo");
 
-        assertEquals("ANTIGA", squadIdColumn("hugo"), "quem saiu do roster não é regravado (valor antigo intocado)");
         assertEquals("PROJ1", defaultProjectColumn("hugo"));
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM squad_members WHERE jira_account_id = 'jira-hugo'", Integer.class));
     }
@@ -243,10 +233,8 @@ class UsersSquadIdRetiredIntegrationTest {
         jdbc.update("UPDATE users SET jira_account_id = 'jira-iris' WHERE id = 'iris'");
 
         squadService.saveMember("SQX", "jira-iris", SquadMember.builder().displayName("Íris").email("iris@totvs.com.br").build());
-        assertNull(squadIdColumn("iris"));
 
         squadService.deleteMember("SQX", "jira-iris");
-        assertNull(squadIdColumn("iris"));
     }
 
     // ---------- perfil e squad nova ----------
@@ -267,7 +255,6 @@ class UsersSquadIdRetiredIntegrationTest {
             assertEquals("SQ1", saved.get("squadId").asText(), "derivado da squad ativa validada, não do corpo");
         }
         assertEquals("SQ1", defaultProjectColumn("joao"), "a preferência não muda por saveUser");
-        assertNull(squadIdColumn("joao"));
 
         JsonNode me = send(get("/api/users/joao").header("Authorization", token("joao")));
         assertEquals("SQ1", me.get("squadId").asText());
@@ -293,6 +280,5 @@ class UsersSquadIdRetiredIntegrationTest {
                 .content("{\"ceremonyMode\":\"manual\"}")).andExpect(status().is2xxSuccessful());
 
         assertEquals("NOVA", defaultProjectColumn("marta"), "o bootstrap grava só a preferência");
-        assertNull(squadIdColumn("marta"));
     }
 }

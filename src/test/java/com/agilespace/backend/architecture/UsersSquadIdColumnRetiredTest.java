@@ -11,16 +11,14 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Trava de regressão da Etapa 5 do vínculo (passo 1): {@code users.squad_id} foi aposentada. A coluna continua no banco até o
- * passo 2 (backup + DROP COLUMN), mas NENHUM código de produção pode ler ou gravá-la, exceto o SQL de diagnóstico de legado
- * do {@code MembershipReportService} (marcado com {@code LEGACY-SQUAD-ID-DIAGNOSTIC}, a remover junto com a coluna).
+ * Trava de regressão da Etapa 5 do vínculo: {@code users.squad_id} foi apagada (passo 2, migração V82, com backup em
+ * {@code users_squad_legacy_backup}). NENHUM código de produção pode ler ou gravar a coluna, sem exceção.
  *
  * <p>Duas travas: (1) a entidade {@code User} não tem o campo nem os acessores (reflexão: se alguém reinserir
  * {@code getSquadId()}/{@code setSquadId()}/{@code squadId}, falha); (2) varredura de {@code src/main/java} (sem comentários) atrás
@@ -29,10 +27,6 @@ import static org.junit.jupiter.api.Assertions.*;
 class UsersSquadIdColumnRetiredTest {
 
     private static final Path MAIN_JAVA = Path.of("src", "main", "java");
-
-    /** Único arquivo autorizado a citar users.squad_id (SQL nativo de diagnóstico do legado). */
-    private static final Set<String> DIAGNOSTIC_ALLOWLIST = Set.of("MembershipReportService.java");
-    private static final String DIAGNOSTIC_MARKER = "LEGACY-SQUAD-ID-DIAGNOSTIC";
 
     /** users.squad_id, u.squad_id, usr.squad_id (SQL) e u.squadId / user.squadId (JPQL). */
     private static final Pattern USERS_COLUMN = Pattern.compile(
@@ -55,27 +49,19 @@ class UsersSquadIdColumnRetiredTest {
     }
 
     @Test
-    @DisplayName("Nenhum código de produção (fora do diagnóstico de legado) cita users.squad_id em SQL/JPQL")
+    @DisplayName("Nenhum código de produção cita users.squad_id em SQL/JPQL")
     void noProductionCodeTouchesTheColumn() throws IOException {
         List<String> violations = new ArrayList<>();
-        boolean diagnosticStillMarked = false;
         try (Stream<Path> files = Files.walk(MAIN_JAVA)) {
             for (Path file : (Iterable<Path>) files.filter(p -> p.toString().endsWith(".java"))::iterator) {
                 String raw = Files.readString(file, StandardCharsets.UTF_8);
-                String name = file.getFileName().toString();
-                if (DIAGNOSTIC_ALLOWLIST.contains(name)) {
-                    diagnosticStillMarked |= raw.contains(DIAGNOSTIC_MARKER);
-                    continue;
-                }
                 String code = stripComments(raw);
                 if (USERS_COLUMN.matcher(code).find() || WRITES_USERS_COLUMN.matcher(code).find()) {
                     violations.add(MAIN_JAVA.relativize(file).toString());
                 }
             }
         }
-        assertTrue(violations.isEmpty(), "users.squad_id foi aposentada (Etapa 5): remova a leitura/gravação em " + violations);
-        assertTrue(diagnosticStillMarked, "o SQL de diagnóstico de legado precisa continuar marcado com " + DIAGNOSTIC_MARKER
-                + " (ou ser removido junto com o DROP COLUMN, atualizando esta lista)");
+        assertTrue(violations.isEmpty(), "users.squad_id foi apagada (Etapa 5): remova a leitura/gravação em " + violations);
     }
 
     @Test

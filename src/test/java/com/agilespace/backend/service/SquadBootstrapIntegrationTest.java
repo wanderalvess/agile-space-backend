@@ -102,10 +102,6 @@ class SquadBootstrapIntegrationTest {
             return jdbc.queryForList("SELECT user_id, role_key, is_leadership, source FROM project_member_roles WHERE project_id = ?", squad);
         }
 
-        String squadIdOf(String user) {
-            return jdbc.queryForObject("SELECT squad_id FROM users WHERE id = ?", String.class, user);
-        }
-
         String defaultOf(String user) {
             return jdbc.queryForObject("SELECT default_project_id FROM users WHERE id = ?", String.class, user);
         }
@@ -136,7 +132,6 @@ class SquadBootstrapIntegrationTest {
             assertEquals("MANUAL", rows.get(0).get("source"));
             assertEquals(1, projectsNamed("NOVA"));
             assertEquals("NOVA", defaultOf("p1"), "grava a preferência default_project_id");
-            assertNull(squadIdOf("p1"), "users.squad_id aposentada (Etapa 5): nunca mais gravada");
             assertEquals(List.of("authz_bootstrap user=p1 squad=NOVA"), bootstrapLogs());
 
             // Segunda chamada: passa pelo VÍNCULO (o cache de vínculos foi invalidado pelo listener JPA, senão a
@@ -159,7 +154,6 @@ class SquadBootstrapIntegrationTest {
             assertEquals(403, manage("NOVA", "p2", "MEMBER"));
             assertEquals(403, read("NOVA", "p2", "MEMBER"));
             assertEquals(0, pmrOf("NOVA").stream().filter(r -> "p2".equals(r.get("user_id"))).count());
-            assertNull(squadIdOf("p2"), "negado: nada é gravado na pessoa");
             assertEquals(1, bootstrapLogs().size());
         }
 
@@ -173,7 +167,6 @@ class SquadBootstrapIntegrationTest {
 
             assertEquals(403, manage("JIRAX", "p2", "MEMBER"));
             assertEquals(403, manage("jirax", "p2", "MEMBER"), "chave com outra caixa também não");
-            assertNull(squadIdOf("p2"));
             assertEquals(1, pmrOf("JIRAX").size());
             assertTrue(bootstrapLogs().isEmpty());
         }
@@ -190,7 +183,7 @@ class SquadBootstrapIntegrationTest {
         void quemJaTemVinculoEmOutraSquad_naoUsaOBootstrapParaCriarOutra() throws Exception {
             assertEquals(200, manage("NOVA", "p1", "MEMBER"));
             // squad_id perdido (ex.: limpeza), mas o vínculo continua: a regra nova não o trata como pessoa sem time.
-            jdbc.update("UPDATE users SET squad_id = NULL, default_project_id = NULL WHERE id = 'p1'");
+            jdbc.update("UPDATE users SET default_project_id = NULL WHERE id = 'p1'");
 
             assertEquals(200, manage("NOVA", "p1", "MEMBER"), "continua passando pelo vínculo");
             assertEquals(403, manage("OUTRA", "p1", "MEMBER"));
@@ -203,7 +196,6 @@ class SquadBootstrapIntegrationTest {
             assertEquals(200, manage("NOVA", "admin", "ADMIN"));
             assertEquals(200, read("NOVA", "admin", "ADMIN"));
             assertTrue(pmrOf("NOVA").isEmpty());
-            assertNull(squadIdOf("admin"));
             assertTrue(bootstrapLogs().isEmpty());
             // E depois dele, a primeira pessoa sem time ainda faz o primeiro uso (o admin não "ocupou" a squad).
             assertEquals(200, manage("NOVA", "p1", "MEMBER"));
@@ -222,7 +214,6 @@ class SquadBootstrapIntegrationTest {
             assertEquals(403, read("NOVA", "p1", "MEMBER"));
             assertTrue(pmrOf("NOVA").isEmpty());
             assertEquals(0, projectsNamed("NOVA"));
-            assertNull(squadIdOf("p1"));
             assertTrue(bootstrapLogs().isEmpty());
         }
 
@@ -243,7 +234,6 @@ class SquadBootstrapIntegrationTest {
             assertEquals(200, manage("NOVA", "p1", "MEMBER"));
 
             assertEquals("NOVA", defaultOf("p1"));
-            assertNull(squadIdOf("p1"));
             assertTrue(pmrOf("NOVA").isEmpty(), "legacy não cria vínculo");
             assertEquals(0, projectsNamed("NOVA"));
             assertEquals(200, manage("NOVA", "p1", "MEMBER"), "segue passando por default_project_id");
@@ -255,7 +245,6 @@ class SquadBootstrapIntegrationTest {
             jdbc.update("INSERT INTO squad_members (db_id, squad_id, jira_account_id, display_name, role) VALUES ('X_1', 'COMTIME', 'jira-1', 'Alguém', 'Developer')");
 
             assertEquals(403, manage("COMTIME", "p1", "MEMBER"));
-            assertNull(squadIdOf("p1"));
         }
     }
 
@@ -269,7 +258,6 @@ class SquadBootstrapIntegrationTest {
             assertEquals(200, manage("NOVA", "p1", "MEMBER"));
 
             assertEquals("NOVA", defaultOf("p1"));
-            assertNull(squadIdOf("p1"));
             assertTrue(pmrOf("NOVA").isEmpty(), "shadow não grava vínculo: só observa");
             assertEquals(0, projectsNamed("NOVA"));
             assertEquals(200, manage("NOVA", "p1", "MEMBER"));
