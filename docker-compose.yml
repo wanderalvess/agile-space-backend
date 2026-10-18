@@ -114,6 +114,9 @@ services:
         NEXT_PUBLIC_SPRING_API_URL: ${NEXT_PUBLIC_SPRING_API_URL:-http://localhost:8002/api}
         NEXT_PUBLIC_GEMINI_API_KEY: ${NEXT_PUBLIC_GEMINI_API_KEY:-}
         NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
+        # Pré-baixa o modelo de embedding (~470MB) na imagem: a busca semântica funciona sem depender de saída
+        # para huggingface.co no runtime. 0 desliga (a imagem fica menor e o modelo baixa na 1a chamada).
+        PRELOAD_EMBEDDING_MODEL: ${PRELOAD_EMBEDDING_MODEL:-1}
     container_name: agile-space-frontend
     restart: unless-stopped
     depends_on:
@@ -137,7 +140,7 @@ services:
       resources:
         limits:
           cpus: "${FRONTEND_CPU_LIMIT:-1}"
-          memory: ${FRONTEND_MEMORY_LIMIT:-512M}
+          memory: ${FRONTEND_MEMORY_LIMIT:-1536M}
 
   # Reverse proxy + TLS automático (Let's Encrypt) na frente de frontend/backend. Só entra em
   # jogo com o profile "proxy" (docker compose --profile proxy up -d) — em dev local, sem
