@@ -187,17 +187,16 @@ class InviteServiceTest {
     }
 
     @Test
-    @DisplayName("Pré-visualização pública: squad, papel e quem convidou; e-mail só mascarado")
-    void publicPreviewShowsSquadAndInviterWithMaskedEmail() {
+    @DisplayName("Pré-visualização pública: squad e papel, sem quem convidou; e-mail só mascarado")
+    void publicPreviewShowsSquadWithoutInviterAndMaskedEmail() {
         when(inviteRepository.findByToken("tok")).thenReturn(Optional.of(pending("ana@totvs.com.br", LocalDateTime.now().plusDays(1))));
         when(projectConfigRepository.findById("SQ")).thenReturn(Optional.of(
                 com.agilespace.backend.domain.ProjectConfig.builder().id("SQ").name("Squad Alfa").build()));
-        when(userRepository.findByEmail("lead@totvs.com.br")).thenReturn(Optional.of(User.builder().id("l").email("lead@totvs.com.br").name("Lia Lider").build()));
 
         var view = service.getPublicPreview("tok");
 
         assertEquals("Squad Alfa", view.get("squadName"));
-        assertEquals("Lia Lider", view.get("invitedByName"));
+        assertFalse(view.containsKey("invitedByName"));
         assertEquals("Developer", view.get("roleName"));
         assertEquals("PENDING", view.get("status"));
         assertEquals("a••••@totvs.com.br", view.get("emailMasked"));
