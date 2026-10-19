@@ -151,6 +151,45 @@ public class InviteService {
         return view;
     }
 
+    /**
+     * Pré-visualização SEM login, para a página do convite mostrar o que é antes de a pessoa entrar ou criar a conta.
+     * O token é a credencial do link (UUID de 128 bits) e o aceite continua exigindo sessão e, se houver, o e-mail
+     * certo. Devolve só o necessário: squad, papel, quem convidou (só o nome), validade e situação. O e-mail do
+     * destinatário nunca sai inteiro: só mascarado (c••••@dominio), para a pessoa saber com qual conta entrar.
+     */
+    @Transactional(readOnly = true)
+    public java.util.Map<String, Object> getPublicPreview(String token) {
+        Invite invite = getByToken(token);
+        String squadName = projectConfigRepository.findById(invite.getSquadId())
+                .map(p -> p.getName())
+                .filter(n -> n != null && !n.isBlank())
+                .orElse(null);
+        String invitedByName = invite.getInvitedBy() == null ? null
+                : userRepository.findByEmail(invite.getInvitedBy())
+                        .map(User::getName)
+                        .filter(n -> n != null && !n.isBlank())
+                        .orElse(null);
+        String status = invite.getStatus();
+        if ("PENDING".equalsIgnoreCase(status) && invite.getExpiresAt().isBefore(LocalDateTime.now())) {
+            status = "EXPIRED";
+        }
+        java.util.Map<String, Object> view = new java.util.LinkedHashMap<>();
+        view.put("squadId", invite.getSquadId());
+        view.put("squadName", squadName);
+        view.put("roleName", invite.getRoleName());
+        view.put("invitedByName", invitedByName);
+        view.put("status", status);
+        view.put("expiresAt", invite.getExpiresAt());
+        view.put("emailMasked", maskEmail(invite.getEmail()));
+        return view;
+    }
+
+    static String maskEmail(String email) {
+        if (email == null || email.isBlank() || !email.contains("@")) return null;
+        int at = email.indexOf('@');
+        return email.charAt(0) + "••••" + email.substring(at);
+    }
+
     private static boolean isRecipient(Invite invite, User caller) {
         return invite.getEmail() != null && caller.getEmail() != null && invite.getEmail().trim().equalsIgnoreCase(caller.getEmail().trim());
     }

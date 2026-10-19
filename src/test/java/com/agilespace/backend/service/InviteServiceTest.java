@@ -185,4 +185,35 @@ class InviteServiceTest {
         assertNull(seen.getInvitedBy());
         assertNull(seen.getEmail());
     }
+
+    @Test
+    @DisplayName("Pré-visualização pública: squad, papel e quem convidou; e-mail só mascarado")
+    void publicPreviewShowsSquadAndInviterWithMaskedEmail() {
+        when(inviteRepository.findByToken("tok")).thenReturn(Optional.of(pending("ana@totvs.com.br", LocalDateTime.now().plusDays(1))));
+        when(projectConfigRepository.findById("SQ")).thenReturn(Optional.of(
+                com.agilespace.backend.domain.ProjectConfig.builder().id("SQ").name("Squad Alfa").build()));
+        when(userRepository.findByEmail("lead@totvs.com.br")).thenReturn(Optional.of(User.builder().id("l").email("lead@totvs.com.br").name("Lia Lider").build()));
+
+        var view = service.getPublicPreview("tok");
+
+        assertEquals("Squad Alfa", view.get("squadName"));
+        assertEquals("Lia Lider", view.get("invitedByName"));
+        assertEquals("Developer", view.get("roleName"));
+        assertEquals("PENDING", view.get("status"));
+        assertEquals("a••••@totvs.com.br", view.get("emailMasked"));
+        assertFalse(view.containsKey("email"));
+        assertFalse(view.containsKey("token"));
+    }
+
+    @Test
+    @DisplayName("Pré-visualização pública: vencido vira EXPIRED e token inexistente é 404")
+    void publicPreviewMarksExpiredAndRejectsUnknown() {
+        when(inviteRepository.findByToken("tok")).thenReturn(Optional.of(pending(null, LocalDateTime.now().minusDays(1))));
+        assertEquals("EXPIRED", service.getPublicPreview("tok").get("status"));
+        assertNull(service.getPublicPreview("tok").get("emailMasked"));
+
+        when(inviteRepository.findByToken("nada")).thenReturn(Optional.empty());
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> service.getPublicPreview("nada"));
+        assertEquals(404, ex.getStatusCode().value());
+    }
 }
