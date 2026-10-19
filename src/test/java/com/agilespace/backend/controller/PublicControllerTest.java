@@ -26,6 +26,9 @@ public class PublicControllerTest {
     @Mock
     private AnnouncementService announcementService;
 
+    @Mock
+    private com.agilespace.backend.service.InviteService inviteService;
+
     @InjectMocks
     private PublicController controller;
 
@@ -85,5 +88,15 @@ public class PublicControllerTest {
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals(1, response.getBody().size());
         verifyNoInteractions(adminService);
+    }
+
+    @Test
+    public void testInvitePreviewDelegatesToServiceWithoutSession() {
+        when(inviteService.getPublicPreview("tok")).thenReturn(Map.of("squadName", "Squad Alfa", "status", "PENDING"));
+
+        ResponseEntity<Map<String, Object>> response = controller.getInvitePreview("tok");
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals("Squad Alfa", response.getBody().get("squadName"));
     }
 }

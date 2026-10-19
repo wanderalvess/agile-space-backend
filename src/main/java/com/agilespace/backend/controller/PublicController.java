@@ -3,6 +3,7 @@ package com.agilespace.backend.controller;
 import com.agilespace.backend.dto.AnnouncementDto;
 import com.agilespace.backend.service.AdminService;
 import com.agilespace.backend.service.AnnouncementService;
+import com.agilespace.backend.service.InviteService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -29,6 +30,7 @@ public class PublicController {
 
     private final AdminService adminService;
     private final AnnouncementService announcementService;
+    private final InviteService inviteService;
 
     @GetMapping("/system-config")
     public ResponseEntity<Map<String, String>> getSystemConfig() {
@@ -46,5 +48,14 @@ public class PublicController {
     @GetMapping("/announcements")
     public ResponseEntity<List<AnnouncementDto>> getAnnouncements() {
         return ResponseEntity.ok(announcementService.publicActive());
+    }
+
+    /**
+     * Página do convite para quem ainda não entrou: squad, papel, quem convidou e validade (sem e-mail inteiro).
+     * Token desconhecido responde 404.
+     */
+    @GetMapping("/invites/{token}")
+    public ResponseEntity<Map<String, Object>> getInvitePreview(@PathVariable String token) {
+        return ResponseEntity.ok(inviteService.getPublicPreview(token));
     }
 }
