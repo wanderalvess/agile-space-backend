@@ -99,8 +99,8 @@ public class InviteService {
             notificationTriggers.inviteCreated(invite.getToken(), squadId, invite.getSquadName(), invite.getEmail(), invitedByUserId);
         }
 
-        audit("INVITE_CREATED", invitedByUserId, "Convite criado para squad " + squadId + " (papel: " + roleName + ")"
-                + (invite.getEmail() != null ? ", e-mail: " + invite.getEmail() : ""));
+        audit("INVITE_CREATED", invitedByUserId, "origem=INVITE; squad=" + squadId + "; papel=" + roleName + "; conviteId=" + invite.getId()
+                + (invite.getEmail() != null ? "; email=" + invite.getEmail() : ""));
         log.info("Convite {} criado para squad {} por {}", invite.getId(), squadId, invitedByUserId);
         return invite;
     }
@@ -223,7 +223,7 @@ public class InviteService {
         }
         invite.setStatus("REVOKED");
         inviteRepository.save(invite);
-        audit("INVITE_REVOKED", revokedBy, "Convite " + id + " revogado");
+        audit("INVITE_REVOKED", revokedBy, "origem=INVITE; squad=" + invite.getSquadId() + "; papel=" + invite.getRoleName() + "; conviteId=" + id);
     }
 
     @Transactional
@@ -270,8 +270,12 @@ public class InviteService {
         invite.setAcceptedByUserId(acceptingUser.getId());
         inviteRepository.save(invite);
 
-        audit("INVITE_ACCEPTED", acceptingUser.getEmail(),
-                "Convite " + invite.getId() + " aceito, vinculado ao squad " + invite.getSquadId() + " como " + invite.getRoleName());
+        // performed_by = id do usuário (chave estável p/ consulta); e-mail, squad, papel, convite e origem em details.
+        // Só o id do convite entra: o token é a credencial do link e nunca vai pra auditoria.
+        audit("INVITE_ACCEPTED", acceptingUser.getId(),
+                "origem=INVITE; userId=" + acceptingUser.getId() + "; email=" + acceptingUser.getEmail()
+                        + "; squad=" + invite.getSquadId() + "; papel=" + invite.getRoleName()
+                        + "; conviteId=" + invite.getId() + "; convidadoPor=" + invite.getInvitedBy());
         log.info("Convite {} aceito por {} (squad {})", invite.getId(), acceptingUser.getEmail(), invite.getSquadId());
         return saved;
     }
