@@ -34,7 +34,7 @@ class SquadSyncServicePlannerColumnsTest {
     @BeforeEach
     void setup() {
         MockitoAnnotations.openMocks(this);
-        syncService = new SquadSyncService(squadService, jiraService, squadCapacityService, userJiraConfigRepository, new ObjectMapper());
+        syncService = new SquadSyncService(squadService, jiraService, squadCapacityService, userJiraConfigRepository, new ObjectMapper(), null);
         when(squadService.getSquad("SQ1")).thenReturn(Optional.of(Squad.builder().id("SQ1").name("SQ1").jiraProjectKey("PROJ")
                 .syncJql("project = PROJ").defaultDailyCapacityHours(6.0).rankingEnabled(false).build()));
         when(userJiraConfigRepository.findById("u1")).thenReturn(Optional.of(
