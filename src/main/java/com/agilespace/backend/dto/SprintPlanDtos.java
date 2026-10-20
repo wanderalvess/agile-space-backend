@@ -108,5 +108,12 @@ public final class SprintPlanDtos {
                            List<AbsenceView> absences, List<HolidayDto> holidays,
                            List<ItemView> items, ScopeTotals scope, List<AssignmentView> assignments,
                            Map<String, SprintPlanCalculator.Thermometer> thermometer, Permissions permissions,
-                           boolean goalSavedInJira, Instant updatedAt) {}
+                           boolean goalSavedInJira, Instant updatedAt,
+                           List<com.agilespace.backend.dto.SprintPlanDistributionDtos.DistWarning> warnings) {
+        /** Avisos da Distribuição ao avançar para a Revisão (null nas demais respostas). */
+        public PlanView withWarnings(List<com.agilespace.backend.dto.SprintPlanDistributionDtos.DistWarning> w) {
+            return new PlanView(id, squadId, version, status, sprint, goal, reserve, syncedAt, capacity, absences, holidays,
+                    items, scope, assignments, thermometer, permissions, goalSavedInJira, updatedAt, w);
+        }
+    }
 }

@@ -3,6 +3,7 @@ package com.agilespace.backend.config;
 import com.agilespace.backend.security.BoardExistsHandshakeInterceptor;
 import com.agilespace.backend.security.JwtHandshakeInterceptor;
 import com.agilespace.backend.security.RetroBoardHandshakeInterceptor;
+import com.agilespace.backend.security.SprintPlanHandshakeInterceptor;
 import com.agilespace.backend.service.BrainstormingService;
 import com.agilespace.backend.service.HealthCheckService;
 import com.agilespace.backend.websocket.BrainstormingWebSocketHandler;
@@ -10,6 +11,7 @@ import com.agilespace.backend.websocket.HealthCheckWebSocketHandler;
 import com.agilespace.backend.websocket.PokerWebSocketHandler;
 import com.agilespace.backend.websocket.RetroWebSocketHandler;
 import com.agilespace.backend.websocket.ShowcaseWebSocketHandler;
+import com.agilespace.backend.websocket.SprintPlanWebSocketHandler;
 import com.agilespace.backend.websocket.UserWebSocketHandler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,6 +33,8 @@ public class WebSocketConfig implements WebSocketConfigurer {
     private final BrainstormingWebSocketHandler brainstormingWebSocketHandler;
     private final ShowcaseWebSocketHandler showcaseWebSocketHandler;
     private final UserWebSocketHandler userWebSocketHandler;
+    private final SprintPlanWebSocketHandler sprintPlanWebSocketHandler;
+    private final SprintPlanHandshakeInterceptor sprintPlanHandshakeInterceptor;
     private final JwtHandshakeInterceptor jwtHandshakeInterceptor;
     private final RetroBoardHandshakeInterceptor retroBoardHandshakeInterceptor;
     private final HealthCheckService healthCheckService;
@@ -59,6 +63,9 @@ public class WebSocketConfig implements WebSocketConfigurer {
                 .setAllowedOrigins(origins);
         registry.addHandler(showcaseWebSocketHandler, "/ws/showcase/*")
                 .addInterceptors(jwtHandshakeInterceptor)
+                .setAllowedOrigins(origins);
+        registry.addHandler(sprintPlanWebSocketHandler, "/ws/sprint-plan/*")
+                .addInterceptors(jwtHandshakeInterceptor, sprintPlanHandshakeInterceptor)
                 .setAllowedOrigins(origins);
         // Canal do usuário (sinais de notificação/mensagem/aviso). Sem sala: o escopo é o userId do próprio JWT.
         registry.addHandler(userWebSocketHandler, "/ws/user")

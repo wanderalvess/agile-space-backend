@@ -1,8 +1,10 @@
 package com.agilespace.backend.controller;
 
+import com.agilespace.backend.domain.SprintPlan;
 import com.agilespace.backend.dto.SprintPlanDtos.*;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.SquadAccessService;
+import com.agilespace.backend.service.sprintplan.SprintPlanDistributionService;
 import com.agilespace.backend.service.sprintplan.SprintPlanScopeService;
 import com.agilespace.backend.service.sprintplan.SprintPlanService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -27,6 +29,7 @@ public class SprintPlanController {
 
     private final SprintPlanService service;
     private final SprintPlanScopeService scopeService;
+    private final SprintPlanDistributionService distributionService;
     private final SquadAccessService squadAccessService;
 
     @GetMapping
@@ -59,7 +62,13 @@ public class SprintPlanController {
     public PlanView status(@PathVariable String squadId, @PathVariable String planId,
                            @RequestBody(required = false) StatusRequest body, HttpServletRequest request) {
         requireLeadership(squadId, request);
-        return service.changeStatus(squadId, planId, body, userId(request));
+        String before = body != null && SprintPlan.STATUS_REVISAO.equals(body.to()) ? service.currentStatus(squadId, planId) : null;
+        PlanView view = service.changeStatus(squadId, planId, body, userId(request));
+        // DISTRIBUICAO -> REVISAO só avisa (subtarefa sem dono/sem datas, pessoa acima da capacidade...), nunca bloqueia.
+        if (SprintPlan.STATUS_DISTRIBUICAO.equals(before)) {
+            view = view.withWarnings(distributionService.warningsFor(squadId, planId));
+        }
+        return view;
     }
 
     @DeleteMapping("/{planId}")

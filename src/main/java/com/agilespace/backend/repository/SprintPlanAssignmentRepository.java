@@ -9,4 +9,6 @@ import java.util.Optional;
 
 public interface SprintPlanAssignmentRepository extends JpaRepository<SprintPlanAssignment, String> {
     List<SprintPlanAssignment> findByPlanId(String planId);
+
+    Optional<SprintPlanAssignment> findByPlanIdAndSubtaskKey(String planId, String subtaskKey);
 }
