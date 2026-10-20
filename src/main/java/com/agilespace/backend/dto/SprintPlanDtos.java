@@ -61,8 +61,39 @@ public final class SprintPlanDtos {
 
     public record SprintView(String jiraSprintId, String name, LocalDate startDate, LocalDate endDate, String sprintKey) {}
 
+    // ---- Escopo (E3) ----
+
+    public record AddItemsRequest(String parentKey, List<String> parentKeys) {}
+
+    public record ReorderItemsRequest(List<String> orderedItemIds) {}
+
+    /** Subtarefa da pai como entra na conta: classe pelo tipo do Jira; só DEV/QA somam. */
+    public record ScopeSubtaskView(String key, String title, String typeId, String typeName, String cls,
+                                   BigDecimal estimateH, BigDecimal remainingH, BigDecimal countedH,
+                                   boolean defaultHoursApplied, String assigneeId, String assigneeName) {}
+
+    /**
+     * Item do escopo. {@code devHours}/{@code qaHours} são o que CONTA no total (HORAS_ITEM); {@code subtaskDevH}/
+     * {@code subtaskQaH} são a soma das subtarefas da classe (estimado, ou restante se carry-over), só para alerta.
+     */
     public record ItemView(String id, String parentKey, String title, BigDecimal titleDevHours,
-                           BigDecimal titleQaHours, int sortOrder, boolean carryOver) {}
+                           BigDecimal titleQaHours, int sortOrder, boolean carryOver,
+                           BigDecimal devHours, BigDecimal qaHours, BigDecimal subtaskDevH, BigDecimal subtaskQaH,
+                           BigDecimal subtaskDevEstimateH, BigDecimal subtaskDevRemainingH,
+                           BigDecimal subtaskQaEstimateH, BigDecimal subtaskQaRemainingH,
+                           boolean divergenceDev, boolean divergenceQa, boolean divergent, boolean noEstimate,
+                           boolean inBacklog, int unclassifiedCount, BigDecimal unclassifiedHours,
+                           List<ScopeSubtaskView> subtasks) {}
+
+    public record UnclassifiedTypeView(String typeId, String typeName, int count, BigDecimal hours) {}
+
+    public record ScopeTotals(int itemCount, Map<String, Double> allocated, int carryOverCount,
+                              double carryOverDevHours, double carryOverQaHours, int divergentCount,
+                              int noEstimateCount, int unclassifiedCount, double unclassifiedHours,
+                              List<UnclassifiedTypeView> unclassifiedTypes) {}
+
+    public record ScopeView(String planId, String status, String syncedAt, List<ItemView> items, ScopeTotals totals,
+                            Map<String, SprintPlanCalculator.Thermometer> thermometer, boolean canEditPlan) {}
 
     public record AssignmentView(String id, String itemId, String subtaskKey, String accountId, LocalDate startDate,
                                  LocalDate endDate, String cls, BigDecimal hours, Long version) {}
@@ -72,7 +103,7 @@ public final class SprintPlanDtos {
     public record PlanView(String id, String squadId, Long version, String status, SprintView sprint, String goal,
                            ReserveView reserve, String syncedAt, CapacityView capacity,
                            List<AbsenceView> absences, List<HolidayDto> holidays,
-                           List<ItemView> items, List<AssignmentView> assignments,
+                           List<ItemView> items, ScopeTotals scope, List<AssignmentView> assignments,
                            Map<String, SprintPlanCalculator.Thermometer> thermometer, Permissions permissions,
-                           Instant updatedAt) {}
+                           boolean goalSavedInJira, Instant updatedAt) {}
 }

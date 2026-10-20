@@ -39,6 +39,7 @@ public class SprintPlanService {
     private final SquadMemberRepository squadMemberRepository;
     private final SquadCapacityService squadCapacityService;
     private final SprintPlanCapacityService capacityService;
+    private final SprintPlanScopeService scopeService;
 
     // ---------------- Leitura ----------------
 
@@ -46,7 +47,7 @@ public class SprintPlanService {
     public List<PlanSummary> list(String squadId) {
         return planRepository.findBySquadIdOrderByStartDateDesc(squadId).stream().map(p -> {
             CapacityView cap = capacityService.compute(p);
-            Map<String, Double> alloc = capacityService.allocated(p.getId());
+            Map<String, Double> alloc = scopeService.compute(p).totals().allocated();
             return new PlanSummary(p.getId(), p.getJiraSprintId(), p.getSprintName(), p.getStartDate(), p.getEndDate(),
                     p.getStatus(), new Totals(cap.byClass().get("DEV"), cap.byClass().get("QA"),
                     alloc.get("DEV"), alloc.get("QA")), p.getUpdatedAt());
@@ -156,6 +157,9 @@ public class SprintPlanService {
         int from = SprintPlan.STATUS_ORDER.indexOf(plan.getStatus());
         if (Math.abs(to - from) != 1) {
             throw conflict("Transição inválida: de " + plan.getStatus() + " só dá para avançar ou voltar uma etapa.");
+        }
+        if (SprintPlan.STATUS_ESCOPO.equals(plan.getStatus()) && SprintPlan.STATUS_DISTRIBUICAO.equals(req.to())) {
+            scopeService.requireItemsToLeaveScope(planId);
         }
         plan.setStatus(req.to());
         plan.setUpdatedAt(Instant.now());
@@ -305,16 +309,14 @@ public class SprintPlanService {
 
     PlanView toView(SprintPlan p, boolean canEdit, String userId) {
         CapacityView cap = capacityService.compute(p);
-        Map<String, Double> alloc = capacityService.allocated(p.getId());
+        SprintPlanScopeService.Computed scope = scopeService.compute(p);
+        Map<String, Double> alloc = scope.totals().allocated();
         List<ReserveTypeView> types = reserveTypeRepository.findByPlanIdOrderByLabelAsc(p.getId()).stream()
                 .map(t -> new ReserveTypeView(t.getId(), t.getLabel(), t.getHoursPerDay())).toList();
         List<AbsenceView> absences = absenceRepository.findByPlanIdOrderByStartDateAsc(p.getId()).stream()
                 .map(SprintPlanService::toAbsenceView).toList();
         List<HolidayDto> holidays = holidayRepository.findByPlanIdOrderByDayAsc(p.getId()).stream()
                 .map(h -> new HolidayDto(h.getDay(), h.getLabel())).toList();
-        List<ItemView> items = itemRepository.findByPlanIdOrderBySortOrderAsc(p.getId()).stream()
-                .map(i -> new ItemView(i.getId(), i.getParentKey(), i.getTitleSnapshot(), i.getTitleDevHours(),
-                        i.getTitleQaHours(), i.getSortOrder(), i.isCarryOver())).toList();
         List<AssignmentView> assignments = assignmentRepository.findByPlanId(p.getId()).stream()
                 .map(a -> new AssignmentView(a.getId(), a.getItemId(), a.getSubtaskKey(), a.getJiraAccountId(),
                         a.getStartDate(), a.getEndDate(), a.getAssignmentClass(), a.getHours(), a.getVersion())).toList();
@@ -323,8 +325,9 @@ public class SprintPlanService {
         return new PlanView(p.getId(), p.getSquadId(), p.getVersion(), p.getStatus(),
                 new SprintView(p.getJiraSprintId(), p.getSprintName(), p.getStartDate(), p.getEndDate(), p.sprintKey()),
                 p.getGoal(), new ReserveView(p.getReserveMode(), p.getReservePct(), p.getFocusFactorPct(), types),
-                null, cap, absences, holidays, items, assignments,
-                capacityService.thermometer(p, cap, alloc), perms, p.getUpdatedAt());
+                null, cap, absences, holidays, scope.items(), scope.totals(), assignments,
+                capacityService.thermometer(p, cap, alloc), perms,
+                SprintPlan.STATUS_ENVIADO.equals(p.getStatus()), p.getUpdatedAt());
     }
 
     private String myAccountId(String squadId, String userId) {
