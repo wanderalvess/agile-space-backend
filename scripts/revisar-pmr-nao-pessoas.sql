@@ -8,7 +8,7 @@ SELECT pmr.id, pmr.project_id, pmr.role_name, pmr.jira_account_id, pmr.display_n
                       OR lower(btrim(pmr.jira_account_id)) = lower(btrim(pc.name)))
             THEN 'nome da squad como pessoa' ELSE 'caixa compartilhada/servico' END AS motivo
 FROM project_member_roles pmr
-LEFT JOIN project_configs pc ON pc.id = pmr.project_id
+LEFT JOIN projects pc ON pc.id = pmr.project_id
 WHERE pmr.source = 'JIRA'
   AND ( ((pmr.email IS NULL OR btrim(pmr.email) = '')
          AND (lower(btrim(pmr.display_name)) = lower(btrim(pc.name)) OR lower(btrim(pmr.display_name)) = lower(pmr.project_id)
