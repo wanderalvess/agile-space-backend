@@ -32,6 +32,10 @@ public class SquadService {
     private final SquadPanelRepository panelRepository;
     private final SquadMemberExclusionRepository exclusionRepository;
 
+    /** Fusão de linhas da mesma pessoa e troca de chave das configurações por pessoa (opcional: ausente em testes unitários). */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private RosterMergeService rosterMerge;
+
     // ----- Squad Config -----
     @Transactional(readOnly = true)
     public List<Squad> getAllSquads() {
@@ -206,12 +210,15 @@ public class SquadService {
         // Mesma pessoa = mesma conta; senão mesmo e-mail (sem caixa); senão o nome (ver PersonIdentity). Evita a segunda
         // linha com o mesmo nome e e-mail quando a pessoa chega por outra chave (uid, e-mail, "manual-...").
         Optional<SquadMember> existing = memberRepository.findBySquadIdAndJiraAccountId(squadId, jiraAccountId);
+        String rekeyedFrom = null;
         if (existing.isEmpty()) {
             SquadMember same = PersonIdentity.resolve(memberRepository.findBySquadIdOrderByDisplayNameAsc(squadId),
                     jiraAccountId, member.getEmail(), member.getDisplayName());
             if (same != null) {
-                if (PersonIdentity.isSyntheticId(same.getJiraAccountId()) && !PersonIdentity.isSyntheticId(jiraAccountId)) {
-                    // A linha nasceu com id gerado e agora chega a conta real do Jira: troca a chave, preservando os dados.
+                if (PersonIdentity.shouldAdoptIncomingId(same.getJiraAccountId(), jiraAccountId)) {
+                    // A linha nasceu com id gerado (ou com a chave interna JIRAUSER) e agora chega a conta real do Jira /
+                    // o nome de usuário: troca a chave, preservando os dados (e as configurações por pessoa, abaixo).
+                    rekeyedFrom = same.getJiraAccountId();
                     memberRepository.delete(same);
                     memberRepository.flush();
                 } else {
@@ -237,6 +244,7 @@ public class SquadService {
             if (member.getClaimedByUid() == null) member.setClaimedByUid(e.getClaimedByUid());
         }
         SquadMember saved = saveRosterRow(member);
+        if (rekeyedFrom != null && rosterMerge != null) rosterMerge.movePersonConfigs(squadId, rekeyedFrom, jiraAccountId);
         clearExclusion(squadId, jiraAccountId); // adicionar/editar à mão (ou aceitar convite) desfaz a exclusão
 
         // Sincroniza tabela central de usuários. NUNCA grava em user.role a partir daqui:
@@ -295,6 +303,7 @@ public class SquadService {
         List<SquadMember> pool = new ArrayList<>(memberRepository.findBySquadIdOrderByDisplayNameAsc(squadId));
         List<SquadMember> toSave = new ArrayList<>();
         List<SquadMember> toRekey = new ArrayList<>();
+        Map<SquadMember, String> rekeyTo = new java.util.IdentityHashMap<>();
         for (SquadMember m : members) {
             String incomingId = PersonIdentity.cleanId(m.getJiraAccountId());
             String email = PersonIdentity.normEmail(m.getEmail());
@@ -306,11 +315,10 @@ public class SquadService {
             m.setDisplayName(name);
             SquadMember e = PersonIdentity.resolve(pool, incomingId, email, name);
             if (e != null) {
-                boolean rekey = !incomingId.equalsIgnoreCase(e.getJiraAccountId().trim())
-                        && PersonIdentity.isSyntheticId(e.getJiraAccountId()) && !PersonIdentity.isSyntheticId(incomingId);
+                boolean rekey = PersonIdentity.shouldAdoptIncomingId(e.getJiraAccountId(), incomingId);
                 m.setJiraAccountId(rekey ? incomingId : e.getJiraAccountId());
                 m.setDbId(rekey ? squadId + "_" + incomingId : e.getDbId());
-                if (rekey) toRekey.add(e);
+                if (rekey) { toRekey.add(e); rekeyTo.put(e, incomingId); }
                 if (m.getDisplayName() == null || m.getDisplayName().isBlank()) m.setDisplayName(e.getDisplayName());
                 if (m.getEmail() == null) m.setEmail(PersonIdentity.normEmail(e.getEmail()));
                 if (m.getRole() == null) m.setRole(e.getRole());
@@ -341,8 +349,19 @@ public class SquadService {
         } catch (org.springframework.dao.DataIntegrityViolationException ex) {
             throw rosterConflict(toSave.isEmpty() ? new SquadMember() : toSave.get(0), ex);
         }
+        if (rosterMerge != null) {
+            for (Map.Entry<SquadMember, String> mv : rekeyTo.entrySet()) {
+                rosterMerge.movePersonConfigs(squadId, mv.getKey().getJiraAccountId(), mv.getValue());
+            }
+        }
         for (SquadMember m : toSave) clearExclusion(squadId, m.getJiraAccountId());
         return savedAll;
+    }
+
+    /** Funde pares da mesma pessoa no roster da squad (ver {@link RosterMergeService}). Devolve quantas linhas saíram. */
+    @Transactional
+    public int consolidateRoster(String squadId) {
+        return rosterMerge == null ? 0 : rosterMerge.consolidate(squadId);
     }
 
     private void clearExclusion(String squadId, String jiraAccountId) {

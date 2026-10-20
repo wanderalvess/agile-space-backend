@@ -837,12 +837,25 @@ public class SquadSyncService {
         for (List<SquadMember> group : chunk(rosterSeeds, BATCH_CHUNK_SIZE)) {
             squadService.batchUpsertMembers(squadId, group);
         }
-        if (!rosterSeeds.isEmpty()) {
+        try {
+            // O Jira Server mostra a mesma conta como JIRAUSER<n> nas issues e como nome de usuário nos papéis do projeto:
+            // junta os pares que já estavam no roster (sem perder e-mail, vínculo nem horas calibradas).
+            squadService.consolidateRoster(squadId);
+        } catch (Exception e) {
+            log.warn("[squad:{}] não foi possível fundir duplicatas do roster: {}", squadId, e.getMessage());
+        }
+        if (!rosterSeeds.isEmpty() || !seenAssignees.isEmpty()) {
             // O upsert casa por conta > e-mail > nome: um responsável que já está no roster com outra chave (id gerado,
             // pré-cadastro por nome) é fundido em vez de ganhar uma linha fantasma. Relê o roster para a capacidade
             // seguir a linha que ficou (a chave pode ter virado a conta real do Jira).
-            for (SquadMember m : squadService.getMembers(squadId)) {
+            List<SquadMember> fresh = squadService.getMembers(squadId);
+            for (SquadMember m : fresh) {
                 if (m.getJiraAccountId() != null) rosterMap.put(m.getJiraAccountId(), m);
+            }
+            // Responsável cuja chave (JIRAUSER) foi fundida em outra linha: a capacidade segue a linha que ficou.
+            for (Map.Entry<String, String> e : seenAssignees.entrySet()) {
+                SquadMember canon = canonicalMember(fresh, e.getKey(), e.getValue());
+                if (canon != null) rosterMap.put(e.getKey(), canon);
             }
         }
 
@@ -851,6 +864,14 @@ public class SquadSyncService {
             SquadMember m = finalRosterMap.get(assigneeId);
             return (m != null && m.getCapacityHoursPerDay() != null) ? m.getCapacityHoursPerDay() : defaultCapacity;
         };
+    }
+
+    /** Linha do roster que representa o responsável: a da própria chave, ou a fundida por nome (ver PersonIdentity). */
+    static SquadMember canonicalMember(List<SquadMember> roster, String assigneeId, String assigneeName) {
+        for (SquadMember m : roster) {
+            if (m.getJiraAccountId() != null && m.getJiraAccountId().equalsIgnoreCase(assigneeId)) return m;
+        }
+        return PersonIdentity.resolve(roster, assigneeId, null, assigneeName);
     }
 
     // ===================== Segurança de migração =====================
@@ -1106,9 +1127,13 @@ public class SquadSyncService {
     private ObjectNode buildCycleTimeByStatus(String squadId, String sprintId, List<ParsedJiraIssue> groupRawIssues) {
         Map<String, Double> totalsByStatus = new LinkedHashMap<>();
         Map<String, Double> capacityCache = new HashMap<>();
+        List<SquadMember> roster = squadService.getMembers(squadId);
         for (ParsedJiraIssue issue : groupRawIssues) {
             if (isBlank(issue.assigneeId())) continue;
-            double horasProdutivas = capacityCache.computeIfAbsent(issue.assigneeId(),
+            // As configurações por pessoa vivem na chave canônica do roster (nome de usuário), não na JIRAUSER das issues.
+            SquadMember canon = roster == null ? null : canonicalMember(roster, issue.assigneeId(), issue.assigneeName());
+            String configId = canon != null && canon.getJiraAccountId() != null ? canon.getJiraAccountId() : issue.assigneeId();
+            double horasProdutivas = capacityCache.computeIfAbsent(configId,
                     id -> squadCapacityService.resolve(squadId, sprintId, id).horasProdutivas());
             accumulateCycleTime(issue, horasProdutivas, totalsByStatus);
         }
