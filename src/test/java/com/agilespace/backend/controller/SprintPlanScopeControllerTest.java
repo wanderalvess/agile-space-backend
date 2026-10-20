@@ -74,7 +74,7 @@ class SprintPlanScopeControllerTest {
         });
         Map<SubtaskClass, BigDecimal> sums = new EnumMap<>(SubtaskClass.class);
         ParentView p = new ParentView("A-1", "Pai (DEV 10h / QA 4h)", "Refinamento Concluído", false,
-                new HoursPair(new BigDecimal("10"), new BigDecimal("4")), List.of(), sums, false, false, false);
+                new HoursPair(new BigDecimal("10"), new BigDecimal("4")), List.of(), sums, false, false, false, Map.of(), false);
         lenient().when(backlogService.view(eq("SQ1"), any(), any(), eq(false))).thenReturn(
                 new PlannerBacklogService.BacklogView("t", "S3", List.of(p), List.of()));
     }

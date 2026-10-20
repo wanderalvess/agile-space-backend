@@ -28,9 +28,10 @@ public class PlannerBacklogService {
 
     public record SubtaskView(String key, String title, String typeId, String typeName, SubtaskClass subtaskClass,
                               BigDecimal estimateH, BigDecimal remainingH, BigDecimal countedH, boolean defaultHoursApplied,
-                              String status, String statusCategory, String assigneeId, String assigneeName) {
-        /** Subtarefa do tipo Code Review (id da semente ou nome "Code Review"); a classe DEV/QA vem de {@code subtaskClass}. */
-        public boolean countsAsCodeReview() {
+                              String status, String statusCategory, String assigneeId, String assigneeName,
+                              boolean codeReview) {
+        /** Tipo Code Review (id da semente ou nome "Code Review"); a classe DEV/QA continua em {@code subtaskClass}. */
+        public static boolean isCodeReviewType(String typeId, String typeName) {
             return SubtaskTypeMappingService.CODE_REVIEW_SEED_ID.equals(typeId)
                     || "code review".equals(SubtaskTypeMappingService.normalizeName(typeName));
         }
@@ -38,7 +39,8 @@ public class PlannerBacklogService {
 
     public record ParentView(String key, String title, String status, boolean carryOver, HoursPair titleHours,
                              List<SubtaskView> subtasks, Map<SubtaskClass, BigDecimal> sumByClass,
-                             boolean divergenceDev, boolean divergenceQa, boolean divergent) {}
+                             boolean divergenceDev, boolean divergenceQa, boolean divergent,
+                             Map<SubtaskClass, BigDecimal> codeReviewByClass, boolean hasCodeReviewDev) {}
 
     public record UnclassifiedType(String typeId, String typeName, int count, BigDecimal hours) {}
 
@@ -110,6 +112,9 @@ public class PlannerBacklogService {
         // Soma por classe SEM o Code Review: é o que se compara com o título (o título vem do Poker e não inclui o CR).
         Map<SubtaskClass, BigDecimal> sumsNoCr = new EnumMap<>(SubtaskClass.class);
         for (SubtaskClass c : SubtaskClass.values()) sumsNoCr.put(c, BigDecimal.ZERO);
+        Map<SubtaskClass, BigDecimal> crSums = new EnumMap<>(SubtaskClass.class);
+        for (SubtaskClass c : SubtaskClass.values()) crSums.put(c, BigDecimal.ZERO);
+        boolean hasCrDev = false;
         List<SubtaskView> views = new ArrayList<>();
         for (SquadIssueSnapshot s : subs) {
             SubtaskTypeMappingService.ResolvedType type = s.getIssueTypeId() != null ? types.get(s.getIssueTypeId()) : null;
@@ -126,8 +131,13 @@ public class PlannerBacklogService {
             BigDecimal counted = carryOver ? rem : est;
             sums.merge(cls, counted, BigDecimal::add);
             SubtaskView view = new SubtaskView(s.getJiraKey(), s.getTitle(), s.getIssueTypeId(), s.getType(), cls, est, rem,
-                    counted, defaultApplied, s.getStatus(), s.getStatusCategory(), s.getAssigneeId(), s.getAssigneeName());
-            if (!view.countsAsCodeReview()) sumsNoCr.merge(cls, counted, BigDecimal::add);
+                    counted, defaultApplied, s.getStatus(), s.getStatusCategory(), s.getAssigneeId(), s.getAssigneeName(),
+                    SubtaskView.isCodeReviewType(s.getIssueTypeId(), s.getType()));
+            if (!view.codeReview()) sumsNoCr.merge(cls, counted, BigDecimal::add);
+            else {
+                crSums.merge(cls, counted, BigDecimal::add);
+                if (cls == SubtaskClass.DEV) hasCrDev = true;
+            }
             views.add(view);
         }
         PokerHoursTitleParser.TitleHours th = PokerHoursTitleParser.parse(p.getTitle());
@@ -135,7 +145,7 @@ public class PlannerBacklogService {
         boolean divDev = isDivergent(carryOver, th == null ? null : th.dev(), sumsNoCr.get(SubtaskClass.DEV));
         boolean divQa = isDivergent(carryOver, th == null ? null : th.qa(), sumsNoCr.get(SubtaskClass.QA));
         return new ParentView(p.getJiraKey(), p.getTitle(), p.getStatus(), carryOver, titleHours, views, sums,
-                divDev, divQa, divDev || divQa);
+                divDev, divQa, divDev || divQa, crSums, hasCrDev);
     }
 
     /** Divergência só faz sentido para item novo com horas no título; sobra conta o restante e não compara. */

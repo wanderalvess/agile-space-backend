@@ -221,7 +221,7 @@ public class SprintPlanScopeService {
                     unclassN++;
                     unclassH = unclassH.add(carry ? s.remainingH() : s.estimateH());
                 }
-                if (s.countsAsCodeReview()) {
+                if (s.codeReview()) {
                     if (s.subtaskClass() == SubtaskClass.DEV) {
                         hasCrDev = true;
                         crDevEst = crDevEst.add(s.estimateH());

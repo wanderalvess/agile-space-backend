@@ -67,14 +67,14 @@ class SprintPlanScopeServiceTest {
     }
 
     private static SubtaskView sub(String key, SubtaskClass cls, String est, String rem) {
-        return new SubtaskView(key, key, "t", "Tipo", cls, h(est), h(rem), h(est), false, "Aberto", "new", null, null);
+        return new SubtaskView(key, key, "t", "Tipo", cls, h(est), h(rem), h(est), false, "Aberto", "new", null, null, false);
     }
 
     private static ParentView parent(String key, String devTitle, String qaTitle, boolean carry, SubtaskView... subs) {
         Map<SubtaskClass, BigDecimal> sums = new EnumMap<>(SubtaskClass.class);
         for (SubtaskClass c : SubtaskClass.values()) sums.put(c, BigDecimal.ZERO);
         return new ParentView(key, "Título " + key, "Refinamento Concluído", carry,
-                devTitle == null ? null : new HoursPair(h(devTitle), h(qaTitle)), List.of(subs), sums, false, false, false);
+                devTitle == null ? null : new HoursPair(h(devTitle), h(qaTitle)), List.of(subs), sums, false, false, false, Map.of(), false);
     }
 
     private static SprintPlanItem item(String key, int order, boolean carry, ParentView p) {
@@ -147,7 +147,7 @@ class SprintPlanScopeServiceTest {
     }
 
     private static SubtaskView cr(String key, String title, SubtaskClass cls, String est, String rem) {
-        return new SubtaskView(key, title, "12300", "Code Review", cls, h(est), h(rem), h(est), false, "Aberto", "new", null, null);
+        return new SubtaskView(key, title, "12300", "Code Review", cls, h(est), h(rem), h(est), false, "Aberto", "new", null, null, true);
     }
 
     @Test
@@ -237,7 +237,7 @@ class SprintPlanScopeServiceTest {
     @DisplayName("Tipo sem classificação não entra no total e gera aviso (quantidade e horas); fora da conta fica de fora")
     void unclassifiedAndOutOfAccount() {
         SubtaskView spec = new SubtaskView("S-9", "Spec", "777", "Especificação", SubtaskClass.SEM_CLASSIFICACAO,
-                h("3"), h("3"), h("3"), false, "Aberto", "new", null, null);
+                h("3"), h("3"), h("3"), false, "Aberto", "new", null, null, false);
         var c = computeOf(parent("A-1", null, null, false, sub("S-1", SubtaskClass.DEV, "11", "11"), spec,
                 sub("S-8", SubtaskClass.FORA_DA_CONTA, "4", "4")));
         assertEquals(11.0, c.totals().allocated().get("DEV"));

@@ -74,6 +74,8 @@ class PlannerBacklogServiceTest {
         eq("9", p.sumByClass().get(SubtaskClass.DEV));
         eq("4", p.sumByClass().get(SubtaskClass.QA));
         assertFalse(p.divergent());
+        assertTrue(p.hasCodeReviewDev());
+        eq("1", p.codeReviewByClass().get(SubtaskClass.DEV));
         assertTrue(p.subtasks().stream().filter(s -> s.key().equals("P-3")).findFirst().orElseThrow().defaultHoursApplied());
         assertEquals("2026-10-20T10:00:00Z", v.syncedAt());
     }
