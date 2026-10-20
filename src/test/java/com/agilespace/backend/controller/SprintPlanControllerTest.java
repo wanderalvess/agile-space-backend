@@ -54,6 +54,7 @@ class SprintPlanControllerTest {
     @Mock SquadCapacityService squadCapacityService;
     @Mock SprintPlanCapacityService capacityService;
     @Mock SprintPlanScopeService scopeService;
+    @Mock com.agilespace.backend.service.sprintplan.SprintPlanDistributionService distributionService;
 
     MockMvc mvc;
     SprintPlan plan;
@@ -63,7 +64,7 @@ class SprintPlanControllerTest {
         SprintPlanService service = new SprintPlanService(planRepository, personRepository, reserveTypeRepository,
                 absenceRepository, holidayRepository, itemRepository, assignmentRepository, memberRepository,
                 squadCapacityService, capacityService, scopeService);
-        mvc = MockMvcBuilders.standaloneSetup(new SprintPlanController(service, scopeService, access))
+        mvc = MockMvcBuilders.standaloneSetup(new SprintPlanController(service, scopeService, distributionService, access))
                 .setControllerAdvice(new ErrorMessageAdvice()).build();
 
         plan = SprintPlan.builder().id("P1").squadId("SQ1").jiraSprintId("S3").sprintName("Sprint 3")

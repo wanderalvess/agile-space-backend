@@ -307,6 +307,11 @@ public class SprintPlanService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Plano não encontrado."));
     }
 
+    @Transactional(readOnly = true)
+    public String currentStatus(String squadId, String planId) {
+        return load(squadId, planId).getStatus();
+    }
+
     PlanView toView(SprintPlan p, boolean canEdit, String userId) {
         CapacityView cap = capacityService.compute(p);
         SprintPlanScopeService.Computed scope = scopeService.compute(p);
@@ -327,7 +332,7 @@ public class SprintPlanService {
                 p.getGoal(), new ReserveView(p.getReserveMode(), p.getReservePct(), p.getFocusFactorPct(), types),
                 null, cap, absences, holidays, scope.items(), scope.totals(), assignments,
                 capacityService.thermometer(p, cap, alloc), perms,
-                SprintPlan.STATUS_ENVIADO.equals(p.getStatus()), p.getUpdatedAt());
+                SprintPlan.STATUS_ENVIADO.equals(p.getStatus()), p.getUpdatedAt(), null);
     }
 
     private String myAccountId(String squadId, String userId) {
