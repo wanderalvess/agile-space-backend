@@ -4,11 +4,13 @@ import com.agilespace.backend.config.ErrorMessageAdvice;
 import com.agilespace.backend.domain.SprintPlan;
 import com.agilespace.backend.domain.SquadMember;
 import com.agilespace.backend.dto.SprintPlanDtos.CapacityView;
+import com.agilespace.backend.dto.SprintPlanDtos.ScopeTotals;
 import com.agilespace.backend.repository.*;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.SquadAccessService;
 import com.agilespace.backend.service.SquadCapacityService;
 import com.agilespace.backend.service.sprintplan.SprintPlanCapacityService;
+import com.agilespace.backend.service.sprintplan.SprintPlanScopeService;
 import com.agilespace.backend.service.sprintplan.SprintPlanService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -51,6 +53,7 @@ class SprintPlanControllerTest {
     @Mock SquadMemberRepository memberRepository;
     @Mock SquadCapacityService squadCapacityService;
     @Mock SprintPlanCapacityService capacityService;
+    @Mock SprintPlanScopeService scopeService;
 
     MockMvc mvc;
     SprintPlan plan;
@@ -59,8 +62,8 @@ class SprintPlanControllerTest {
     void setUp() {
         SprintPlanService service = new SprintPlanService(planRepository, personRepository, reserveTypeRepository,
                 absenceRepository, holidayRepository, itemRepository, assignmentRepository, memberRepository,
-                squadCapacityService, capacityService);
-        mvc = MockMvcBuilders.standaloneSetup(new SprintPlanController(service, access))
+                squadCapacityService, capacityService, scopeService);
+        mvc = MockMvcBuilders.standaloneSetup(new SprintPlanController(service, scopeService, access))
                 .setControllerAdvice(new ErrorMessageAdvice()).build();
 
         plan = SprintPlan.builder().id("P1").squadId("SQ1").jiraSprintId("S3").sprintName("Sprint 3")
@@ -69,7 +72,8 @@ class SprintPlanControllerTest {
         lenient().when(planRepository.findById("P1")).thenReturn(Optional.of(plan));
         lenient().when(planRepository.saveAndFlush(any())).thenAnswer(i -> i.getArgument(0));
         lenient().when(capacityService.compute(any())).thenReturn(new CapacityView(Map.of("DEV", 0.0, "QA", 0.0), List.of(), 10));
-        lenient().when(capacityService.allocated(any())).thenReturn(Map.of("DEV", 0.0, "QA", 0.0));
+        lenient().when(scopeService.compute(any())).thenReturn(new SprintPlanScopeService.Computed(List.of(),
+                new ScopeTotals(0, Map.of("DEV", 0.0, "QA", 0.0), 0, 0, 0, 0, 0, 0, 0, List.of())));
         lenient().when(capacityService.thermometer(any(), any(), any())).thenReturn(Map.of());
     }
 
@@ -208,6 +212,31 @@ class SprintPlanControllerTest {
         mvc.perform(as(post(url), "pl").content("{\"version\":3,\"to\":\"ESCOPO\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ESCOPO"));
         mvc.perform(as(post("/api/squads/SQ1/sprint-plans/P1/send-to-jira"), "pl")).andExpect(status().isNotImplemented());
+    }
+
+    @Test
+    @DisplayName("Avançar de ESCOPO para DISTRIBUICAO sem itens: 422 com mensagem; voltar não exige itens")
+    void advanceFromScopeNeedsItems() throws Exception {
+        leader("pl");
+        plan.setStatus(SprintPlan.STATUS_ESCOPO);
+        String url = "/api/squads/SQ1/sprint-plans/P1/status";
+        doThrow(new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "Inclua ao menos uma tarefa no escopo antes de ir para a distribuição."))
+                .when(scopeService).requireItemsToLeaveScope("P1");
+        mvc.perform(as(post(url), "pl").content("{\"version\":3,\"to\":\"DISTRIBUICAO\"}"))
+                .andExpect(status().isUnprocessableEntity());
+        org.junit.jupiter.api.Assertions.assertEquals(SprintPlan.STATUS_ESCOPO, plan.getStatus());
+        mvc.perform(as(post(url), "pl").content("{\"version\":3,\"to\":\"RASCUNHO\"}")).andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("PlanView expõe a meta e a flag informativa de gravação no Sprint goal do Jira")
+    void planViewExposesGoalFlag() throws Exception {
+        member("dev1");
+        plan.setGoal("Fechar o PDV");
+        mvc.perform(as(get("/api/squads/SQ1/sprint-plans/P1"), "dev1"))
+                .andExpect(jsonPath("$.goal").value("Fechar o PDV"))
+                .andExpect(jsonPath("$.goalSavedInJira").value(false))
+                .andExpect(jsonPath("$.scope.itemCount").value(0));
     }
 
     @Test

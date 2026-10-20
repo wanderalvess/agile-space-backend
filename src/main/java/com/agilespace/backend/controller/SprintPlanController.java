@@ -3,6 +3,7 @@ package com.agilespace.backend.controller;
 import com.agilespace.backend.dto.SprintPlanDtos.*;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.SquadAccessService;
+import com.agilespace.backend.service.sprintplan.SprintPlanScopeService;
 import com.agilespace.backend.service.sprintplan.SprintPlanService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +26,7 @@ import java.util.Map;
 public class SprintPlanController {
 
     private final SprintPlanService service;
+    private final SprintPlanScopeService scopeService;
     private final SquadAccessService squadAccessService;
 
     @GetMapping
@@ -108,6 +110,36 @@ public class SprintPlanController {
                                               HttpServletRequest request) {
         requireLeadership(squadId, request);
         return service.replaceReserveTypes(squadId, planId, body);
+    }
+
+    // ---- Escopo (E3) ----
+
+    @GetMapping("/{planId}/items")
+    public ScopeView items(@PathVariable String squadId, @PathVariable String planId, HttpServletRequest request) {
+        squadAccessService.requireSquadReadAccess(squadId, request);
+        return scopeService.view(squadId, planId, canEdit(squadId, request));
+    }
+
+    @PostMapping("/{planId}/items")
+    public ResponseEntity<ScopeView> addItems(@PathVariable String squadId, @PathVariable String planId,
+                                              @RequestBody(required = false) AddItemsRequest body, HttpServletRequest request) {
+        requireLeadership(squadId, request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(scopeService.addItems(squadId, planId, body, userId(request), true));
+    }
+
+    @DeleteMapping("/{planId}/items/{itemId}")
+    public ResponseEntity<Void> removeItem(@PathVariable String squadId, @PathVariable String planId,
+                                           @PathVariable String itemId, HttpServletRequest request) {
+        requireLeadership(squadId, request);
+        scopeService.removeItem(squadId, planId, itemId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PutMapping("/{planId}/items/order")
+    public ScopeView reorderItems(@PathVariable String squadId, @PathVariable String planId,
+                                  @RequestBody(required = false) ReorderItemsRequest body, HttpServletRequest request) {
+        requireLeadership(squadId, request);
+        return scopeService.reorder(squadId, planId, body, true);
     }
 
     /** E6: gravação no Jira ainda não existe. */
