@@ -476,7 +476,9 @@ public class SquadSyncService {
             String targetStart, String targetEnd, boolean datesAreInferred,
             String assigneeId, String assigneeName, String parentKey, String parentTitle,
             JsonNode sprintRaw, List<String> subtaskKeys, List<WorklogEntry> worklogs,
-            List<ChangelogEntry> changelog
+            List<ChangelogEntry> changelog,
+            // Sprint Planner (V89): ids e estimativa PRÓPRIA (sem aggregate*). Não entram em métrica nenhuma.
+            String typeId, String statusId, Long ownEstimateSec, Long ownRemainingSec
     ) {}
 
     // field usa nomes diferentes conforme o campo do Jira: status manda fromString/toString
@@ -602,7 +604,19 @@ public class SquadSyncService {
 
         return new ParsedJiraIssue(key, title, type, isBug, status, statusCategory, estimateSec, remainingSec, loggedSec,
                 updatedAtJira, created, resolutionDate, dueDate, targetStart, targetEnd, datesAreInferred,
-                assigneeId, assigneeName, parentKey, parentTitle, sprintRaw, subtaskKeys, worklogs, changelog);
+                assigneeId, assigneeName, parentKey, parentTitle, sprintRaw, subtaskKeys, worklogs, changelog,
+                blankToNull(fields.path("issuetype").path("id").asText("")), blankToNull(fields.path("status").path("id").asText("")),
+                ownSeconds(fields, "timeoriginalestimate"), ownSeconds(fields, "timeestimate"));
+    }
+
+    private static String blankToNull(String v) {
+        return v == null || v.isBlank() ? null : v;
+    }
+
+    /** Valor próprio do campo de tempo (segundos) ou null quando o Jira não manda. */
+    static Long ownSeconds(JsonNode fields, String field) {
+        JsonNode v = fields.get(field);
+        return v == null || v.isNull() || !v.canConvertToLong() ? null : v.asLong();
     }
 
     private static JsonNode extractSprintRaw(JsonNode fields, String sprintFieldId) {
@@ -711,7 +725,8 @@ public class SquadSyncService {
                 continue;
             }
             squadService.getIssueByKey(squadId, s.getParentKey()).ifPresent(parentSnap -> {
-                if (!isBlank(parentSnap.getSprintId())) {
+                // Pai que só está no backlog do planner não empresta sprint (PLANNER_BACKLOG não é sprint de verdade).
+                if (!isBlank(parentSnap.getSprintId()) && !SquadIssueSnapshot.PLANNER_BACKLOG_SPRINT_ID.equals(parentSnap.getSprintId())) {
                     s.setSprintId(parentSnap.getSprintId());
                     s.setSprintName(parentSnap.getSprintName());
                 }
@@ -791,6 +806,10 @@ public class SquadSyncService {
                 .assigneeName(issue.assigneeName())
                 .parentKey(issue.parentKey())
                 .parentTitle(issue.parentTitle())
+                .issueTypeId(issue.typeId())
+                .statusId(issue.statusId())
+                .ownOriginalEstimateSec(issue.ownEstimateSec())
+                .ownRemainingSec(issue.ownRemainingSec())
                 .syncedAt(syncedAt)
                 .build();
     }
@@ -889,7 +908,7 @@ public class SquadSyncService {
                     "A sincronização ia apagar " + migrationToDelete.size() + " de " + allExisting.size() + " issues de uma vez — abortado por segurança. Confira a JQL.");
         }
         for (List<String> group : chunk(migrationToDelete, BATCH_CHUNK_SIZE)) {
-            squadService.batchDeleteIssues(squadId, group);
+            squadService.batchDeleteIssuesKeepingPlannerBacklog(squadId, group);
         }
     }
 
@@ -931,8 +950,10 @@ public class SquadSyncService {
         for (List<SquadIssueSnapshot> group : chunk(groupSnapshots, BATCH_CHUNK_SIZE)) {
             squadService.batchUpsertIssues(squadId, group);
         }
+        // Reconciliação: linha que sumiu da JQL da sprint mas está no backlog do Sprint Planner não é apagada
+        // (vira sprint_id PLANNER_BACKLOG); ver SquadService.batchDeleteIssuesKeepingPlannerBacklog.
         for (List<String> group : chunk(keysToDelete, BATCH_CHUNK_SIZE)) {
-            squadService.batchDeleteIssues(squadId, group);
+            squadService.batchDeleteIssuesKeepingPlannerBacklog(squadId, group);
         }
     }
 
