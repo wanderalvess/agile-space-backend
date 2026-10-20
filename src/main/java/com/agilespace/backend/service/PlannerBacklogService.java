@@ -127,7 +127,7 @@ public class PlannerBacklogService {
     }
 
     /** Divergência só faz sentido para item novo com horas no título; sobra conta o restante e não compara. */
-    static boolean isDivergent(boolean carryOver, BigDecimal titleHours, BigDecimal subtaskSum) {
+    public static boolean isDivergent(boolean carryOver, BigDecimal titleHours, BigDecimal subtaskSum) {
         if (carryOver || titleHours == null) return false;
         return titleHours.subtract(subtaskSum).abs().compareTo(DIVERGENCE_TOLERANCE) > 0;
     }

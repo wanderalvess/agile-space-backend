@@ -32,7 +32,6 @@ public class SprintPlanCapacityService {
     private final SprintPlanPersonRepository personRepository;
     private final SprintPlanAbsenceRepository absenceRepository;
     private final SprintPlanHolidayRepository holidayRepository;
-    private final SprintPlanAssignmentRepository assignmentRepository;
 
     @Transactional(readOnly = true)
     public CapacityView compute(SprintPlan plan) {
@@ -74,24 +73,6 @@ public class SprintPlanCapacityService {
         byClass.put(CLASS_QA, SprintPlanCalculator.round2(qa));
         return new CapacityView(byClass, rows,
                 SprintPlanCalculator.workingDays(plan.getStartDate(), plan.getEndDate(), holidays));
-    }
-
-    /**
-     * Alocado por classe. Nesta entrega (E1a) é a soma das horas das subtarefas DEV/QA do plano; FORA e SEM não entram
-     * (decisão 2). Na E3 passa a valer HORAS_ITEM (horas do título da pai, carry-over pelo restante).
-     */
-    @Transactional(readOnly = true)
-    public Map<String, Double> allocated(String planId) {
-        double dev = 0, qa = 0;
-        for (SprintPlanAssignment a : assignmentRepository.findByPlanId(planId)) {
-            double h = a.getHours() == null ? 0 : a.getHours().doubleValue();
-            if (SprintPlanAssignment.CLASS_DEV.equals(a.getAssignmentClass())) dev += h;
-            else if (SprintPlanAssignment.CLASS_QA.equals(a.getAssignmentClass())) qa += h;
-        }
-        Map<String, Double> m = new LinkedHashMap<>();
-        m.put(CLASS_DEV, SprintPlanCalculator.round2(dev));
-        m.put(CLASS_QA, SprintPlanCalculator.round2(qa));
-        return m;
     }
 
     public Map<String, SprintPlanCalculator.Thermometer> thermometer(SprintPlan plan, CapacityView cap,

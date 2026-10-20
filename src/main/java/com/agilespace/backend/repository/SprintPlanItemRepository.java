@@ -9,4 +9,8 @@ import java.util.Optional;
 
 public interface SprintPlanItemRepository extends JpaRepository<SprintPlanItem, String> {
     List<SprintPlanItem> findByPlanIdOrderBySortOrderAsc(String planId);
+
+    long countByPlanId(String planId);
+
+    boolean existsByPlanIdAndParentKey(String planId, String parentKey);
 }

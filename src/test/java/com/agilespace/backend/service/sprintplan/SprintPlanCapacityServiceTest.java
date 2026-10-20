@@ -17,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -37,7 +38,6 @@ class SprintPlanCapacityServiceTest {
     @Mock SprintPlanPersonRepository personRepository;
     @Mock SprintPlanAbsenceRepository absenceRepository;
     @Mock SprintPlanHolidayRepository holidayRepository;
-    @Mock SprintPlanAssignmentRepository assignmentRepository;
 
     SprintPlanCapacityService service;
     SprintPlan plan;
@@ -45,7 +45,7 @@ class SprintPlanCapacityServiceTest {
     @BeforeEach
     void setUp() {
         service = new SprintPlanCapacityService(new SquadCapacityService(configRepository, squadRepository),
-                memberRepository, personRepository, absenceRepository, holidayRepository, assignmentRepository);
+                memberRepository, personRepository, absenceRepository, holidayRepository);
         plan = SprintPlan.builder().id("P1").squadId("SQ1").jiraSprintId("S3").sprintName("Sprint 3")
                 .startDate(LocalDate.of(2026, 11, 2)).endDate(LocalDate.of(2026, 11, 13))
                 .status(SprintPlan.STATUS_RASCUNHO).reserveMode(SprintPlan.RESERVE_HORAS).version(0L).build();
@@ -123,24 +123,14 @@ class SprintPlanCapacityServiceTest {
     }
 
     @Test
-    @DisplayName("Alocado por classe ignora FORA e SEM; termômetro usa a reserva do plano")
-    void allocatedAndThermometer() {
+    @DisplayName("Termômetro usa a reserva do plano sobre o alocado informado")
+    void thermometerUsesPlanReserve() {
         config("S3", "ana", "DEV", 10, 0, 10.0);
-        when(assignmentRepository.findByPlanId("P1")).thenReturn(List.of(
-                asg("DEV", "105"), asg("QA", "5"), asg("FORA", "40"), asg("SEM", "7")));
         plan.setReservePct(new BigDecimal("10"));
 
         CapacityView cap = service.compute(plan);
-        var alloc = service.allocated("P1");
-        assertEquals(105.0, alloc.get("DEV"));
-        assertEquals(5.0, alloc.get("QA"));
-
-        var t = service.thermometer(plan, cap, alloc);
+        var t = service.thermometer(plan, cap, Map.of("DEV", 105.0, "QA", 5.0));
         assertEquals(SprintPlanCalculator.State.COBERTO_PELA_RESERVA, t.get("DEV").state());
         assertEquals(SprintPlanCalculator.State.SEM_CAPACIDADE, t.get("QA").state());
-    }
-
-    private static SprintPlanAssignment asg(String cls, String hours) {
-        return SprintPlanAssignment.builder().planId("P1").assignmentClass(cls).hours(new BigDecimal(hours)).build();
     }
 }
