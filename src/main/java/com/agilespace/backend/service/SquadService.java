@@ -170,12 +170,49 @@ public class SquadService {
             }
             snap.setDbId(ownedDbId(squadId, snap.getDbId(), snap.getJiraKey() != null ? snap.getJiraKey() : "unknown"));
         }
+        // O upsert troca a linha inteira: sem isto, o sync da sprint zerava a marca do backlog do Sprint Planner.
+        java.util.Map<String, SquadIssueSnapshot> plannerRows = new java.util.HashMap<>();
+        for (SquadIssueSnapshot p : nullSafe(issueSnapshotRepository.findBySquadIdAndInPlannerBacklogTrue(squadId))) {
+            plannerRows.put(p.getJiraKey(), p);
+        }
+        for (SquadIssueSnapshot snap : snapshots) {
+            SquadIssueSnapshot prior = plannerRows.get(snap.getJiraKey());
+            if (prior != null && !snap.isInPlannerBacklog()) {
+                snap.setInPlannerBacklog(true);
+                if (snap.getPlannerSyncedAt() == null) snap.setPlannerSyncedAt(prior.getPlannerSyncedAt());
+            }
+        }
         return issueSnapshotRepository.saveAll(snapshots);
+    }
+
+    private static <T> List<T> nullSafe(List<T> list) {
+        return list != null ? list : List.of();
     }
 
     @Transactional
     public void batchDeleteIssues(String squadId, List<String> keys) {
         issueSnapshotRepository.deleteBySquadIdAndJiraKeyIn(squadId, keys);
+    }
+
+    /**
+     * Remoção da reconciliação do sync da sprint. Linhas que estão no backlog do Sprint Planner
+     * (in_planner_backlog) não são apagadas: saem da sprint (sprint_id = PLANNER_BACKLOG) e continuam no backlog,
+     * fora das listagens do Quadro/Cronograma. As demais são apagadas como antes.
+     */
+    @Transactional
+    public void batchDeleteIssuesKeepingPlannerBacklog(String squadId, List<String> keys) {
+        if (keys == null || keys.isEmpty()) return;
+        List<SquadIssueSnapshot> protectedRows = nullSafe(issueSnapshotRepository.findBySquadIdAndJiraKeyIn(squadId, keys)).stream()
+                .filter(SquadIssueSnapshot::isInPlannerBacklog).toList();
+        java.util.Set<String> protectedKeys = new java.util.HashSet<>();
+        for (SquadIssueSnapshot row : protectedRows) {
+            protectedKeys.add(row.getJiraKey());
+            row.setSprintId(SquadIssueSnapshot.PLANNER_BACKLOG_SPRINT_ID);
+            row.setSprintName("");
+        }
+        if (!protectedRows.isEmpty()) issueSnapshotRepository.saveAll(protectedRows);
+        List<String> toDelete = keys.stream().filter(k -> !protectedKeys.contains(k)).toList();
+        if (!toDelete.isEmpty()) issueSnapshotRepository.deleteBySquadIdAndJiraKeyIn(squadId, toDelete);
     }
 
     // ----- Members -----
