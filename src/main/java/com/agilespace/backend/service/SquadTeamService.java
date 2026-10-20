@@ -112,14 +112,16 @@ public class SquadTeamService {
         RoleDef role = roleFor(req.roleName(), caller);
 
         User user = null;
+        String reqEmail = PersonIdentity.normEmail(req.email());
         if (notBlank(req.userId())) {
             user = userRepository.findById(req.userId().trim()).orElseThrow(() ->
                     new ResponseStatusException(HttpStatus.NOT_FOUND, "Pessoa não encontrada. Busque pelo e-mail ou cadastre pelo nome."));
-        } else if (notBlank(req.email())) {
-            user = userRepository.findByEmail(req.email().trim()).orElse(null);
+        } else if (reqEmail != null) {
+            user = userRepository.findByEmail(reqEmail).orElse(null);
+            if (user == null && !reqEmail.equals(req.email().trim())) user = userRepository.findByEmail(req.email().trim()).orElse(null);
         }
-        String email = user != null ? user.getEmail() : (notBlank(req.email()) ? req.email().trim() : null);
-        String name = user != null && notBlank(user.getName()) ? user.getName().trim() : (notBlank(req.displayName()) ? req.displayName().trim() : null);
+        String email = user != null ? PersonIdentity.normEmail(user.getEmail()) : reqEmail;
+        String name = user != null && notBlank(user.getName()) ? PersonIdentity.cleanName(user.getName()) : PersonIdentity.cleanName(req.displayName());
         if (name == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe o nome da pessoa.");
         }
@@ -127,16 +129,37 @@ public class SquadTeamService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nome muito longo.");
         }
 
+        // Chave estável (nunca por relógio): a mesma pessoa cai sempre na mesma chave, então um duplo clique ou dois
+        // pedidos ao mesmo tempo esbarram na unicidade (squad + conta) em vez de criar duas linhas idênticas.
+        // Mesma regra de id da planilha (e-mail em minúsculas) para os dois caminhos se encontrarem.
         String jiraAccountId = user != null && notBlank(user.getJiraAccountId()) ? user.getJiraAccountId().trim()
                 : user != null ? user.getId()
-                : "manual-" + squadId + "-" + slug(name) + "-" + Long.toString(System.currentTimeMillis(), 36);
+                : email != null ? email
+                : "manual-" + squadId + "-" + slug(name);
 
-        for (SquadMember m : memberRepository.findBySquadIdOrderByDisplayNameAsc(squadId)) {
-            boolean same = m.getJiraAccountId().equalsIgnoreCase(jiraAccountId)
-                    || (email != null && m.getEmail() != null && m.getEmail().trim().equalsIgnoreCase(email));
-            if (same) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, name + " já está no time desta squad.");
-            }
+        List<SquadMember> roster = memberRepository.findBySquadIdOrderByDisplayNameAsc(squadId);
+        SquadMember dup = PersonIdentity.resolve(roster, jiraAccountId, email, name);
+        // Só o NOME em comum com um pré-cadastro sem e-mail, e agora há e-mail: não dá para saber se é a mesma pessoa
+        // (decisão da liderança), então não bloqueia; o cadastro com e-mail diferente segue como outra pessoa.
+        boolean nameOnly = dup != null && email != null
+                && !dup.getJiraAccountId().trim().equalsIgnoreCase(jiraAccountId)
+                && !email.equals(PersonIdentity.normEmail(dup.getEmail()));
+        if (dup != null && !nameOnly) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, name + " já está no time desta squad."
+                    + (email == null ? " Para cadastrar outra pessoa com o mesmo nome, informe o e-mail." : ""));
+        }
+
+        // Quem já consta no cadastro do projeto (fundador da equipe, importação do Jira) com este papel não ganha uma
+        // segunda linha igual: o vínculo existente é reaproveitado e só o roster (horas) é criado.
+        ProjectMemberRole existingRow = null;
+        for (ProjectMemberRole r : projectRows(squadId)) {
+            boolean same = (user != null && user.getId() != null && user.getId().equals(r.getUserId()))
+                    || (email != null && email.equals(PersonIdentity.normEmail(r.getEmail())))
+                    || (notBlank(r.getJiraAccountId()) && r.getJiraAccountId().trim().equalsIgnoreCase(jiraAccountId));
+            if (!same) continue;
+            if (r.getRoleKey() != null && r.getRoleKey().equalsIgnoreCase(role.key())) { existingRow = r; break; }
+            throw new ResponseStatusException(HttpStatus.CONFLICT, name + " já está nesta squad como " + r.getRoleName()
+                    + ". Para mudar o papel, use a troca de papel da pessoa.");
         }
 
         SquadMember member = SquadMember.builder()
@@ -145,13 +168,20 @@ public class SquadTeamService {
                 .claimedByUid(user != null ? user.getId() : null)
                 .updatedAt(Instant.now().toString())
                 .build();
-        member = memberRepository.save(member);
+        try {
+            member = memberRepository.save(member);
+            memberRepository.flush();
+        } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, name + " já está no time desta squad.", ex);
+        }
 
-        projectMemberRoleRepository.save(ProjectMemberRole.builder()
-                .projectId(squadId).roleName(role.name()).roleKey(role.key())
-                .jiraAccountId(user != null ? user.getJiraAccountId() : null)
-                .displayName(name).email(email).userId(user != null ? user.getId() : null)
-                .isLeadership(role.leadership()).source(com.agilespace.backend.domain.MembershipSource.MANUAL).build());
+        if (existingRow == null) {
+            projectMemberRoleRepository.save(ProjectMemberRole.builder()
+                    .projectId(squadId).roleName(role.name()).roleKey(role.key())
+                    .jiraAccountId(user != null ? user.getJiraAccountId() : null)
+                    .displayName(name).email(email).userId(user != null ? user.getId() : null)
+                    .isLeadership(role.leadership()).source(com.agilespace.backend.domain.MembershipSource.MANUAL).build());
+        }
 
         exclusionRepository.deleteById(squadId + "_" + jiraAccountId);
         audit(caller, "SQUAD_TEAM_MEMBER_ADDED", squadId, name + " (" + (email != null ? email : jiraAccountId) + ") como " + role.name());

@@ -199,16 +199,36 @@ public class SquadService {
 
     @Transactional
     public SquadMember saveMember(String squadId, String jiraAccountId, SquadMember member) {
+        member.setEmail(PersonIdentity.normEmail(member.getEmail()));
+        member.setDisplayName(PersonIdentity.cleanName(member.getDisplayName()));
+        jiraAccountId = PersonIdentity.cleanId(jiraAccountId);
+
+        // Mesma pessoa = mesma conta; senão mesmo e-mail (sem caixa); senão o nome (ver PersonIdentity). Evita a segunda
+        // linha com o mesmo nome e e-mail quando a pessoa chega por outra chave (uid, e-mail, "manual-...").
+        Optional<SquadMember> existing = memberRepository.findBySquadIdAndJiraAccountId(squadId, jiraAccountId);
+        if (existing.isEmpty()) {
+            SquadMember same = PersonIdentity.resolve(memberRepository.findBySquadIdOrderByDisplayNameAsc(squadId),
+                    jiraAccountId, member.getEmail(), member.getDisplayName());
+            if (same != null) {
+                if (PersonIdentity.isSyntheticId(same.getJiraAccountId()) && !PersonIdentity.isSyntheticId(jiraAccountId)) {
+                    // A linha nasceu com id gerado e agora chega a conta real do Jira: troca a chave, preservando os dados.
+                    memberRepository.delete(same);
+                    memberRepository.flush();
+                } else {
+                    jiraAccountId = same.getJiraAccountId();
+                }
+                existing = Optional.of(same);
+            }
+        }
         member.setSquadId(squadId);
         member.setJiraAccountId(jiraAccountId);
         member.setDbId(squadId + "_" + jiraAccountId);
 
         // Merge: se já existe, preserva campos que não vieram no payload
-        Optional<SquadMember> existing = memberRepository.findBySquadIdAndJiraAccountId(squadId, jiraAccountId);
         if (existing.isPresent()) {
             SquadMember e = existing.get();
             if (member.getDisplayName() == null) member.setDisplayName(e.getDisplayName());
-            if (member.getEmail() == null) member.setEmail(e.getEmail());
+            if (member.getEmail() == null) member.setEmail(PersonIdentity.normEmail(e.getEmail()));
             if (member.getRole() == null) member.setRole(e.getRole());
             if (member.getCapacityHoursPerDay() == null) member.setCapacityHoursPerDay(e.getCapacityHoursPerDay());
             if (member.getSystemCalculatedCapacityHoursPerDay() == null) member.setSystemCalculatedCapacityHoursPerDay(e.getSystemCalculatedCapacityHoursPerDay());
@@ -216,7 +236,7 @@ public class SquadService {
             if (member.getOverrideType() == null) member.setOverrideType(e.getOverrideType());
             if (member.getClaimedByUid() == null) member.setClaimedByUid(e.getClaimedByUid());
         }
-        SquadMember saved = memberRepository.save(member);
+        SquadMember saved = saveRosterRow(member);
         clearExclusion(squadId, jiraAccountId); // adicionar/editar à mão (ou aceitar convite) desfaz a exclusão
 
         // Sincroniza tabela central de usuários. NUNCA grava em user.role a partir daqui:
@@ -246,36 +266,81 @@ public class SquadService {
         return saved;
     }
 
+    /**
+     * Grava a linha do roster e força o flush: a violação da unicidade (squad + conta, ou squad + e-mail, V85) estoura aqui
+     * e vira 409 com mensagem clara, em vez de um 500 no commit.
+     */
+    private SquadMember saveRosterRow(SquadMember member) {
+        try {
+            SquadMember saved = memberRepository.save(member);
+            memberRepository.flush();
+            return saved;
+        } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+            throw rosterConflict(member, ex);
+        }
+    }
+
+    private static org.springframework.web.server.ResponseStatusException rosterConflict(SquadMember member, Exception cause) {
+        String who = member.getDisplayName() != null ? member.getDisplayName() : member.getJiraAccountId();
+        return new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT,
+                (who == null ? "Essa pessoa" : who) + " já está no time desta squad (mesma conta ou mesmo e-mail).", cause);
+    }
+
     @Transactional
     public List<SquadMember> batchUpsertMembers(String squadId, List<SquadMember> members) {
         // Uma leitura só do roster (sem N+1). Campo ausente no payload preserva o que já está salvo,
         // e o vínculo "sou eu" (claimedByUid) nunca é trocado por este caminho.
-        Map<String, SquadMember> existingByAccount = new LinkedHashMap<>();
-        for (SquadMember e : memberRepository.findBySquadIdOrderByDisplayNameAsc(squadId)) {
-            existingByAccount.put(e.getJiraAccountId(), e);
-        }
+        // A pessoa é casada por conta > e-mail > nome (PersonIdentity), inclusive contra linhas criadas neste mesmo lote:
+        // duas linhas do arquivo para a mesma pessoa viram uma só.
+        List<SquadMember> pool = new ArrayList<>(memberRepository.findBySquadIdOrderByDisplayNameAsc(squadId));
         List<SquadMember> toSave = new ArrayList<>();
+        List<SquadMember> toRekey = new ArrayList<>();
         for (SquadMember m : members) {
-            if (m.getJiraAccountId() == null || m.getJiraAccountId().isBlank()) continue;
+            String incomingId = PersonIdentity.cleanId(m.getJiraAccountId());
+            String email = PersonIdentity.normEmail(m.getEmail());
+            String name = PersonIdentity.cleanName(m.getDisplayName());
+            if ((incomingId == null || incomingId.isEmpty()) && email != null) incomingId = email;
+            if (incomingId == null || incomingId.isEmpty()) continue;
             m.setSquadId(squadId);
-            SquadMember e = existingByAccount.get(m.getJiraAccountId());
+            m.setEmail(email);
+            m.setDisplayName(name);
+            SquadMember e = PersonIdentity.resolve(pool, incomingId, email, name);
             if (e != null) {
-                m.setDbId(e.getDbId());
+                boolean rekey = !incomingId.equalsIgnoreCase(e.getJiraAccountId().trim())
+                        && PersonIdentity.isSyntheticId(e.getJiraAccountId()) && !PersonIdentity.isSyntheticId(incomingId);
+                m.setJiraAccountId(rekey ? incomingId : e.getJiraAccountId());
+                m.setDbId(rekey ? squadId + "_" + incomingId : e.getDbId());
+                if (rekey) toRekey.add(e);
                 if (m.getDisplayName() == null || m.getDisplayName().isBlank()) m.setDisplayName(e.getDisplayName());
-                if (m.getEmail() == null) m.setEmail(e.getEmail());
+                if (m.getEmail() == null) m.setEmail(PersonIdentity.normEmail(e.getEmail()));
                 if (m.getRole() == null) m.setRole(e.getRole());
                 if (m.getCapacityHoursPerDay() == null) m.setCapacityHoursPerDay(e.getCapacityHoursPerDay());
                 if (m.getSystemCalculatedCapacityHoursPerDay() == null) m.setSystemCalculatedCapacityHoursPerDay(e.getSystemCalculatedCapacityHoursPerDay());
                 if (m.getCalibrationNotes() == null) m.setCalibrationNotes(e.getCalibrationNotes());
                 if (m.getOverrideType() == null) m.setOverrideType(e.getOverrideType());
                 m.setClaimedByUid(e.getClaimedByUid());
+                pool.remove(e);
             } else {
-                m.setDbId(ownedDbId(squadId, m.getDbId(), m.getJiraAccountId()));
+                m.setJiraAccountId(incomingId);
+                m.setDbId(ownedDbId(squadId, m.getDbId(), incomingId));
                 m.setClaimedByUid(null);
             }
+            pool.add(m);
+            toSave.removeIf(x -> x.getDbId().equals(m.getDbId()));
             toSave.add(m);
         }
-        List<SquadMember> savedAll = memberRepository.saveAll(toSave);
+        if (!toRekey.isEmpty()) {
+            // Troca de chave (id gerado -> conta real do Jira): apaga a linha antiga antes, senão o INSERT bate no índice do e-mail.
+            memberRepository.deleteAll(toRekey);
+            memberRepository.flush();
+        }
+        List<SquadMember> savedAll;
+        try {
+            savedAll = memberRepository.saveAll(toSave);
+            memberRepository.flush();
+        } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+            throw rosterConflict(toSave.isEmpty() ? new SquadMember() : toSave.get(0), ex);
+        }
         for (SquadMember m : toSave) clearExclusion(squadId, m.getJiraAccountId());
         return savedAll;
     }

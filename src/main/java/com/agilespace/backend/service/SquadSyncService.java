@@ -837,6 +837,14 @@ public class SquadSyncService {
         for (List<SquadMember> group : chunk(rosterSeeds, BATCH_CHUNK_SIZE)) {
             squadService.batchUpsertMembers(squadId, group);
         }
+        if (!rosterSeeds.isEmpty()) {
+            // O upsert casa por conta > e-mail > nome: um responsável que já está no roster com outra chave (id gerado,
+            // pré-cadastro por nome) é fundido em vez de ganhar uma linha fantasma. Relê o roster para a capacidade
+            // seguir a linha que ficou (a chave pode ter virado a conta real do Jira).
+            for (SquadMember m : squadService.getMembers(squadId)) {
+                if (m.getJiraAccountId() != null) rosterMap.put(m.getJiraAccountId(), m);
+            }
+        }
 
         Map<String, SquadMember> finalRosterMap = rosterMap;
         return assigneeId -> {

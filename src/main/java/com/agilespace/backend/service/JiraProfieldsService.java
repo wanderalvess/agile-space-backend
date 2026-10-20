@@ -76,6 +76,9 @@ public class JiraProfieldsService {
         return new org.springframework.transaction.support.TransactionTemplate(transactionManager).execute(status -> {
             String cleanKey = project.getId();
             ProjectConfig saved = projectConfigRepository.save(project);
+            // E-mail sempre sem espaços e em minúsculas: o casamento e a unicidade não dependem de caixa.
+            for (ProjectMemberRole r : members) r.setEmail(PersonIdentity.normEmail(r.getEmail()));
+            for (ProjectMemberRole r : jiraMembers) r.setEmail(PersonIdentity.normEmail(r.getEmail()));
             List<ProjectMemberRole> existing = projectMemberRoleRepository.findByProjectId(cleanKey);
             // Quem a liderança removeu à mão do time não volta só porque o Jira ainda lista a pessoa.
             SquadMemberExclusions.Removed removedByHand = SquadMemberExclusions.of(squadMemberExclusions, cleanKey);
@@ -1151,7 +1154,7 @@ public class JiraProfieldsService {
                 .roleKey(founderRole[1])
                 .jiraAccountId(creator.getJiraAccountId())
                 .displayName(creator.getName())
-                .email(creator.getEmail())
+                .email(PersonIdentity.normEmail(creator.getEmail()))
                 .userId(creator.getId())
                 .isLeadership(isTeamManagerRow(ProjectMemberRole.builder().roleKey(founderRole[1]).build()))
                 .source(com.agilespace.backend.domain.MembershipSource.MANUAL)
