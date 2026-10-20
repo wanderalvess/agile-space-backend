@@ -14,7 +14,9 @@ import java.util.Locale;
  * não há como serem duas pessoas diferentes: um único candidato com aquele nome, os e-mails não se contradizem (os dois
  * presentes e diferentes = outra pessoa) e pelo menos um dos ids é sintético ({@code manual-...}, {@code import....} ou
  * e-mail), isto é, nenhum dos dois é uma conta real do Jira distinta. Duas contas reais do Jira com o mesmo nome são
- * homônimos e nunca se fundem.
+ * homônimos e nunca se fundem, EXCETO quando uma é a chave interna do Jira Server ({@code JIRAUSER<n>}, sem e-mail) e a
+ * outra é um nome de usuário/e-mail: são os dois nomes da mesma conta (issues x papéis do projeto). Mesmo assim exige
+ * nome igual e um único candidato no roster; com dois candidatos (ou dois JIRAUSER de mesmo nome) não funde.
  */
 public final class PersonIdentity {
 
@@ -45,11 +47,49 @@ public final class PersonIdentity {
         return id == null ? null : id.trim();
     }
 
+    /** Linhas do roster (já gravadas) que são a mesma pessoa; mesma regra de {@link #resolve} aplicada a um par. */
+    public static boolean sameRosterPerson(SquadMember a, SquadMember b, List<SquadMember> roster) {
+        if (a == null || b == null || a == b) return false;
+        List<SquadMember> others = new java.util.ArrayList<>(roster == null ? List.<SquadMember>of() : roster);
+        others.remove(a);
+        SquadMember hit = resolve(others, a.getJiraAccountId(), a.getEmail(), a.getDisplayName());
+        return hit == b;
+    }
+
     /** Id gerado pelo sistema (não é uma conta do Jira): {@code manual-...}, {@code import....} ou um e-mail. */
     public static boolean isSyntheticId(String id) {
         if (id == null) return true;
         String t = id.trim().toLowerCase(Locale.ROOT);
         return t.isEmpty() || t.startsWith("manual-") || t.startsWith("import.") || t.contains("@");
+    }
+
+    /**
+     * Chave interna do Jira Server/Data Center ({@code JIRAUSER97280}): a mesma conta aparece com ela nas issues
+     * ({@code assignee.key}) e com o nome de usuário ({@code bruna.balves}) nos papéis do projeto. São dois espaços de
+     * nomes da MESMA conta, e a chave interna não traz e-mail.
+     */
+    public static boolean isJiraServerKey(String id) {
+        return id != null && id.trim().matches("(?i)JIRAUSER\\d+");
+    }
+
+    /**
+     * Dois ids reais do Jira de espaços de nomes diferentes (chave interna x nome de usuário) podem ser a mesma conta;
+     * dois ids do mesmo espaço (duas chaves internas, ou dois nomes de usuário) são contas distintas.
+     */
+    static boolean crossJiraNamespaces(String a, String b) {
+        if (isSyntheticId(a) || isSyntheticId(b)) return false;
+        return isJiraServerKey(a) != isJiraServerKey(b);
+    }
+
+    /**
+     * A linha existente deve adotar a chave que está chegando? Id gerado -> conta real do Jira, ou chave interna do Jira
+     * (JIRAUSER) -> nome de usuário (a chave canônica do roster é a que carrega e-mail/vínculo; a chave interna só
+     * serve de apelido, ver {@link #resolve}).
+     */
+    public static boolean shouldAdoptIncomingId(String existingId, String incomingId) {
+        if (existingId == null || incomingId == null || existingId.trim().equalsIgnoreCase(incomingId.trim())) return false;
+        if (isSyntheticId(existingId) && !isSyntheticId(incomingId)) return true;
+        return isJiraServerKey(existingId) && !isSyntheticId(incomingId) && !isJiraServerKey(incomingId);
     }
 
     /** Linha do roster que representa a mesma pessoa, ou null. Ver a regra na descrição da classe. */
@@ -78,7 +118,14 @@ public final class PersonIdentity {
         if (only == null) return null;
         String oe = normEmail(only.getEmail());
         if (ne != null && oe != null) return null; // os dois têm e-mail e são diferentes (iguais já casaram acima)
-        if (!isSyntheticId(only.getJiraAccountId()) && !isSyntheticId(cid)) return null;
+        boolean bothReal = !isSyntheticId(only.getJiraAccountId()) && !isSyntheticId(cid);
+        // Duas contas reais: só a mesma conta vista por dois espaços de nomes (JIRAUSER x usuário) e, nesse caso, o lado
+        // que é chave interna não pode ter e-mail próprio (a chave interna nunca vem com e-mail).
+        if (bothReal) {
+            if (!crossJiraNamespaces(only.getJiraAccountId(), cid)) return null;
+            if (isJiraServerKey(only.getJiraAccountId()) && oe != null) return null;
+            if (isJiraServerKey(cid) && ne != null) return null;
+        }
         return only;
     }
 }

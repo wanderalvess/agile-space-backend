@@ -11,4 +11,5 @@ import java.util.Optional;
 public interface SquadPersonConfigRepository extends JpaRepository<SquadPersonConfig, String> {
     Optional<SquadPersonConfig> findBySquadIdAndSprintIdAndJiraAccountId(String squadId, String sprintId, String jiraAccountId);
     List<SquadPersonConfig> findBySquadIdAndSprintId(String squadId, String sprintId);
+    List<SquadPersonConfig> findBySquadIdAndJiraAccountId(String squadId, String jiraAccountId);
 }
