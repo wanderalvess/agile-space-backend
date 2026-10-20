@@ -74,7 +74,7 @@ class SprintPlanScopeControllerTest {
         });
         Map<SubtaskClass, BigDecimal> sums = new EnumMap<>(SubtaskClass.class);
         ParentView p = new ParentView("A-1", "Pai (DEV 10h / QA 4h)", "Refinamento Concluído", false,
-                new HoursPair(new BigDecimal("10"), new BigDecimal("4")), List.of(), sums, false, false, false);
+                new HoursPair(new BigDecimal("10"), new BigDecimal("4")), List.of(), sums, false, false, false, Map.of(), false);
         lenient().when(backlogService.view(eq("SQ1"), any(), any(), eq(false))).thenReturn(
                 new PlannerBacklogService.BacklogView("t", "S3", List.of(p), List.of()));
     }
@@ -121,8 +121,9 @@ class SprintPlanScopeControllerTest {
         leader("pl");
         mvc.perform(as(post(URL), "pl").content("{\"parentKey\":\"A-1\"}")).andExpect(status().isCreated())
                 .andExpect(jsonPath("$.items[0].parentKey").value("A-1"))
-                .andExpect(jsonPath("$.items[0].devHours").value(10))
-                .andExpect(jsonPath("$.totals.allocated.DEV").value(10.0));
+                .andExpect(jsonPath("$.items[0].devHours").value(11))
+                .andExpect(jsonPath("$.items[0].codeReviewDevH").value(1))
+                .andExpect(jsonPath("$.totals.allocated.DEV").value(11.0));
         mvc.perform(as(post(URL), "pl").content("{\"parentKey\":\"A-1\"}")).andExpect(status().isConflict());
         mvc.perform(as(post(URL), "pl").content("{\"parentKey\":\"Z-9\"}")).andExpect(status().isUnprocessableEntity());
         mvc.perform(as(post(URL), "pl").content("{}")).andExpect(status().isUnprocessableEntity());

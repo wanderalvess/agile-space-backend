@@ -67,14 +67,14 @@ class SprintPlanScopeServiceTest {
     }
 
     private static SubtaskView sub(String key, SubtaskClass cls, String est, String rem) {
-        return new SubtaskView(key, key, "t", "Tipo", cls, h(est), h(rem), h(est), false, "Aberto", "new", null, null);
+        return new SubtaskView(key, key, "t", "Tipo", cls, h(est), h(rem), h(est), false, "Aberto", "new", null, null, false);
     }
 
     private static ParentView parent(String key, String devTitle, String qaTitle, boolean carry, SubtaskView... subs) {
         Map<SubtaskClass, BigDecimal> sums = new EnumMap<>(SubtaskClass.class);
         for (SubtaskClass c : SubtaskClass.values()) sums.put(c, BigDecimal.ZERO);
         return new ParentView(key, "Título " + key, "Refinamento Concluído", carry,
-                devTitle == null ? null : new HoursPair(h(devTitle), h(qaTitle)), List.of(subs), sums, false, false, false);
+                devTitle == null ? null : new HoursPair(h(devTitle), h(qaTitle)), List.of(subs), sums, false, false, false, Map.of(), false);
     }
 
     private static SprintPlanItem item(String key, int order, boolean carry, ParentView p) {
@@ -100,7 +100,7 @@ class SprintPlanScopeServiceTest {
     @Test
     @DisplayName("DEV 90 h de capacidade: alocado 90 = 100%, dentro da capacidade")
     void dev90Exact() {
-        var c = computeOf(parent("A-1", "50", "10", false), parent("A-2", "40", "20", false));
+        var c = computeOf(parent("A-1", "49", "10", false), parent("A-2", "39", "20", false));
         assertEquals(90.0, c.totals().allocated().get("DEV"));
         var t = SprintPlanCalculator.thermometer(c.totals().allocated().get("DEV"), 90, 12.0);
         assertEquals(SprintPlanCalculator.State.DENTRO_DA_CAPACIDADE, t.state());
@@ -110,12 +110,12 @@ class SprintPlanScopeServiceTest {
     @Test
     @DisplayName("DEV 96 de 90 (107%) fica coberto pela reserva de 12%; 120 de 90 fica acima da reserva")
     void reserveCoverage() {
-        var covered = computeOf(parent("A-1", "96", "0", false));
+        var covered = computeOf(parent("A-1", "95", "0", false));
         var t1 = SprintPlanCalculator.thermometer(covered.totals().allocated().get("DEV"), 90, 12.0);
         assertEquals(106.67, t1.pct(), 0.01);
         assertEquals(SprintPlanCalculator.State.COBERTO_PELA_RESERVA, t1.state());
 
-        var over = computeOf(parent("A-1", "120", "0", false));
+        var over = computeOf(parent("A-1", "119", "0", false));
         var t2 = SprintPlanCalculator.thermometer(over.totals().allocated().get("DEV"), 90, 12.0);
         assertEquals(SprintPlanCalculator.State.ACIMA_DA_RESERVA, t2.state());
     }
@@ -131,19 +131,75 @@ class SprintPlanScopeServiceTest {
     }
 
     @Test
-    @DisplayName("Vale o título; subtarefas só alertam: título 18 h x Codificação 16 h = divergência, total 18")
+    @DisplayName("Vale o título + Code Review padrão; subtarefas só alertam: título 18 h x Codificação 16 h = divergência, total 19")
     void titleWinsAndDivergence() {
         var c = computeOf(parent("A-1", "18", "14", false,
                 sub("S-1", SubtaskClass.DEV, "16", "16"), sub("S-2", SubtaskClass.QA, "14", "14")));
         ItemView v = c.items().get(0);
-        assertEquals(h("18"), v.devHours());
+        assertEquals(h("19"), v.devHours());
         assertEquals(h("14"), v.qaHours());
         assertTrue(v.divergenceDev());
         assertFalse(v.divergenceQa());
         assertTrue(v.divergent());
         assertEquals(h("16"), v.subtaskDevH());
         assertEquals(1, c.totals().divergentCount());
-        assertEquals(18.0, c.totals().allocated().get("DEV"));
+        assertEquals(19.0, c.totals().allocated().get("DEV"));
+    }
+
+    private static SubtaskView cr(String key, String title, SubtaskClass cls, String est, String rem) {
+        return new SubtaskView(key, title, "12300", "Code Review", cls, h(est), h(rem), h(est), false, "Aberto", "new", null, null, true);
+    }
+
+    @Test
+    @DisplayName("Tarefa 5823: título DEV 5 / QA 4 + Codificação 5, Code Review 1, Code Review QA 1: DEV 6, QA 5, sem divergência")
+    void canonicalCodeReview() {
+        var c = computeOf(parent("A-1", "5", "4", false,
+                sub("S-1", SubtaskClass.DEV, "5", "5"), cr("S-2", "Code Review", SubtaskClass.DEV, "1", "1"),
+                sub("S-3", SubtaskClass.QA, "4", "4"), cr("S-4", "Code Review QA", SubtaskClass.QA, "1", "1")));
+        ItemView v = c.items().get(0);
+        assertEquals(h("6"), v.devHours());
+        assertEquals(h("5"), v.qaHours());
+        assertEquals(h("1"), v.codeReviewDevH());
+        assertEquals(h("1"), v.codeReviewQaH());
+        assertFalse(v.codeReviewDevAssumed());
+        assertEquals(h("5"), v.subtaskDevH());
+        assertEquals(h("4"), v.subtaskQaH());
+        assertFalse(v.divergent());
+        assertEquals(0, c.totals().divergentCount());
+    }
+
+    @Test
+    @DisplayName("Sem subtarefa de Code Review: DEV ganha 1 h presumida; QA não ganha nada")
+    void assumedCodeReviewOnlyDev() {
+        var c = computeOf(parent("A-1", "5", "4", false, sub("S-1", SubtaskClass.DEV, "5", "5"), sub("S-3", SubtaskClass.QA, "4", "4")));
+        ItemView v = c.items().get(0);
+        assertEquals(h("6"), v.devHours());
+        assertEquals(h("4"), v.qaHours());
+        assertEquals(h("1"), v.codeReviewDevH());
+        assertEquals(h("0"), v.codeReviewQaH());
+        assertTrue(v.codeReviewDevAssumed());
+        assertFalse(v.divergent());
+    }
+
+    @Test
+    @DisplayName("Code Review com estimativa do Jira usa a estimativa; Code Review nunca gera divergência")
+    void codeReviewEstimateFromJira() {
+        var c = computeOf(parent("A-1", "5", "4", false, sub("S-1", SubtaskClass.DEV, "5", "5"),
+                cr("S-2", "Code Review", SubtaskClass.DEV, "2", "2")));
+        ItemView v = c.items().get(0);
+        assertEquals(h("7"), v.devHours());
+        assertFalse(v.divergenceDev());
+    }
+
+    @Test
+    @DisplayName("Carry-over: restante inclui o Code Review restante, sem somar presumido")
+    void carryOverWithCodeReview() {
+        var c = computeOf(parent("A-1", "5", "4", true, sub("S-1", SubtaskClass.DEV, "5", "3"),
+                cr("S-2", "Code Review", SubtaskClass.DEV, "1", "1")));
+        ItemView v = c.items().get(0);
+        assertEquals(h("4"), v.devHours());
+        assertEquals(h("1"), v.codeReviewDevH());
+        assertFalse(v.codeReviewDevAssumed());
     }
 
     @Test
@@ -181,7 +237,7 @@ class SprintPlanScopeServiceTest {
     @DisplayName("Tipo sem classificação não entra no total e gera aviso (quantidade e horas); fora da conta fica de fora")
     void unclassifiedAndOutOfAccount() {
         SubtaskView spec = new SubtaskView("S-9", "Spec", "777", "Especificação", SubtaskClass.SEM_CLASSIFICACAO,
-                h("3"), h("3"), h("3"), false, "Aberto", "new", null, null);
+                h("3"), h("3"), h("3"), false, "Aberto", "new", null, null, false);
         var c = computeOf(parent("A-1", null, null, false, sub("S-1", SubtaskClass.DEV, "11", "11"), spec,
                 sub("S-8", SubtaskClass.FORA_DA_CONTA, "4", "4")));
         assertEquals(11.0, c.totals().allocated().get("DEV"));
@@ -197,7 +253,7 @@ class SprintPlanScopeServiceTest {
     void parentGoneFallsBackToSnapshot() {
         ParentView p = parent("A-1", "10", "4", false);
         var c = SprintPlanScopeService.compute(List.of(item("A-1", 0, false, p)), Map.of());
-        assertEquals(h("10"), c.items().get(0).devHours());
+        assertEquals(h("11"), c.items().get(0).devHours());
         assertFalse(c.items().get(0).inBacklog());
     }
 

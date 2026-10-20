@@ -74,7 +74,9 @@ public final class SprintPlanDtos {
 
     /**
      * Item do escopo. {@code devHours}/{@code qaHours} são o que CONTA no total (HORAS_ITEM); {@code subtaskDevH}/
-     * {@code subtaskQaH} são a soma das subtarefas da classe (estimado, ou restante se carry-over), só para alerta.
+     * {@code subtaskQaH} são a soma das subtarefas da classe SEM Code Review (estimado; restante se carry-over), só para
+     * alerta. {@code codeReviewDevH}/{@code codeReviewQaH} são as horas de Code Review incluídas em devHours/qaHours;
+     * {@code codeReviewDevAssumed} = não há subtarefa de Code Review DEV e entrou a hora padrão.
      */
     public record ItemView(String id, String parentKey, String title, BigDecimal titleDevHours,
                            BigDecimal titleQaHours, int sortOrder, boolean carryOver,
@@ -83,7 +85,8 @@ public final class SprintPlanDtos {
                            BigDecimal subtaskQaEstimateH, BigDecimal subtaskQaRemainingH,
                            boolean divergenceDev, boolean divergenceQa, boolean divergent, boolean noEstimate,
                            boolean inBacklog, int unclassifiedCount, BigDecimal unclassifiedHours,
-                           List<ScopeSubtaskView> subtasks) {}
+                           List<ScopeSubtaskView> subtasks,
+                           BigDecimal codeReviewDevH, BigDecimal codeReviewQaH, boolean codeReviewDevAssumed) {}
 
     public record UnclassifiedTypeView(String typeId, String typeName, int count, BigDecimal hours) {}
 
