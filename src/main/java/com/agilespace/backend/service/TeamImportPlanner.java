@@ -100,7 +100,27 @@ final class TeamImportPlanner {
             if (old.getRoleKey() != null && old.getRoleKey().equalsIgnoreCase(in.getRoleKey())) return old;
             if (rosterRow == null && !MembershipSource.roleIsHumanDecision(old.getSource())) rosterRow = old;
         }
-        return rosterRow;
+        if (rosterRow != null) return rosterRow;
+        return placeholderByName(current, consumed, in);
+    }
+
+    /**
+     * Pré-cadastro só por nome (sem conta do Jira, sem e-mail, sem usuário vinculado) que o Jira agora traz com conta/e-mail:
+     * é a mesma pessoa, vira uma linha só em vez de um fantasma ao lado. Só vale com um ÚNICO pré-cadastro daquele nome
+     * e quando a linha de entrada tem identidade (conta ou e-mail); linha com qualquer identidade própria, ou vinculada a uma
+     * conta, nunca é fundida por nome (homônimos).
+     */
+    private static ProjectMemberRole placeholderByName(List<ProjectMemberRole> current, Set<ProjectMemberRole> consumed, ProjectMemberRole in) {
+        String key = PersonIdentity.nameKey(in.getDisplayName());
+        if (key.isEmpty() || (!notBlank(in.getJiraAccountId()) && !notBlank(in.getEmail()))) return null;
+        ProjectMemberRole only = null;
+        for (ProjectMemberRole old : current) {
+            if (consumed.contains(old) || !key.equals(PersonIdentity.nameKey(old.getDisplayName()))) continue;
+            if (only != null) return null;
+            only = old;
+        }
+        if (only == null || notBlank(only.getJiraAccountId()) || notBlank(only.getEmail()) || notBlank(only.getUserId())) return null;
+        return only;
     }
 
     /**

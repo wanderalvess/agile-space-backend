@@ -50,6 +50,24 @@ public class ErrorMessageAdvice {
                 "message", reason == null || reason.isBlank() ? DEFAULT_4XX : reason));
     }
 
+    /**
+     * Violação de unicidade do roster da squad (mesma conta ou mesmo e-mail na squad, V85) estourada no commit por uma
+     * corrida entre dois pedidos: 409 claro. Qualquer outra violação de integridade segue como erro interno, como antes.
+     */
+    @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
+    public ResponseEntity<Map<String, String>> handleIntegrity(org.springframework.dao.DataIntegrityViolationException ex) {
+        String detail = String.valueOf(ex.getMostSpecificCause().getMessage()).toLowerCase(java.util.Locale.ROOT);
+        if (detail.contains("squad_members")) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "error", HttpStatus.CONFLICT.toString(),
+                    "message", "Essa pessoa já está no time desta squad (mesma conta ou mesmo e-mail)."));
+        }
+        log.error("Violação de integridade sem tratamento específico", ex);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                "error", HttpStatus.INTERNAL_SERVER_ERROR.toString(),
+                "message", GENERIC_5XX));
+    }
+
     /** JSON malformado, corpo ausente ou tipo errado: 400 no mesmo formato, sem expor o método Java nem o parser. */
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<Map<String, String>> handleUnreadable(HttpMessageNotReadableException ex) {

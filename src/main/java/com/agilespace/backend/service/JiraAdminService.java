@@ -305,12 +305,33 @@ public class JiraAdminService {
         for (JiraMemberCandidateDto m : approvedMembers) {
             membersSaved++;
             String dbId = projectKey + "_" + m.getJiraAccountId();
-            SquadMember member = squadMemberRepository.findById(dbId).orElse(new SquadMember());
+            SquadMember member = squadMemberRepository.findById(dbId).orElse(null);
+            if (member == null) {
+                // Conta nova do Jira para quem já está no roster com outra chave (mesmo e-mail, ou pré-cadastro por nome):
+                // funde na linha existente em vez de criar uma segunda pessoa. Id gerado vira a conta real do Jira.
+                SquadMember same = PersonIdentity.resolve(squadMemberRepository.findBySquadIdOrderByDisplayNameAsc(projectKey),
+                        m.getJiraAccountId(), m.getEmail(), m.getDisplayName());
+                if (same != null && PersonIdentity.isSyntheticId(same.getJiraAccountId())
+                        && !PersonIdentity.isSyntheticId(m.getJiraAccountId())) {
+                    squadMemberRepository.delete(same);
+                    squadMemberRepository.flush();
+                    member = new SquadMember();
+                    member.setClaimedByUid(same.getClaimedByUid());
+                    member.setCalibrationNotes(same.getCalibrationNotes());
+                    member.setOverrideType(same.getOverrideType());
+                } else if (same != null) {
+                    member = same;
+                    dbId = same.getDbId();
+                }
+            }
+            if (member == null) member = new SquadMember();
             member.setDbId(dbId);
             member.setSquadId(projectKey);
-            member.setJiraAccountId(m.getJiraAccountId());
-            member.setDisplayName(m.getDisplayName());
-            member.setEmail(m.getEmail());
+            if (member.getJiraAccountId() == null || dbId.equals(projectKey + "_" + m.getJiraAccountId())) {
+                member.setJiraAccountId(m.getJiraAccountId());
+            }
+            member.setDisplayName(PersonIdentity.cleanName(m.getDisplayName()));
+            member.setEmail(PersonIdentity.normEmail(m.getEmail()));
             member.setRole(m.getRole());
             member.setCapacityHoursPerDay(m.getCapacityHoursPerDay() != null ? m.getCapacityHoursPerDay() : 8.0);
             member.setUpdatedAt(Instant.now().toString());
