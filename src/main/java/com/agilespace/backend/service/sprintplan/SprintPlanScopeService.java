@@ -24,12 +24,20 @@ import java.util.*;
  * entram na conta. Autorização fica no controller; aqui: 404 plano de outra squad, 409 duplicada, 422 etapa/regra.
  *
  * <p>HORAS_ITEM (plano técnico, seção 5): sobra conta o RESTANTE das subtarefas da classe; item novo vale o TÍTULO
- * "(DEV xh / QA yh)" (subtarefas só geram alerta de divergência); sem horas no título, soma das subtarefas da classe.
+ * "(DEV xh / QA yh)" (vindo do Poker, sem Code Review) MAIS o Code Review da mesma classe (subtarefas do tipo Code
+ * Review; sem nenhuma de DEV, a hora padrão {@link #DEFAULT_CODE_REVIEW_DEV_HOURS}; QA só se houver subtarefa);
+ * sem horas no título, soma das subtarefas da classe. A divergência compara o título com as subtarefas SEM Code Review.
  * Tipos FORA_DA_CONTA e SEM_CLASSIFICACAO nunca entram no total; os sem classificação geram aviso (quantidade e horas).
  */
 @Service
 @RequiredArgsConstructor
 public class SprintPlanScopeService {
+
+    /**
+     * Code Review DEV que entra na conta de item novo quando a pai ainda não tem subtarefa de Code Review.
+     * Constante (1 h = padrão do tipo Code Review); QA nunca ganha hora presumida.
+     */
+    public static final BigDecimal DEFAULT_CODE_REVIEW_DEV_HOURS = BigDecimal.ONE;
 
     private static final Set<String> SCOPE_EDITABLE = Set.of(SprintPlan.STATUS_RASCUNHO, SprintPlan.STATUS_ESCOPO);
 
@@ -196,6 +204,8 @@ public class SprintPlanScopeService {
         boolean hasTitle = titleDev != null || titleQa != null;
 
         BigDecimal devEst = BigDecimal.ZERO, devRem = BigDecimal.ZERO, qaEst = BigDecimal.ZERO, qaRem = BigDecimal.ZERO;
+        BigDecimal crDevEst = BigDecimal.ZERO, crDevRem = BigDecimal.ZERO, crQaEst = BigDecimal.ZERO, crQaRem = BigDecimal.ZERO;
+        boolean hasCrDev = false;
         BigDecimal unclassH = BigDecimal.ZERO;
         int unclassN = 0;
         List<ScopeSubtaskView> subs = new ArrayList<>();
@@ -211,33 +221,52 @@ public class SprintPlanScopeService {
                     unclassN++;
                     unclassH = unclassH.add(carry ? s.remainingH() : s.estimateH());
                 }
+                if (s.countsAsCodeReview()) {
+                    if (s.subtaskClass() == SubtaskClass.DEV) {
+                        hasCrDev = true;
+                        crDevEst = crDevEst.add(s.estimateH());
+                        crDevRem = crDevRem.add(s.remainingH());
+                    } else if (s.subtaskClass() == SubtaskClass.QA) {
+                        crQaEst = crQaEst.add(s.estimateH());
+                        crQaRem = crQaRem.add(s.remainingH());
+                    }
+                }
                 subs.add(new ScopeSubtaskView(s.key(), s.title(), s.typeId(), s.typeName(), s.subtaskClass().name(),
                         s.estimateH(), s.remainingH(), carry ? s.remainingH() : s.estimateH(), s.defaultHoursApplied(),
                         s.assigneeId(), s.assigneeName()));
             }
         }
-        BigDecimal subDev = carry ? devRem : devEst;
-        BigDecimal subQa = carry ? qaRem : qaEst;
+        // Base de comparação com o título: subtarefas da classe SEM Code Review (sobra não compara, fica o restante).
+        BigDecimal subDev = carry ? devRem : devEst.subtract(crDevEst);
+        BigDecimal subQa = carry ? qaRem : qaEst.subtract(crQaEst);
 
-        BigDecimal dev, qa;
+        BigDecimal dev, qa, outCrDev, outCrQa;
+        boolean assumed = false;
         if (carry) {
             dev = devRem;
             qa = qaRem;
+            outCrDev = crDevRem;
+            outCrQa = crQaRem;
         } else if (hasTitle) {
-            dev = titleDev == null ? BigDecimal.ZERO : titleDev;
-            qa = titleQa == null ? BigDecimal.ZERO : titleQa;
+            assumed = titleDev != null && !hasCrDev;
+            outCrDev = titleDev == null ? BigDecimal.ZERO : (hasCrDev ? crDevEst : DEFAULT_CODE_REVIEW_DEV_HOURS);
+            outCrQa = titleQa == null ? BigDecimal.ZERO : crQaEst;
+            dev = (titleDev == null ? BigDecimal.ZERO : titleDev).add(outCrDev);
+            qa = (titleQa == null ? BigDecimal.ZERO : titleQa).add(outCrQa);
         } else {
             dev = devEst;
             qa = qaEst;
+            outCrDev = crDevEst;
+            outCrQa = crQaEst;
         }
-        boolean divDev = PlannerBacklogService.isDivergent(carry, titleDev, devEst);
-        boolean divQa = PlannerBacklogService.isDivergent(carry, titleQa, qaEst);
+        boolean divDev = PlannerBacklogService.isDivergent(carry, titleDev, subDev);
+        boolean divQa = PlannerBacklogService.isDivergent(carry, titleQa, subQa);
         // Sem estimativa: nada no título e nenhuma subtarefa DEV/QA estimada (sobra: nada restante nem estimado).
         boolean noEst = !hasTitle && devEst.signum() == 0 && qaEst.signum() == 0
                 && (!carry || (devRem.signum() == 0 && qaRem.signum() == 0));
         return new ItemView(it.getId(), it.getParentKey(), p != null ? p.title() : it.getTitleSnapshot(), titleDev, titleQa,
                 it.getSortOrder(), carry, dev, qa, subDev, subQa, devEst, devRem, qaEst, qaRem,
-                divDev, divQa, divDev || divQa, noEst, p != null, unclassN, unclassH, subs);
+                divDev, divQa, divDev || divQa, noEst, p != null, unclassN, unclassH, subs, outCrDev, outCrQa, assumed);
     }
 
     // ---------------- Apoio ----------------

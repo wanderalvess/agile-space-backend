@@ -59,9 +59,9 @@ class PlannerBacklogServiceTest {
     }
 
     @Test
-    @DisplayName("título bate com as subtarefas: soma por classe, sem divergência; Code Review sem estimativa conta 1 h")
+    @DisplayName("título (sem Code Review) bate com as subtarefas sem Code Review: sem divergência; Code Review sem estimativa conta 1 h")
     void sumsWithoutDivergence() {
-        parent("P-1", "Login (DEV 9h / QA 4h)", "Refinamento Concluído");
+        parent("P-1", "Login (DEV 8h / QA 4h)", "Refinamento Concluído");
         sub("P-2", "P-1", "10036", "Codificação", "Codificar", 8L, 8L);
         sub("P-3", "P-1", "12300", "Code Review", "Code Review", null, null);
         sub("P-4", "P-1", "10013", "Execução de TI", "Executar", 4L, 4L);
@@ -69,7 +69,7 @@ class PlannerBacklogServiceTest {
         PlannerBacklogService.BacklogView v = service.view("SQ", null, null, false);
         PlannerBacklogService.ParentView p = v.items().get(0);
         assertFalse(p.carryOver());
-        eq("9", p.titleHours().dev());
+        eq("8", p.titleHours().dev());
         eq("4", p.titleHours().qa());
         eq("9", p.sumByClass().get(SubtaskClass.DEV));
         eq("4", p.sumByClass().get(SubtaskClass.QA));
@@ -81,7 +81,7 @@ class PlannerBacklogServiceTest {
     @Test
     @DisplayName("título diferente das subtarefas: divergência por classe; Code Review QA conta como QA")
     void divergenceAndCodeReviewQa() {
-        parent("P-1", "Login (DEV 10h / QA 4h)", "Refinamento Concluído");
+        parent("P-1", "Login (DEV 10h / QA 2h)", "Refinamento Concluído");
         sub("P-2", "P-1", "10036", "Codificação", "Codificar", 8L, 8L);
         sub("P-3", "P-1", "12300", "Code Review", "Code Review QA", 2L, 2L);
         sub("P-4", "P-1", "10013", "Execução de TI", "Executar", 2L, 2L);
