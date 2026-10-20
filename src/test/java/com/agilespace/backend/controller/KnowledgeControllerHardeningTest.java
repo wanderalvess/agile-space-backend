@@ -79,6 +79,24 @@ class KnowledgeControllerHardeningTest {
     }
 
     @Test
+    @DisplayName("API v1 não serve rascunho nem arquivado")
+    void v1HidesDraftAndArchived() {
+        UUID id = UUID.randomUUID();
+        for (String status : List.of("draft", "archived")) {
+            when(service.getDocumentById(id)).thenReturn(KnowledgeDocument.builder().id(id).title("x").status(status).authorId("a").build());
+            assertEquals(HttpStatus.NOT_FOUND, v1.getDocumentById(id, apiKey()).getStatusCode());
+        }
+    }
+
+    @Test
+    @DisplayName("Rascunho de outra pessoa: o endpoint por id responde 404")
+    void draftOfOtherIs404() {
+        UUID id = UUID.randomUUID();
+        when(service.getReadableDocument(eq(id), eq("beto"), eq(false))).thenThrow(new IllegalArgumentException("Document not found"));
+        assertEquals(HttpStatus.NOT_FOUND, controller.getDocumentById(id, user("beto")).getStatusCode());
+    }
+
+    @Test
     @DisplayName("API v1 POST com título/conteúdo que não é texto é 400")
     void v1RejectsNonStringFields() {
         assertEquals(HttpStatus.BAD_REQUEST, v1.createDocument(Map.of("title", 123), apiKey()).getStatusCode());

@@ -41,7 +41,7 @@ public class KnowledgeController {
             @RequestParam(value = "status", required = false) String status,
             @PageableDefault(size = 20) Pageable pageable,
             HttpServletRequest request) {
-        Page<KnowledgeDocument> page = knowledgeService.listDocuments(query, tags, status, pageable);
+        Page<KnowledgeDocument> page = knowledgeService.listDocuments(query, tags, status, pageable, resolveUserId(request), isAdmin(request));
         knowledgeService.markEditable(page.getContent(), resolveUserId(request), isAdmin(request));
         return ResponseEntity.ok(page);
     }
@@ -75,7 +75,7 @@ public class KnowledgeController {
     @GetMapping("/{id}")
     public ResponseEntity<KnowledgeDocument> getDocumentById(@PathVariable("id") UUID id, HttpServletRequest request) {
         try {
-            KnowledgeDocument doc = knowledgeService.getDocumentById(id);
+            KnowledgeDocument doc = knowledgeService.getReadableDocument(id, resolveUserId(request), isAdmin(request));
             knowledgeService.markEditable(List.of(doc), resolveUserId(request), isAdmin(request));
             return ResponseEntity.ok(doc);
         } catch (IllegalArgumentException e) {
@@ -125,18 +125,18 @@ public class KnowledgeController {
     }
 
     @GetMapping("/{id}/versions")
-    public ResponseEntity<List<KnowledgeVersionDto>> listVersions(@PathVariable("id") UUID id) {
+    public ResponseEntity<List<KnowledgeVersionDto>> listVersions(@PathVariable("id") UUID id, HttpServletRequest request) {
         try {
-            return ResponseEntity.ok(knowledgeService.listVersions(id));
+            return ResponseEntity.ok(knowledgeService.listVersions(id, resolveUserId(request), isAdmin(request)));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }
     }
 
     @GetMapping("/{id}/versions/{number}")
-    public ResponseEntity<KnowledgeVersionDto> getVersion(@PathVariable("id") UUID id, @PathVariable("number") int number) {
+    public ResponseEntity<KnowledgeVersionDto> getVersion(@PathVariable("id") UUID id, @PathVariable("number") int number, HttpServletRequest request) {
         try {
-            return ResponseEntity.ok(knowledgeService.getVersion(id, number));
+            return ResponseEntity.ok(knowledgeService.getVersion(id, number, resolveUserId(request), isAdmin(request)));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }
@@ -156,9 +156,9 @@ public class KnowledgeController {
     }
 
     @PostMapping("/{id}/view")
-    public ResponseEntity<KnowledgeDocument> incrementViews(@PathVariable("id") UUID id) {
+    public ResponseEntity<KnowledgeDocument> incrementViews(@PathVariable("id") UUID id, HttpServletRequest request) {
         try {
-            return ResponseEntity.ok(knowledgeService.incrementViews(id));
+            return ResponseEntity.ok(knowledgeService.incrementViews(id, resolveUserId(request), isAdmin(request)));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }

@@ -16,18 +16,19 @@ public interface KnowledgeRepository extends JpaRepository<KnowledgeDocument, UU
 
     Optional<KnowledgeDocument> findByTdnId(String tdnId);
 
-    Page<KnowledgeDocument> findByStatusNot(String status, Pageable pageable);
-
     Page<KnowledgeDocument> findByStatus(String status, Pageable pageable);
 
-    @Query("SELECT d FROM KnowledgeDocument d WHERE d.status <> :deletedStatus AND " +
+    /** Documentos cujo status está na lista (ex.: só os "listáveis": publicado e indexado). */
+    Page<KnowledgeDocument> findByStatusIn(java.util.Collection<String> statuses, Pageable pageable);
+
+    @Query("SELECT d FROM KnowledgeDocument d WHERE d.status IN :statuses AND " +
            "(LOWER(d.title) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
            "LOWER(d.content) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
            "LOWER(d.category) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
            "LOWER(d.fullPath) LIKE LOWER(CONCAT('%', :query, '%')))")
-    Page<KnowledgeDocument> searchActive(
+    Page<KnowledgeDocument> searchByStatuses(
             @Param("query") String query,
-            @Param("deletedStatus") String deletedStatus,
+            @Param("statuses") java.util.Collection<String> statuses,
             Pageable pageable
     );
 }
