@@ -91,6 +91,20 @@ public class SquadService {
         return squadRepository.save(target);
     }
 
+    /** Grava os campos de data do Jira da squad; diferente de saveSquad, nulo AQUI significa "voltar à autodetecção". */
+    @Transactional
+    public Squad saveJiraDateFields(String squadId, String startFieldId, String endFieldId) {
+        Squad target = squadRepository.findById(squadId).orElseGet(() -> {
+            Squad novo = new Squad();
+            novo.setId(squadId);
+            novo.setName(squadId);
+            return novo;
+        });
+        target.setJiraStartField(startFieldId);
+        target.setJiraEndField(endFieldId);
+        return squadRepository.save(target);
+    }
+
     // ----- Metrics Rollup -----
     // "Atual" = rollup da sprint que o squad marcou como ativa. Antes a PK era
     // só squadId (1 rollup por squad, não por sprint) — sobrevivia por sorte
