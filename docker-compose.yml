@@ -140,7 +140,7 @@ services:
       resources:
         limits:
           cpus: "${FRONTEND_CPU_LIMIT:-1}"
-          memory: ${FRONTEND_MEMORY_LIMIT:-1536M}
+          memory: ${FRONTEND_MEMORY_LIMIT:-2048M}
 
   # Reverse proxy + TLS automático (Let's Encrypt) na frente de frontend/backend. Só entra em
   # jogo com o profile "proxy" (docker compose --profile proxy up -d) — em dev local, sem
