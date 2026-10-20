@@ -41,7 +41,7 @@ public class SquadSyncServiceTest {
     @BeforeEach
     public void setup() {
         MockitoAnnotations.openMocks(this);
-        syncService = new SquadSyncService(squadService, jiraService, squadCapacityService, userJiraConfigRepository, new ObjectMapper());
+        syncService = new SquadSyncService(squadService, jiraService, squadCapacityService, userJiraConfigRepository, new ObjectMapper(), null);
     }
 
     private Squad baseSquad() {

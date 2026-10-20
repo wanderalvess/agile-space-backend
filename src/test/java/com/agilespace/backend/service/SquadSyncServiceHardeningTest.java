@@ -39,7 +39,7 @@ public class SquadSyncServiceHardeningTest {
     @BeforeEach
     public void setup() {
         MockitoAnnotations.openMocks(this);
-        syncService = new SquadSyncService(squadService, jiraService, squadCapacityService, userJiraConfigRepository, mapper);
+        syncService = new SquadSyncService(squadService, jiraService, squadCapacityService, userJiraConfigRepository, mapper, null);
     }
 
     private UserJiraConfig creds() {
