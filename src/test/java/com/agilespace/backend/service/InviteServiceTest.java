@@ -100,6 +100,42 @@ class InviteServiceTest {
         assertEquals(403, assertThrows(ResponseStatusException.class, () -> service.acceptInvite("other", user())).getStatusCode().value());
 
         verify(squadService, never()).saveMember(anyString(), anyString(), any());
+        verify(auditLogRepository, never()).save(argThat(a -> "INVITE_ACCEPTED".equals(a.getAction())));
+    }
+
+    @Test
+    @DisplayName("Aceite grava INVITE_ACCEPTED com usuário, e-mail, squad, papel, convite e origem, sem o token")
+    void acceptWritesAuditWithoutToken() {
+        when(inviteRepository.findByTokenForUpdate("tok-secreto")).thenReturn(Optional.of(pending(null, LocalDateTime.now().plusDays(1))));
+        when(squadService.saveMember(anyString(), anyString(), any(SquadMember.class))).thenAnswer(i -> i.getArgument(2));
+
+        service.acceptInvite("tok-secreto", user());
+
+        org.mockito.ArgumentCaptor<com.agilespace.backend.domain.AuditLog> cap = org.mockito.ArgumentCaptor.forClass(com.agilespace.backend.domain.AuditLog.class);
+        verify(auditLogRepository).save(cap.capture());
+        var log = cap.getValue();
+        assertEquals("INVITE_ACCEPTED", log.getAction());
+        assertEquals("u1", log.getPerformedBy());
+        for (String parte : new String[]{"userId=u1", "email=ana@totvs.com.br", "squad=SQ", "papel=Developer", "conviteId=i1", "origem=INVITE"}) {
+            assertTrue(log.getDetails().contains(parte), parte);
+        }
+        assertFalse(log.getDetails().contains("tok-secreto"));
+        assertFalse(log.getDetails().contains("token"));
+    }
+
+    @Test
+    @DisplayName("Criar e revogar convite gravam auditoria sem o token")
+    void createAndRevokeAuditWithoutToken() {
+        when(inviteRepository.save(any(Invite.class))).thenAnswer(i -> i.getArgument(0));
+        Invite created = service.createInvite("SQ", "Developer", null, "lead");
+        when(inviteRepository.findById("i2")).thenReturn(Optional.of(pending(null, LocalDateTime.now().plusDays(1))));
+        service.revoke("i2", "SQ", "lead");
+
+        org.mockito.ArgumentCaptor<com.agilespace.backend.domain.AuditLog> cap = org.mockito.ArgumentCaptor.forClass(com.agilespace.backend.domain.AuditLog.class);
+        verify(auditLogRepository, times(2)).save(cap.capture());
+        assertEquals("INVITE_CREATED", cap.getAllValues().get(0).getAction());
+        assertEquals("INVITE_REVOKED", cap.getAllValues().get(1).getAction());
+        cap.getAllValues().forEach(a -> assertFalse(a.getDetails().contains(created.getToken())));
     }
 
     @Test
