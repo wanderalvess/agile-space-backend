@@ -97,7 +97,8 @@ class PromptHubServerSideIntegrationTest {
     void searchFiltersVisibilitySortAndPagination() throws Exception {
         create("ana", "Ação de retro", "prompt", "public", "published", "texto sobre coração", "scrum", "retro");
         create("ana", "Skill privada", "skill", "private", "published", "segredo", "scrum");
-        create("bia", "Arquivado", "prompt", "public", "archived", "velho");
+        create("bia", "Arquivado", "prompt", "public", "arquivado", "velho");
+        create("bia", "Archived en", "prompt", "public", "archived", "old");
         create("bia", "Zeta pública", "agent", "public", "published", "z", "kanban");
 
         // bia não vê o privado da ana; não vê arquivado por padrão? (autor vê o próprio arquivado só com status=all)
@@ -105,13 +106,15 @@ class PromptHubServerSideIntegrationTest {
         assertFalse(titles(list("bia", "sort=recent")).contains("Skill privada"));
         assertFalse(titles(list("bia", "sort=recent")).contains("Arquivado"));
         assertTrue(titles(list("bia", "sort=recent&status=all")).contains("Arquivado"));
-        assertEquals(List.of("Arquivado"), titles(list("bia", "status=archived")));
+        assertEquals(List.of("Arquivado", "Archived en"), titles(list("bia", "status=arquivado&sort=az")));
+        assertEquals(List.of("Arquivado", "Archived en"), titles(list("bia", "status=archived&sort=az")));
+        assertFalse(titles(list("bia", "sort=recent")).contains("Archived en"));
 
         // visibilidade
         assertEquals(List.of("Skill privada"), titles(list("ana", "visibility=private")));
         assertEquals(List.of(), titles(list("bia", "visibility=private")));
         assertTrue(titles(list("ana", "visibility=public&sort=az")).containsAll(List.of("Ação de retro", "Zeta pública")));
-        assertEquals(4, list("adm", "sort=recent&status=all").get("totalElements").asInt());
+        assertEquals(5, list("adm", "sort=recent&status=all").get("totalElements").asInt());
 
         // busca sem acento / sem caixa, em título, conteúdo, tag e autor
         assertEquals(List.of("Ação de retro"), titles(list("bia", "query=acao&sort=recent")));

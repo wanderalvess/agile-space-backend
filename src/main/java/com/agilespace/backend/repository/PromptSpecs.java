@@ -24,7 +24,7 @@ import java.util.Locale;
 public final class PromptSpecs {
 
     private static final String PUBLIC = "public";
-    private static final String ARCHIVED = "archived";
+    private static final java.util.List<String> ARCHIVED = java.util.List.of("arquivado", "archived");
     private static final String FROM = "áàâãäéèêëíìîïóòôõöúùûüçñ";
     private static final String TO = "aaaaaeeeeiiiiooooouuuucn";
     private static final int MAX_TOKENS = 8;
@@ -80,7 +80,9 @@ public final class PromptSpecs {
 
             String status = f.status() == null ? "" : f.status().trim().toLowerCase(Locale.ROOT);
             if (status.isEmpty()) {
-                all.add(cb.or(cb.isNull(root.get("status")), cb.notEqual(cb.lower(root.<String>get("status")), ARCHIVED)));
+                all.add(cb.or(cb.isNull(root.get("status")), cb.not(cb.lower(root.<String>get("status")).in(ARCHIVED))));
+            } else if (ARCHIVED.contains(status)) {
+                all.add(cb.lower(root.<String>get("status")).in(ARCHIVED));
             } else if (!"all".equals(status)) {
                 all.add(cb.equal(cb.lower(root.<String>get("status")), status));
             }

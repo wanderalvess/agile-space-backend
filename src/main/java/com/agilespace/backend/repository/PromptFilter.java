@@ -2,7 +2,7 @@ package com.agilespace.backend.repository;
 
 /**
  * Filtros da listagem/facets. Todos opcionais. visibility: all (padrão) | public | private;
- * status: omitido = sem arquivados, "all" = todos.
+ * status: omitido = sem arquivados ("arquivado" ou "archived"), "all" = todos.
  */
 public record PromptFilter(String query, String type, String visibility, String status, String impact,
                            String tag, boolean favorites, String authorId) {

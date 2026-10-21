@@ -84,14 +84,24 @@ class PromptSpecsTest {
     }
 
     @Test
-    void defaultStatusExcludesArchivedAndAllDoesNot() {
+    @SuppressWarnings("unchecked")
+    void defaultStatusExcludesBothArchivedSpellingsAndAllDoesNot() {
         PromptSpecs.filtered(filter(null, null, false, null), null).toPredicate(root, query, cb);
-        verify(cb).notEqual(any(), eq("archived"));
+        verify(cb).not(any());
 
         CriteriaBuilder cb2 = mock(CriteriaBuilder.class, RETURNS_MOCKS);
         PromptSpecs.filtered(filter(null, "all", false, null), null).toPredicate(root, query, cb2);
-        verify(cb2, never()).notEqual(any(), eq("archived"));
+        verify(cb2, never()).not(any());
         verify(cb2, never()).equal(any(), eq("all"));
+    }
+
+    @Test
+    void archivedFilterMatchesBothSpellingsNotEquality() {
+        for (String st : new String[]{"arquivado", "archived", "ARQUIVADO"}) {
+            CriteriaBuilder c = mock(CriteriaBuilder.class, RETURNS_MOCKS);
+            PromptSpecs.filtered(filter(null, st, false, null), null).toPredicate(root, query, c);
+            verify(c, never()).equal(any(), eq(st.toLowerCase()));
+        }
     }
 
     @Test
