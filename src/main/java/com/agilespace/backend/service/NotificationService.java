@@ -30,10 +30,10 @@ public class NotificationService {
 
     /** FOR_YOU = todos os kinds exceto ANNOUNCEMENT e MESSAGE. */
     static final List<String> FOR_YOU_KINDS = List.of(Notification.INVITE, Notification.REMINDER, Notification.ACTION_ASSIGNED,
-            Notification.LINK_REQUEST);
+            Notification.LINK_REQUEST, Notification.SUPPORT_REPLY);
     static final List<String> ANNOUNCEMENT_KINDS = List.of(Notification.ANNOUNCEMENT);
     static final List<String> ALL_KINDS = List.of(Notification.INVITE, Notification.REMINDER, Notification.ACTION_ASSIGNED,
-            Notification.MESSAGE, Notification.ANNOUNCEMENT, Notification.LINK_REQUEST);
+            Notification.MESSAGE, Notification.ANNOUNCEMENT, Notification.LINK_REQUEST, Notification.SUPPORT_REPLY);
 
     static final int MAX_LIMIT = 100;
     static final int MAX_TITLE = 200;
@@ -144,6 +144,16 @@ public class NotificationService {
         if (holders.isEmpty()) return;
         notificationRepository.markReadByDedupeKey(dedupeKey, ServerTime.now());
         signalService.signal(holders, UserSignalService.UNREAD);
+    }
+
+    /** Marca como lidas as notificações desta pessoa, deste tipo, que apontam para {@code link}. */
+    @Transactional
+    public void markReadByLink(String userId, String kind, String link) {
+        if (userId == null || userId.isBlank() || link == null) return;
+        int changed = notificationRepository.markReadByUserKindAndLink(userId, kind, link, ServerTime.now());
+        if (changed > 0) {
+            signalService.signal(userId, UserSignalService.UNREAD);
+        }
     }
 
     // --- internos ---

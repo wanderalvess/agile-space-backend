@@ -212,6 +212,35 @@ public class NotificationTriggers {
         fire("LINK_REQUEST_CANCELLED", () -> notificationService.retireByDedupeKey("LINK_REQUEST_CREATED:" + requestId));
     }
 
+    // --- SUPPORT_REPLY ---
+
+    /** Link do chamado na central de suporte (o mesmo da notificação e da leitura). */
+    public static String supportTicketLink(UUID ticketId) {
+        return "/support?ticket=" + ticketId;
+    }
+
+    /**
+     * O time respondeu um chamado: avisa o solicitante ("Seu chamado SUP-NNNN recebeu resposta"). Uma notificação por
+     * resposta (chave = id da resposta). O autor nunca é avisado de resposta própria.
+     */
+    public void supportTicketReplied(UUID ticketId, String protocol, String subject, String requesterId, String replyId,
+                                     String replierId) {
+        if (ticketId == null || requesterId == null || requesterId.isBlank() || requesterId.equals(replierId)) return;
+        fire("SUPPORT_REPLY", () -> notificationService.notifyUsers(List.of(requesterId),
+                new NotificationService.Draft(Notification.SUPPORT_REPLY,
+                        "Seu chamado " + protocol + " recebeu resposta",
+                        "O time respondeu: " + NotificationService.truncate(oneLine(subject), 200),
+                        supportTicketLink(ticketId), null, null, "SUPPORT_REPLY:" + replyId),
+                UserSignalService.NOTIFICATION));
+    }
+
+    /** O solicitante abriu o chamado: os avisos de resposta dele deixam de contar como não lidos. */
+    public void supportTicketRead(UUID ticketId, String requesterId) {
+        if (ticketId == null || requesterId == null) return;
+        fire("SUPPORT_READ", () -> notificationService.markReadByLink(requesterId, Notification.SUPPORT_REPLY,
+                supportTicketLink(ticketId)));
+    }
+
     // --- internos ---
 
     record Candidate(String userId, String name, String email) { }

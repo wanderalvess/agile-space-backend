@@ -19,6 +19,8 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 public class SupportTicketServiceTest {
@@ -28,6 +30,9 @@ public class SupportTicketServiceTest {
 
     @Mock
     private SupportTicketReplyRepository replyRepository;
+
+    @Mock
+    private NotificationTriggers notificationTriggers;
 
     @InjectMocks
     private SupportTicketService service;
@@ -171,10 +176,9 @@ public class SupportTicketServiceTest {
     public void testGetRepliesRejectsOtherRequester() {
         when(ticketRepository.findById(ticketId)).thenReturn(Optional.of(ticket("OPEN")));
 
-        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
-                () -> service.getReplies(ticketId, "intruso", false));
+        // outro usuário recebe "não encontrado" (404 no controller), não 403: o id não vaza
+        assertThrows(IllegalArgumentException.class, () -> service.getReplies(ticketId, "intruso", false));
 
-        assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
         verify(replyRepository, never()).findByTicketIdOrderByCreatedAtAsc(any());
     }
 
@@ -197,12 +201,214 @@ public class SupportTicketServiceTest {
     public void testAddReplyRejectsUserWhoDoesNotOwnTheTicket() {
         when(ticketRepository.findById(ticketId)).thenReturn(Optional.of(ticket("OPEN")));
 
-        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+        assertThrows(IllegalArgumentException.class,
                 () -> service.addReply(ticketId, "intruso", "Intruso", false, "quero ver"));
 
-        assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
         verify(replyRepository, never()).save(any());
         verify(ticketRepository, never()).save(any());
+    }
+
+    // ---------- tipo, protocolo ----------
+
+    @Test
+    public void testCreateTicketStoresTypeAndGeneratesProtocolFromSequence() {
+        when(ticketRepository.nextProtocolNumber()).thenReturn(42L);
+        SupportTicket payload = SupportTicket.builder().subject("Erro").message("Detalhe").type(" BUG ")
+                .protocol("SUP-9999").build();
+
+        SupportTicket created = service.createTicket("u1", "Joao", "joao@empresa.com.br", payload);
+
+        assertEquals("bug", created.getType());
+        // o protocolo é do servidor; o corpo não escolhe
+        assertEquals("SUP-0042", created.getProtocol());
+    }
+
+    @Test
+    public void testCreateTicketDefaultsTypeToSupport() {
+        SupportTicket created = service.createTicket("u1", "Joao", "j@e.com",
+                SupportTicket.builder().subject("Erro").message("Detalhe").build());
+
+        assertEquals("support", created.getType());
+    }
+
+    @Test
+    public void testCreateTicketRejectsUnknownType() {
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> service.createTicket("u1", "Joao", "j@e.com",
+                SupportTicket.builder().subject("Erro").message("Detalhe").type("reclamacao").build()));
+
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatusCode());
+        verify(ticketRepository, never()).save(any());
+    }
+
+    @Test
+    public void testLegacyTicketWithoutProtocolGetsStableDerivedProtocol() {
+        SupportTicket legacy = ticket("OPEN");
+
+        assertEquals("SUP-11111111", legacy.getProtocol());
+        assertEquals(legacy.getProtocol(), legacy.getProtocol());
+        assertNull(legacy.getType());
+    }
+
+    @Test
+    public void testStoredProtocolWinsOverDerived() {
+        SupportTicket t = ticket("OPEN");
+        t.setProtocol("SUP-0007");
+
+        assertEquals("SUP-0007", t.getProtocol());
+    }
+
+    // ---------- fechar / reabrir ----------
+
+    @Test
+    public void testOwnerClosesOwnTicket() {
+        when(ticketRepository.findById(ticketId)).thenReturn(Optional.of(ticket("IN_PROGRESS")));
+
+        SupportTicket closed = service.closeTicket(ticketId, "u1");
+
+        assertEquals("CLOSED", closed.getStatus());
+        assertNotNull(closed.getUpdatedAt());
+    }
+
+    @Test
+    public void testCloseByAnotherUserIsNotFound() {
+        when(ticketRepository.findById(ticketId)).thenReturn(Optional.of(ticket("OPEN")));
+
+        assertThrows(IllegalArgumentException.class, () -> service.closeTicket(ticketId, "intruso"));
+        verify(ticketRepository, never()).save(any());
+    }
+
+    @Test
+    public void testCloseUnknownTicketIsNotFound() {
+        when(ticketRepository.findById(ticketId)).thenReturn(Optional.empty());
+
+        assertThrows(IllegalArgumentException.class, () -> service.closeTicket(ticketId, "u1"));
+    }
+
+    @Test
+    public void testCloseAlreadyClosedIsIdempotent() {
+        when(ticketRepository.findById(ticketId)).thenReturn(Optional.of(ticket("CLOSED")));
+
+        assertEquals("CLOSED", service.closeTicket(ticketId, "u1").getStatus());
+        verify(ticketRepository, never()).save(any());
+    }
+
+    @Test
+    public void testOwnerReopensClosedTicket() {
+        when(ticketRepository.findById(ticketId)).thenReturn(Optional.of(ticket("CLOSED")));
+
+        assertEquals("OPEN", service.reopenTicket(ticketId, "u1").getStatus());
+    }
+
+    @Test
+    public void testReopenByAnotherUserIsNotFound() {
+        when(ticketRepository.findById(ticketId)).thenReturn(Optional.of(ticket("CLOSED")));
+
+        assertThrows(IllegalArgumentException.class, () -> service.reopenTicket(ticketId, "intruso"));
+        verify(ticketRepository, never()).save(any());
+    }
+
+    @Test
+    public void testReopenOnlyWhenClosed() {
+        when(ticketRepository.findById(ticketId)).thenReturn(Optional.of(ticket("IN_PROGRESS")));
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> service.reopenTicket(ticketId, "u1"));
+
+        assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
+        verify(ticketRepository, never()).save(any());
+    }
+
+    @Test
+    public void testAdminWhoDoesNotOwnTheTicketCannotUseOwnerActions() {
+        // fechar/reabrir/ler são do solicitante; o admin usa PATCH /status
+        when(ticketRepository.findById(ticketId)).thenReturn(Optional.of(ticket("OPEN")));
+
+        assertThrows(IllegalArgumentException.class, () -> service.closeTicket(ticketId, "admin1"));
+        assertThrows(IllegalArgumentException.class, () -> service.markRead(ticketId, "admin1"));
+    }
+
+    // ---------- responder em chamado fechado ----------
+
+    @Test
+    public void testRequesterReplyOnClosedTicketIsConflict() {
+        when(ticketRepository.findById(ticketId)).thenReturn(Optional.of(ticket("CLOSED")));
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> service.addReply(ticketId, "u1", "Joao", false, "ainda com erro"));
+
+        assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
+        assertTrue(ex.getReason().contains("Reabra"));
+        verify(replyRepository, never()).save(any());
+    }
+
+    @Test
+    public void testAdminCanStillReplyOnClosedTicket() {
+        when(ticketRepository.findById(ticketId)).thenReturn(Optional.of(ticket("CLOSED")));
+
+        assertTrue(service.addReply(ticketId, "admin1", "Suporte", true, "Fechamos por inatividade").isAdmin());
+    }
+
+    // ---------- notificação ao solicitante ----------
+
+    @Test
+    public void testAdminReplyNotifiesRequesterWithProtocolAndLink() {
+        SupportTicket t = ticket("OPEN");
+        t.setProtocol("SUP-0042");
+        when(ticketRepository.findById(ticketId)).thenReturn(Optional.of(t));
+
+        service.addReply(ticketId, "admin1", "Suporte", true, "Já corrigimos");
+
+        verify(notificationTriggers).supportTicketReplied(eq(ticketId), eq("SUP-0042"), eq("Erro no Poker"), eq("u1"),
+                anyString(), eq("admin1"));
+    }
+
+    @Test
+    public void testRequesterReplyDoesNotNotify() {
+        when(ticketRepository.findById(ticketId)).thenReturn(Optional.of(ticket("OPEN")));
+
+        service.addReply(ticketId, "u1", "Joao", false, "obrigado");
+
+        verifyNoInteractions(notificationTriggers);
+    }
+
+    // ---------- leitura ----------
+
+    @Test
+    public void testMarkReadStampsTimeClearsUnreadAndRetiresBellNotice() {
+        SupportTicket t = ticket("OPEN");
+        t.setUnreadReplies(2);
+        when(ticketRepository.findById(ticketId)).thenReturn(Optional.of(t));
+
+        SupportTicket read = service.markRead(ticketId, "u1");
+
+        assertNotNull(read.getRequesterLastReadAt());
+        assertEquals(0, read.getUnreadReplies());
+        assertFalse(read.isHasUnreadReply());
+        verify(notificationTriggers).supportTicketRead(ticketId, "u1");
+    }
+
+    @Test
+    public void testMarkReadByAnotherUserIsNotFound() {
+        when(ticketRepository.findById(ticketId)).thenReturn(Optional.of(ticket("OPEN")));
+
+        assertThrows(IllegalArgumentException.class, () -> service.markRead(ticketId, "intruso"));
+        verify(ticketRepository, never()).save(any());
+        verifyNoInteractions(notificationTriggers);
+    }
+
+    @Test
+    public void testListMyTicketsFillsUnreadRepliesFromGroupedCount() {
+        SupportTicket a = ticket("OPEN");
+        SupportTicket b = SupportTicket.builder().id(UUID.fromString("22222222-2222-2222-2222-222222222222"))
+                .subject("x").message("y").status("OPEN").requesterId("u1").build();
+        when(ticketRepository.findByRequesterIdOrderByCreatedAtDesc("u1")).thenReturn(List.of(a, b));
+        when(replyRepository.countUnreadAdminRepliesByRequester("u1"))
+                .thenReturn(java.util.Collections.singletonList(new Object[]{ticketId, 3L}));
+
+        List<SupportTicket> mine = service.listMyTickets("u1");
+
+        assertEquals(3, mine.get(0).getUnreadReplies());
+        assertTrue(mine.get(0).isHasUnreadReply());
+        assertFalse(mine.get(1).isHasUnreadReply());
     }
 
     // ---------- deleteTicket ----------
