@@ -1,6 +1,7 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.Prompt;
+import com.agilespace.backend.domain.PromptCollection;
 import com.agilespace.backend.service.PromptService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -29,6 +30,7 @@ public class PublicPromptHubController {
 
     private static final int MAX_PAGE_SIZE = 50;
     private static final int MAX_QUERY_LENGTH = 100;
+    private static final int MAX_COLLECTION_PAGE_SIZE = 200;
 
     private final PromptService promptService;
 
@@ -49,6 +51,44 @@ public class PublicPromptHubController {
                     p.getUseCount(), p.getForkCount(),
                     p.getTags() == null ? List.of() : List.copyOf(p.getTags()),
                     p.getCreatedAt(), p.getUpdatedAt());
+        }
+    }
+
+    /** Coleção pública para visitantes: sem ownerId (interno), itens públicos e contagens; nunca editável. */
+    public record PublicCollectionView(
+            UUID id, String name, String description, String visibility, String ownerId, String ownerName,
+            List<PublicPromptView> items, LocalDateTime createdAt,
+            int itemCount, int hiddenCount, boolean canEdit) {
+
+        static PublicCollectionView of(PromptCollection c) {
+            List<PublicPromptView> items = c.getItems() == null ? List.of()
+                    : c.getItems().stream().map(PublicPromptView::of).toList();
+            int total = c.getItemCount() != null ? c.getItemCount() : items.size();
+            int hidden = c.getHiddenCount() != null ? c.getHiddenCount() : 0;
+            return new PublicCollectionView(c.getId(), c.getName(), c.getDescription(), "public", "",
+                    c.getOwnerName(), items, c.getCreatedAt(), total, hidden, false);
+        }
+    }
+
+    @GetMapping("/collections")
+    @Transactional(readOnly = true)
+    public ResponseEntity<PromptPageDto<PublicCollectionView>> listCollections(
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", required = false) Integer size) {
+        PageRequest pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size == null ? 20 : size, 1), MAX_COLLECTION_PAGE_SIZE));
+        Page<PromptCollection> result = promptService.listCollections("public", null, null, pageable);
+        return ResponseEntity.ok(new PromptPageDto<>(
+                result.getContent().stream().map(PublicCollectionView::of).toList(),
+                result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages()));
+    }
+
+    @GetMapping("/collections/{id}")
+    @Transactional(readOnly = true)
+    public ResponseEntity<PublicCollectionView> getCollection(@PathVariable("id") UUID id) {
+        try {
+            return ResponseEntity.ok(PublicCollectionView.of(promptService.getPublicCollection(id)));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
         }
     }
 

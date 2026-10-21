@@ -653,6 +653,9 @@ public class PromptService {
                 .ownerName(c.getOwnerName())
                 .items(visible)
                 .createdAt(c.getCreatedAt())
+                .itemCount(c.getItems().size())
+                .hiddenCount(c.getItems().size() - visible.size())
+                .canEdit(canManage(c.getOwnerId(), caller))
                 .build();
     }
 
@@ -692,6 +695,16 @@ public class PromptService {
             page = promptCollectionRepository.findByVisibility(PUBLIC, p);
         }
         return page.map(c -> viewOf(c, caller));
+    }
+
+    /** Detalhe anônimo: só coleção pública; privada e inexistente respondem igual (IllegalArgumentException). */
+    @Transactional(readOnly = true)
+    public PromptCollection getPublicCollection(UUID id) {
+        PromptCollection c = getCollectionById(id);
+        if (!PUBLIC.equals(c.getVisibility())) {
+            throw new IllegalArgumentException("Collection not found with id: " + id);
+        }
+        return viewOf(c, null);
     }
 
     @Transactional(readOnly = true)

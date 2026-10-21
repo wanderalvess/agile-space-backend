@@ -236,6 +236,48 @@ class PromptServiceTest {
         }
 
         @Test
+        @DisplayName("Coleção traz itemCount, hiddenCount e canEdit conforme quem lê")
+        void shouldExposeCountsAndCanEdit() {
+            UUID id = UUID.randomUUID();
+            Prompt pub = Prompt.builder().id(UUID.randomUUID()).visibility("public").authorId("a").build();
+            Prompt priv = Prompt.builder().id(UUID.randomUUID()).visibility("private").authorId("a").build();
+            PromptCollection c = PromptCollection.builder().id(id).visibility("public").ownerId("a").build();
+            c.getItems().add(pub);
+            c.getItems().add(priv);
+            when(promptCollectionRepository.findById(id)).thenReturn(Optional.of(c));
+
+            PromptCollection asStranger = service.getCollectionFor(id, stranger);
+            assertEquals(2, asStranger.getItemCount());
+            assertEquals(1, asStranger.getHiddenCount());
+            assertFalse(asStranger.getCanEdit());
+
+            PromptCollection asAdmin = service.getCollectionFor(id, admin);
+            assertEquals(0, asAdmin.getHiddenCount());
+            assertTrue(asAdmin.getCanEdit());
+        }
+
+        @Test
+        @DisplayName("Detalhe público: anônimo vê só itens públicos, sem edição; privada vira inexistente")
+        void shouldServePublicCollectionAnonymously() {
+            UUID id = UUID.randomUUID();
+            UUID privId = UUID.randomUUID();
+            Prompt pub = Prompt.builder().id(UUID.randomUUID()).visibility("public").authorId("a").build();
+            Prompt priv = Prompt.builder().id(UUID.randomUUID()).visibility("private").authorId("a").build();
+            PromptCollection c = PromptCollection.builder().id(id).visibility("public").ownerId("a").build();
+            c.getItems().add(pub);
+            c.getItems().add(priv);
+            when(promptCollectionRepository.findById(id)).thenReturn(Optional.of(c));
+            when(promptCollectionRepository.findById(privId)).thenReturn(Optional.of(
+                    PromptCollection.builder().id(privId).visibility("private").ownerId("a").build()));
+
+            PromptCollection view = service.getPublicCollection(id);
+            assertEquals(List.of(pub), view.getItems());
+            assertEquals(1, view.getHiddenCount());
+            assertFalse(view.getCanEdit());
+            assertThrows(IllegalArgumentException.class, () -> service.getPublicCollection(privId));
+        }
+
+        @Test
         @DisplayName("Coleção privada de outra pessoa responde como inexistente; não dono não exclui coleção pública")
         void shouldProtectCollections() {
             UUID privateId = UUID.randomUUID();
