@@ -36,6 +36,10 @@ class PromptServiceTest {
     @Mock private PromptCommentRepository commentRepository;
     @Mock private PromptCollectionRepository promptCollectionRepository;
     @Mock private com.agilespace.backend.repository.UserRepository userRepository;
+    @Mock private com.agilespace.backend.repository.PromptFavoriteRepository favoriteRepository;
+    @Mock private com.agilespace.backend.repository.PromptVersionRepository versionRepository;
+    @Mock private com.agilespace.backend.repository.PromptUsageEventRepository usageRepository;
+    @Mock private com.agilespace.backend.repository.PromptQueryRepository queryRepository;
 
     private final PromptCaller owner = new PromptCaller("user-123", "MEMBER");
     private final PromptCaller stranger = new PromptCaller("intruso", "MEMBER");
@@ -167,7 +171,7 @@ class PromptServiceTest {
                     () -> service.deletePrompt(promptId, stranger));
             assertThrows(org.springframework.web.server.ResponseStatusException.class,
                     () -> service.updatePrompt(promptId, Prompt.builder().title("x").build(), stranger));
-            verify(promptRepository, never()).delete(any());
+            verify(promptRepository, never()).delete(any(Prompt.class));
 
             service.deletePrompt(promptId, admin);
             verify(promptRepository).delete(prompt);

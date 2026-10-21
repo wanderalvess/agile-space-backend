@@ -55,7 +55,7 @@ public class PromptControllerTest {
         when(service.listPrompts(eq("query"), eq("u1"), eq(new PromptCaller("u1", "MEMBER")), any(PageRequest.class)))
                 .thenReturn(page);
 
-        ResponseEntity<Page<Prompt>> response = controller.listPrompts("query", "u1", PageRequest.of(0, 12), request);
+        ResponseEntity<Object> response = controller.listPrompts("query", "u1", null, null, null, null, null, null, null, PageRequest.of(0, 12), request);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
     }
@@ -64,14 +64,14 @@ public class PromptControllerTest {
     public void testWithoutIdentityIsUnauthorized() {
         MockHttpServletRequest anonymous = new MockHttpServletRequest();
         ResponseStatusException ex = assertThrows(ResponseStatusException.class,
-                () -> controller.listPrompts(null, null, PageRequest.of(0, 12), anonymous));
+                () -> controller.listPrompts(null, null, null, null, null, null, null, null, null, PageRequest.of(0, 12), anonymous));
         assertEquals(HttpStatus.UNAUTHORIZED, ex.getStatusCode());
     }
 
     @Test
     public void testGetPromptByIdHiddenIs404() {
         UUID id = UUID.randomUUID();
-        when(service.getVisiblePrompt(eq(id), any())).thenThrow(new IllegalArgumentException("nope"));
+        when(service.getVisiblePromptDto(eq(id), any())).thenThrow(new IllegalArgumentException("nope"));
 
         assertEquals(HttpStatus.NOT_FOUND, controller.getPromptById(id, request).getStatusCode());
     }
