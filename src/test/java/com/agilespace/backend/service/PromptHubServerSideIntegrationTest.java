@@ -106,8 +106,8 @@ class PromptHubServerSideIntegrationTest {
         assertFalse(titles(list("bia", "sort=recent")).contains("Skill privada"));
         assertFalse(titles(list("bia", "sort=recent")).contains("Arquivado"));
         assertTrue(titles(list("bia", "sort=recent&status=all")).contains("Arquivado"));
-        assertEquals(List.of("Arquivado", "Archived en"), titles(list("bia", "status=arquivado&sort=az")));
-        assertEquals(List.of("Arquivado", "Archived en"), titles(list("bia", "status=archived&sort=az")));
+        assertEquals(List.of("Archived en", "Arquivado"), titles(list("bia", "status=arquivado&sort=az")));
+        assertEquals(List.of("Archived en", "Arquivado"), titles(list("bia", "status=archived&sort=az")));
         assertFalse(titles(list("bia", "sort=recent")).contains("Archived en"));
 
         // visibilidade
