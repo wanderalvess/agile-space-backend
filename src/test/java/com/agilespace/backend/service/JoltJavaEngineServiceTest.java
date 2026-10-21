@@ -245,4 +245,84 @@ class JoltJavaEngineServiceTest {
         assertEquals(2, items.get(1).get("idPdv"));
         assertNull(items.get(1).get("numCupom"));
     }
+
+    // ── Comportamento do motor Java (a tela usa só ele desde que o motor JavaScript saiu) ──────────────────────
+
+    private Object run(Object input, String spec) throws Exception {
+        JoltTransformResponseDto response = joltService.transform(new JoltTransformRequestDto(
+                objectMapper.readValue(objectMapper.writeValueAsString(input), Object.class),
+                objectMapper.readValue(spec, Object.class), null));
+        assertTrue(response.isSuccess(), response.getError());
+        return response.getOutput();
+    }
+
+    /** Números iguais em valor contam como iguais (1 e 1.0), o resto é comparação estrita. */
+    private static Object canonical(Object v) {
+        if (v instanceof Map<?, ?> m) {
+            Map<String, Object> out = new java.util.TreeMap<>();
+            m.forEach((k, val) -> out.put(String.valueOf(k), canonical(val)));
+            return out;
+        }
+        if (v instanceof List<?> l) return l.stream().map(JoltJavaEngineServiceTest::canonical).toList();
+        if (v instanceof Number n && n.doubleValue() == Math.rint(n.doubleValue())) return n.longValue();
+        return v;
+    }
+
+    @Test
+    @DisplayName("Layout real de clientes (PDVSync): a saída é exatamente a esperada, inclusive os tipos")
+    void realCustomerLayoutMatchesExpected() throws Exception {
+        java.nio.file.Path dir = java.nio.file.Path.of("src/test/resources/jolt-engine/clientes");
+        Object input = objectMapper.readValue(dir.resolve("input.json").toFile(), Object.class);
+        Object spec = objectMapper.readValue(dir.resolve("spec.json").toFile(), Object.class);
+        Object expected = objectMapper.readValue(dir.resolve("expected.json").toFile(), Object.class);
+
+        JoltTransformResponseDto response = joltService.transform(new JoltTransformRequestDto(input, spec, null));
+
+        assertTrue(response.isSuccess(), response.getError());
+        assertEquals(canonical(expected), canonical(response.getOutput()));
+    }
+
+    @Test
+    @DisplayName("Literal '#' é sempre texto e um modify depois converte o tipo (sexo vira número)")
+    @SuppressWarnings("unchecked")
+    void hashLiteralIsTextUntilModifyConverts() throws Exception {
+        Map<String, Object> out = (Map<String, Object>) run(Map.of("a", "M"), """
+                [{"operation":"shift","spec":{"a":{"M":{"#1":"sexo"}}}},
+                 {"operation":"modify-overwrite-beta","spec":{"sexo":"=toInteger"}}]""");
+        assertEquals(1, out.get("sexo"));
+        Map<String, Object> text = (Map<String, Object>) run(Map.of("a", "M"),
+                "[{\"operation\":\"shift\",\"spec\":{\"a\":{\"M\":{\"#1\":\"sexo\"}}}}]");
+        assertEquals("1", text.get("sexo"));
+    }
+
+    @Test
+    @DisplayName("Funções do modify que o Jolt oficial tem funcionam (leftPad, split/join, concat, divideAndRound, sum)")
+    @SuppressWarnings("unchecked")
+    void officialModifyFunctions() throws Exception {
+        Map<String, Object> out = (Map<String, Object>) run(
+                Map.of("a", "7", "cpf", "123.456.789-00", "n", List.of(1, 2, 3), "x", 10, "y", 4), """
+                [{"operation":"modify-overwrite-beta","spec":{
+                   "p":"=leftPad(@(1,a),3,'0')",
+                   "arr":"=split('\\\\D',@(1,cpf))","j":"=join('', @(1,arr))",
+                   "k":"=concat('id-',@(1,a))",
+                   "r":"=divideAndRound(2,@(1,x),@(1,y))",
+                   "t":"=intSum(@(1,n))"}}]""");
+        assertEquals("007", out.get("p"));
+        assertEquals("12345678900", out.get("j"));
+        assertEquals("id-7", out.get("k"));
+        assertEquals(2.5, ((Number) out.get("r")).doubleValue());
+        assertEquals(6, ((Number) out.get("t")).intValue());
+    }
+
+    @Test
+    @DisplayName("Funções que NÃO existem no Jolt oficial (replace, multiply, padLeft) não fazem nada: a tela mostra o que o servidor de produção faria")
+    @SuppressWarnings("unchecked")
+    void nonOfficialFunctionsDoNothing() throws Exception {
+        Map<String, Object> out = (Map<String, Object>) run(Map.of("a", "a-b", "x", 3), """
+                [{"operation":"modify-overwrite-beta","spec":{
+                   "r":"=replace(@(1,a),'-','_')","m":"=multiply(@(1,x),2)","p":"=padLeft(@(1,a),5,'0')"}}]""");
+        assertEquals("a-b", out.get("r"));
+        assertEquals(3, out.get("m"));
+        assertEquals("a-b", out.get("p"));
+    }
 }
