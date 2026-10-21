@@ -16,8 +16,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 
 /**
- * Limita o tamanho do corpo de {@code POST /api/jolt/transform}, que é público (sem JWT): o Spring não
- * limita corpo JSON por padrão. Recusa por Content-Length e também corta leitura em corpo "chunked".
+ * Limita o tamanho do corpo de {@code POST /api/jolt/transform}, que exige login mas ainda recebe corpos grandes
+ * de qualquer pessoa logada: o Spring não limita corpo JSON por padrão. Recusa por Content-Length e também corta leitura em corpo "chunked".
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 6)
