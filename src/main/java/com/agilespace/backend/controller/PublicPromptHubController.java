@@ -9,6 +9,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import com.agilespace.backend.dto.PromptFacetsDto;
+import com.agilespace.backend.dto.PromptPageDto;
+import com.agilespace.backend.repository.PromptFilter;
+
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -48,16 +52,51 @@ public class PublicPromptHubController {
         }
     }
 
+    /**
+     * Espelha o contrato de GET /api/prompts para visitantes (sempre só públicos, sem favorite/canEdit).
+     * Sem nenhum parâmetro novo (type, status, impact, tag, sort, query) mantém o formato antigo (Page do Spring).
+     */
     @GetMapping("/items")
     @Transactional(readOnly = true)
-    public ResponseEntity<Page<PublicPromptView>> list(
-            @RequestParam(value = "q", required = false) String query,
+    public ResponseEntity<Object> list(
+            @RequestParam(value = "q", required = false) String q,
+            @RequestParam(value = "query", required = false) String queryParam,
+            @RequestParam(value = "type", required = false) String type,
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "impact", required = false) String impact,
+            @RequestParam(value = "tag", required = false) String tag,
+            @RequestParam(value = "sort", required = false) String sort,
             @RequestParam(value = "page", defaultValue = "0") int page,
-            @RequestParam(value = "size", defaultValue = "20") int size) {
+            @RequestParam(value = "size", required = false) Integer size) {
+        String text = cap(queryParam != null ? queryParam : q);
+        boolean v2 = queryParam != null || type != null || status != null || impact != null || tag != null || sort != null;
+        if (!v2) {
+            PageRequest pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size == null ? 20 : size, 1), MAX_PAGE_SIZE));
+            return ResponseEntity.ok(promptService.listPublicPrompts(text, null, pageable).map(PublicPromptView::of));
+        }
+        PromptFilter filter = new PromptFilter(text, type, "public", status, impact, tag, false, null);
+        Page<Prompt> result = promptService.searchPrompts(filter, sort, null, page, Math.min(size == null ? 24 : size, MAX_PAGE_SIZE));
+        return ResponseEntity.ok(new PromptPageDto<>(
+                result.getContent().stream().map(PublicPromptView::of).toList(),
+                result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages()));
+    }
+
+    @GetMapping("/facets")
+    @Transactional(readOnly = true)
+    public ResponseEntity<PromptFacetsDto> facets(
+            @RequestParam(value = "query", required = false) String query,
+            @RequestParam(value = "type", required = false) String type,
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "impact", required = false) String impact,
+            @RequestParam(value = "tag", required = false) String tag) {
+        PromptFilter filter = new PromptFilter(cap(query), type, "public", status, impact, tag, false, null);
+        return ResponseEntity.ok(promptService.facets(filter, null));
+    }
+
+    private static String cap(String query) {
         String q = query == null ? null : query.trim();
         if (q != null && q.length() > MAX_QUERY_LENGTH) q = q.substring(0, MAX_QUERY_LENGTH);
-        PageRequest pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), MAX_PAGE_SIZE));
-        return ResponseEntity.ok(promptService.listPublicPrompts(q, null, pageable).map(PublicPromptView::of));
+        return q;
     }
 
     @GetMapping("/items/{id}")

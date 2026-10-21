@@ -15,4 +15,11 @@ public interface PromptCollectionRepository extends JpaRepository<PromptCollecti
     Page<PromptCollection> findByOwnerId(String ownerId, Pageable pageable);
     Page<PromptCollection> findByOwnerIdAndVisibility(String ownerId, String visibility, Pageable pageable);
     List<PromptCollection> findDistinctByItemsId(UUID promptId);
+
+    @org.springframework.data.jpa.repository.Query("SELECT COUNT(c) FROM PromptCollection c WHERE c.visibility = 'public'")
+    long countPublic();
+
+    @org.springframework.data.jpa.repository.Query(
+            "SELECT COUNT(c) FROM PromptCollection c WHERE c.visibility = 'public' OR c.ownerId = :ownerId")
+    long countVisibleTo(@org.springframework.data.repository.query.Param("ownerId") String ownerId);
 }

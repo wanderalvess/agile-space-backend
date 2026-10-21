@@ -45,7 +45,7 @@ class PublicPromptHubControllerTest {
     void listUsesPublicOnlyQueryAndCapsPageSize() {
         when(service.listPublicPrompts(any(), eq(null), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(prompt("public"))));
 
-        var response = controller.list("  scrum  ", 0, 5000);
+        var response = controller.list("  scrum  ", null, null, null, null, null, null, 0, 5000);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);

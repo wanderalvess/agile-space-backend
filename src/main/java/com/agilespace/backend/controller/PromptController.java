@@ -19,7 +19,14 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.agilespace.backend.dto.PromptDto;
+import com.agilespace.backend.dto.PromptFacetsDto;
+import com.agilespace.backend.dto.PromptUsageWeekDto;
+import com.agilespace.backend.dto.PromptVersionDto;
+import com.agilespace.backend.repository.PromptFilter;
+
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -47,19 +54,122 @@ public class PromptController {
         return new PromptCaller(id, (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE));
     }
 
+    private static final int DEFAULT_SEARCH_SIZE = 24;
+
+    /**
+     * Dois formatos. Com qualquer parâmetro novo (type, visibility, status, impact, tag, favorites, sort)
+     * vale o contrato novo: filtros/ordem no servidor e {content,page,size,totalElements,totalPages} de
+     * PromptDto. Sem nenhum deles (frontend antigo, que sempre manda page/size) o comportamento antigo
+     * é preservado: só públicos (ou os do autor), Page<Prompt> do Spring.
+     */
     @GetMapping
-    public ResponseEntity<Page<Prompt>> listPrompts(
+    public ResponseEntity<Object> listPrompts(
             @RequestParam(value = "query", required = false) String query,
             @RequestParam(value = "authorId", required = false) String authorId,
+            @RequestParam(value = "type", required = false) String type,
+            @RequestParam(value = "visibility", required = false) String visibility,
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "impact", required = false) String impact,
+            @RequestParam(value = "tag", required = false) String tag,
+            @RequestParam(value = "favorites", required = false) Boolean favorites,
+            @RequestParam(value = "sort", required = false) String sort,
             @PageableDefault(size = 12) Pageable pageable,
             HttpServletRequest request) {
-        return ResponseEntity.ok(promptService.listPrompts(query, authorId, caller(request), pageable));
+        PromptCaller caller = caller(request);
+        boolean v2 = type != null || visibility != null || status != null || impact != null
+                || tag != null || favorites != null || sort != null;
+        if (!v2) {
+            return ResponseEntity.ok(promptService.listPrompts(query, authorId, caller, pageable));
+        }
+        int size = request.getParameter("size") == null ? DEFAULT_SEARCH_SIZE : pageable.getPageSize();
+        PromptFilter filter = new PromptFilter(query, type, visibility, status, impact, tag,
+                Boolean.TRUE.equals(favorites), authorId);
+        return ResponseEntity.ok(promptService.searchPromptDtos(filter, sort, caller, pageable.getPageNumber(), size));
+    }
+
+    @GetMapping("/facets")
+    public ResponseEntity<PromptFacetsDto> facets(
+            @RequestParam(value = "query", required = false) String query,
+            @RequestParam(value = "authorId", required = false) String authorId,
+            @RequestParam(value = "type", required = false) String type,
+            @RequestParam(value = "visibility", required = false) String visibility,
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "impact", required = false) String impact,
+            @RequestParam(value = "tag", required = false) String tag,
+            @RequestParam(value = "favorites", required = false) Boolean favorites,
+            HttpServletRequest request) {
+        PromptFilter filter = new PromptFilter(query, type, visibility, status, impact, tag,
+                Boolean.TRUE.equals(favorites), authorId);
+        return ResponseEntity.ok(promptService.facets(filter, caller(request)));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<Prompt> getPromptById(@PathVariable("id") UUID id, HttpServletRequest request) {
+    public ResponseEntity<PromptDto> getPromptById(@PathVariable("id") UUID id, HttpServletRequest request) {
         try {
-            return ResponseEntity.ok(promptService.getVisiblePrompt(id, caller(request)));
+            return ResponseEntity.ok(promptService.getVisiblePromptDto(id, caller(request)));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    // Favoritos (pessoais, idempotentes)
+    @PostMapping("/{id}/favorite")
+    public ResponseEntity<Map<String, Boolean>> favorite(@PathVariable("id") UUID id, HttpServletRequest request) {
+        return setFavorite(id, true, request);
+    }
+
+    @DeleteMapping("/{id}/favorite")
+    public ResponseEntity<Map<String, Boolean>> unfavorite(@PathVariable("id") UUID id, HttpServletRequest request) {
+        return setFavorite(id, false, request);
+    }
+
+    private ResponseEntity<Map<String, Boolean>> setFavorite(UUID id, boolean favorite, HttpServletRequest request) {
+        try {
+            return ResponseEntity.ok(Map.of("favorite", promptService.setFavorite(id, caller(request), favorite)));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    // Versões
+    @GetMapping("/{id}/versions")
+    public ResponseEntity<List<PromptVersionDto>> versions(@PathVariable("id") UUID id, HttpServletRequest request) {
+        try {
+            return ResponseEntity.ok(promptService.listVersions(id, caller(request)));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @GetMapping("/{id}/versions/{number}")
+    public ResponseEntity<PromptVersionDto> version(@PathVariable("id") UUID id, @PathVariable("number") int number,
+                                                    HttpServletRequest request) {
+        try {
+            return ResponseEntity.ok(promptService.getVersion(id, number, caller(request)));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @PostMapping("/{id}/versions/{number}/restore")
+    public ResponseEntity<PromptDto> restoreVersion(@PathVariable("id") UUID id, @PathVariable("number") int number,
+                                                    HttpServletRequest request) {
+        try {
+            PromptCaller caller = caller(request);
+            promptService.restoreVersion(id, number, caller);
+            return ResponseEntity.ok(promptService.getVisiblePromptDto(id, caller));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    // Uso por semana
+    @GetMapping("/{id}/usage")
+    public ResponseEntity<List<PromptUsageWeekDto>> usage(@PathVariable("id") UUID id,
+                                                          @RequestParam(value = "weeks", defaultValue = "8") int weeks,
+                                                          HttpServletRequest request) {
+        try {
+            return ResponseEntity.ok(promptService.usageByWeek(id, weeks, caller(request)));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }
