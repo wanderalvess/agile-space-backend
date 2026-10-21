@@ -698,7 +698,7 @@ public class PromptService {
     }
 
     /** Detalhe anônimo: só coleção pública; privada e inexistente respondem igual (IllegalArgumentException). */
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, noRollbackFor = IllegalArgumentException.class)
     public PromptCollection getPublicCollection(UUID id) {
         PromptCollection c = getCollectionById(id);
         if (!PUBLIC.equals(c.getVisibility())) {
@@ -707,7 +707,7 @@ public class PromptService {
         return viewOf(c, null);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, noRollbackFor = IllegalArgumentException.class)
     public PromptCollection getCollectionById(UUID id) {
         return promptCollectionRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Collection not found with id: " + id));

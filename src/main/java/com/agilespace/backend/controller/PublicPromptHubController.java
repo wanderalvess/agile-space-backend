@@ -83,7 +83,7 @@ public class PublicPromptHubController {
     }
 
     @GetMapping("/collections/{id}")
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, noRollbackFor = IllegalArgumentException.class)
     public ResponseEntity<PublicCollectionView> getCollection(@PathVariable("id") UUID id) {
         try {
             return ResponseEntity.ok(PublicCollectionView.of(promptService.getPublicCollection(id)));
