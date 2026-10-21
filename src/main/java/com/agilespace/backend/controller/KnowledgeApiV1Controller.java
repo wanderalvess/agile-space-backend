@@ -38,7 +38,7 @@ public class KnowledgeApiV1Controller {
             @PageableDefault(size = 20) Pageable pageable,
             HttpServletRequest request) {
         ApiKeyAccess.requireScope(request, ApiKeyScope.KNOWLEDGE_READ);
-        // status=null: listDocuments já exclui "deleted" por padrão nesse caso (ver KnowledgeService).
+        // status=null e sem usuário: só publicado/indexado (rascunho, arquivado e lixeira ficam de fora; ver KnowledgeService).
         return ResponseEntity.ok(knowledgeService.listDocuments(query, null, null, pageable));
     }
 
@@ -47,8 +47,8 @@ public class KnowledgeApiV1Controller {
         ApiKeyAccess.requireScope(request, ApiKeyScope.KNOWLEDGE_READ);
         try {
             KnowledgeDocument doc = knowledgeService.getDocumentById(id);
-            // Documento na lixeira não é servido pela API pública.
-            return "deleted".equals(doc.getStatus()) ? ResponseEntity.notFound().build() : ResponseEntity.ok(doc);
+            // Lixeira, rascunho e arquivado não são servidos pela API pública (nem pelo MCP).
+            return KnowledgeService.isPubliclyReadable(doc) ? ResponseEntity.ok(doc) : ResponseEntity.notFound().build();
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }
