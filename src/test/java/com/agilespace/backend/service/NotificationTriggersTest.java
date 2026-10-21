@@ -157,6 +157,34 @@ class NotificationTriggersTest {
     }
 
     @Test
+    @DisplayName("Resposta do admin em chamado: avisa só o solicitante, com protocolo no título e link do chamado")
+    void supportReplyNotifiesRequester() {
+        java.util.UUID id = java.util.UUID.fromString("11111111-1111-1111-1111-111111111111");
+
+        triggers.supportTicketReplied(id, "SUP-0042", "Cronograma não carrega", "u1", "r1", "admin1");
+
+        verify(notificationService).notifyUsers(eq(List.of("u1")),
+                argThat(d -> "SUPPORT_REPLY".equals(d.kind()) && "Seu chamado SUP-0042 recebeu resposta".equals(d.title())
+                        && ("/support?ticket=" + id).equals(d.link()) && "SUPPORT_REPLY:r1".equals(d.dedupeKey())
+                        && d.text().contains("Cronograma não carrega")),
+                eq(UserSignalService.NOTIFICATION));
+
+        // quem respondeu nunca é avisado de resposta própria
+        triggers.supportTicketReplied(id, "SUP-0042", "x", "admin1", "r2", "admin1");
+        verify(notificationService, times(1)).notifyUsers(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("Chamado aberto pelo solicitante retira os avisos de resposta daquele chamado")
+    void supportReadRetiresReplyNotices() {
+        java.util.UUID id = java.util.UUID.fromString("11111111-1111-1111-1111-111111111111");
+
+        triggers.supportTicketRead(id, "u1");
+
+        verify(notificationService).markReadByLink("u1", "SUPPORT_REPLY", "/support?ticket=" + id);
+    }
+
+    @Test
     @DisplayName("Pedido de vínculo decidido: aprovado leva ao /painel, recusado ao /onboarding com o motivo")
     void linkRequestDecidedNotifiesRequester() {
         triggers.linkRequestDecided("lr1", "ana", true, "DDWMISSI", null, "adm");

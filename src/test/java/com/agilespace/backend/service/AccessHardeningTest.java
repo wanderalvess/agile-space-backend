@@ -94,7 +94,7 @@ class AccessHardeningTest {
         SupportTicketRepository tickets = mock(SupportTicketRepository.class);
         SupportTicketReplyRepository replies = mock(SupportTicketReplyRepository.class);
         when(tickets.save(any(SupportTicket.class))).thenAnswer(i -> i.getArgument(0));
-        SupportTicketService service = new SupportTicketService(tickets, replies);
+        SupportTicketService service = new SupportTicketService(tickets, replies, mock(NotificationTriggers.class));
 
         SupportTicket body = SupportTicket.builder().id(UUID.randomUUID()).subject(" Erro ").message("Detalhe")
                 .status("CLOSED").requesterId("vitima").build();
@@ -117,7 +117,7 @@ class AccessHardeningTest {
         SupportTicketRepository tickets = mock(SupportTicketRepository.class);
         UUID id = UUID.randomUUID();
         when(tickets.findById(id)).thenReturn(Optional.of(SupportTicket.builder().id(id).subject("s").message("m").build()));
-        SupportTicketService service = new SupportTicketService(tickets, mock(SupportTicketReplyRepository.class));
+        SupportTicketService service = new SupportTicketService(tickets, mock(SupportTicketReplyRepository.class), mock(NotificationTriggers.class));
         assertThrows(ResponseStatusException.class, () -> service.updateStatus(id, "QUALQUER-COISA-MUITO-LONGA"));
     }
 

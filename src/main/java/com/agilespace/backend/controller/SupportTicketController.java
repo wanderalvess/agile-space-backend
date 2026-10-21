@@ -84,6 +84,39 @@ public class SupportTicketController {
         }
     }
 
+    /** O solicitante encerra o próprio chamado (outro usuário, inclusive ADMIN, recebe 404). */
+    @PatchMapping("/{id}/close")
+    public ResponseEntity<SupportTicket> closeTicket(HttpServletRequest request, @PathVariable UUID id) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        try {
+            return ResponseEntity.ok(supportTicketService.closeTicket(id, callerId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /** O solicitante reabre o próprio chamado fechado (aberto = 409; outro usuário = 404). */
+    @PatchMapping("/{id}/reopen")
+    public ResponseEntity<SupportTicket> reopenTicket(HttpServletRequest request, @PathVariable UUID id) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        try {
+            return ResponseEntity.ok(supportTicketService.reopenTicket(id, callerId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /** O solicitante abriu o chamado: marca as respostas do time como lidas. */
+    @PostMapping("/{id}/read")
+    public ResponseEntity<SupportTicket> markRead(HttpServletRequest request, @PathVariable UUID id) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        try {
+            return ResponseEntity.ok(supportTicketService.markRead(id, callerId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
     @GetMapping("/{id}/replies")
     public ResponseEntity<List<SupportTicketReply>> getReplies(HttpServletRequest request, @PathVariable UUID id) {
         String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
