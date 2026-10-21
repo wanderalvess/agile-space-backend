@@ -1,10 +1,18 @@
 {$DOMAIN} {
 	# Rotas de API que existem SÓ no Next.js (app/api/**). Precisam vir antes do /api/* abaixo, senão caem no
 	# Spring e dão 404 (o backend não tem esses caminhos): chat de IA, embeddings/ingestão do conhecimento,
-	# TDN, mocks e llms.
-	@nextApi path /api/ai/* /api/llms /api/mock-config /api/mock/* /api/tdn/* /api/knowledge/embed /api/knowledge/ingest-pdf /api/knowledge/sync-manuals /api/v1/knowledge/docs/*/download
+	# TDN e llms.
+	@nextApi path /api/ai/* /api/llms /api/tdn/* /api/knowledge/embed /api/knowledge/ingest-pdf /api/knowledge/sync-manuals /api/v1/knowledge/docs/*/download
 	handle @nextApi {
 		reverse_proxy frontend:9002
+	}
+
+	# Servidor MCP embutido no Spring (SSE em /mcp/sse, mensagens em /mcp/message). A autenticacao e feita pelo
+	# ApiKeyAuthenticationFilter (cabecalho X-Api-Key; sem chave valida = 401). flush_interval -1 desliga o buffer\n	# para o fluxo SSE chegar em tempo real.
+	handle /mcp/* {
+		reverse_proxy backend:8002 {
+			flush_interval -1
+		}
 	}
 
 	# API REST, WebSocket, docs e actuator vão pro backend Spring Boot.
