@@ -60,6 +60,13 @@ public class JiraDateFieldResolver {
 
     public void clearCache() { cache.clear(); }
 
+    /** Resolução já em cache (sem chamar o Jira), ou nulo se não houver/expirou. */
+    public Resolution peek(String domain) {
+        String key = domain == null ? "" : domain.trim().toLowerCase(Locale.ROOT);
+        Cached hit = cache.get(key);
+        return hit != null && hit.expiresAt() > clock.getAsLong() ? hit.resolution() : null;
+    }
+
     /** Minúsculas, sem acento, sem espaços nas pontas e com espaços internos colapsados. */
     static String normalizeName(String name) {
         if (name == null) return "";
