@@ -36,6 +36,12 @@ public interface NotificationRepository extends JpaRepository<Notification, Stri
     @Query("SELECT DISTINCT n.userId FROM Notification n WHERE n.dedupeKey = :key AND n.readAt IS NULL")
     List<String> findUnreadUserIdsByDedupeKey(@Param("key") String key);
 
+    /** Marca como lidas as notificações de uma pessoa que apontam para este link (ex.: respostas de um chamado). */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("UPDATE Notification n SET n.readAt = :now WHERE n.userId = :userId AND n.kind = :kind AND n.link = :link AND n.readAt IS NULL")
+    int markReadByUserKindAndLink(@Param("userId") String userId, @Param("kind") String kind, @Param("link") String link,
+                                  @Param("now") LocalDateTime now);
+
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("UPDATE Notification n SET n.readAt = :now WHERE n.dedupeKey = :key AND n.readAt IS NULL")
     int markReadByDedupeKey(@Param("key") String key, @Param("now") LocalDateTime now);

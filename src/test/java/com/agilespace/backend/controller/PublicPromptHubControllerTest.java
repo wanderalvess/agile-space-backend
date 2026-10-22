@@ -45,7 +45,7 @@ class PublicPromptHubControllerTest {
     void listUsesPublicOnlyQueryAndCapsPageSize() {
         when(service.listPublicPrompts(any(), eq(null), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(prompt("public"))));
 
-        var response = controller.list("  scrum  ", 0, 5000);
+        var response = controller.list("  scrum  ", null, null, null, null, null, null, 0, 5000);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
@@ -76,6 +76,36 @@ class PublicPromptHubControllerTest {
 
         assertEquals(HttpStatus.NOT_FOUND, controller.get(priv.getId()).getStatusCode());
         assertEquals(HttpStatus.NOT_FOUND, controller.get(missing).getStatusCode());
+    }
+
+    @Test
+    void listCollectionsReturnsPublicViewWithoutOwnerIdAndCapsSize() {
+        Prompt p = prompt("public");
+        com.agilespace.backend.domain.PromptCollection c = com.agilespace.backend.domain.PromptCollection.builder()
+                .id(UUID.randomUUID()).name("Trilha").visibility("public").ownerId("uid-interno").ownerName("Ana")
+                .itemCount(3).hiddenCount(2).canEdit(true).build();
+        c.getItems().add(p);
+        when(service.listCollections(eq("public"), eq(null), eq(null), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(c)));
+
+        var response = controller.listCollections(0, 5000);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(service).listCollections(eq("public"), eq(null), eq(null), captor.capture());
+        assertEquals(200, captor.getValue().getPageSize());
+        var view = response.getBody().content().get(0);
+        assertEquals("", view.ownerId());
+        assertEquals(3, view.itemCount());
+        assertEquals(2, view.hiddenCount());
+        assertFalse(view.canEdit());
+        assertEquals(1, view.items().size());
+    }
+
+    @Test
+    void getCollectionIs404WhenServiceRejects() {
+        UUID id = UUID.randomUUID();
+        when(service.getPublicCollection(id)).thenThrow(new IllegalArgumentException("nope"));
+        assertEquals(HttpStatus.NOT_FOUND, controller.getCollection(id).getStatusCode());
     }
 
     @Test

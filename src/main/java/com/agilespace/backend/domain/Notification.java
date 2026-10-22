@@ -22,6 +22,8 @@ public class Notification {
     public static final String ANNOUNCEMENT = "ANNOUNCEMENT";
     /** Pedido de vínculo criado (para admins) ou decidido (para quem pediu). */
     public static final String LINK_REQUEST = "LINK_REQUEST";
+    /** O time (admin) respondeu um chamado de suporte do usuário. */
+    public static final String SUPPORT_REPLY = "SUPPORT_REPLY";
 
     @Id
     @Column(length = 36)

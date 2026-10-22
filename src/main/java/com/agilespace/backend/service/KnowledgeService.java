@@ -80,7 +80,25 @@ public class KnowledgeService {
     static final int MAX_CONVERSATION_CHARS = 2_000_000;
     public static final int MAX_EMBEDDING_DIMS = 2048;
     static final long MAX_TOKENS_PER_CALL = 200_000L;
-    static final Set<String> DOC_STATUS = Set.of("indexed", "published", "deleted");
+    static final String STATUS_PUBLISHED = "published";
+    static final String STATUS_INDEXED = "indexed";
+    static final String STATUS_DRAFT = "draft";
+    static final String STATUS_ARCHIVED = "archived";
+    static final String STATUS_DELETED = "deleted";
+    static final Set<String> DOC_STATUS = Set.of(STATUS_INDEXED, STATUS_PUBLISHED, STATUS_DRAFT, STATUS_ARCHIVED, STATUS_DELETED);
+
+    /**
+     * Estados "listáveis": os ÚNICOS que entram na lista geral, na busca textual, na busca semântica, no contexto
+     * do assistente (RAG), no servidor MCP e na API pública, para qualquer pessoa. Lista explícita (e não "tudo
+     * menos lixeira") para que um estado novo nunca vaze para as buscas por esquecimento.
+     * <ul>
+     *   <li>{@code draft} (Rascunho): só o autor e ADMIN veem, listam e leem; para os demais o id responde 404.</li>
+     *   <li>{@code archived} (Arquivado): fora de listas/buscas/RAG/MCP para todos; segue legível por id e aparece
+     *       na visão "Arquivados" só para quem pode editar o documento (autor, liderança, ADMIN).</li>
+     *   <li>{@code deleted} (lixeira) e {@code indexed} (importado do TDN) mantêm o comportamento anterior.</li>
+     * </ul>
+     */
+    static final List<String> LISTED_STATUSES = List.of(STATUS_PUBLISHED, STATUS_INDEXED);
 
     // Overload preservado para compatibilidade de origem com chamadas existentes sem filtro de status.
     @Transactional(readOnly = true)
@@ -88,17 +106,38 @@ public class KnowledgeService {
         return listDocuments(query, tags, null, pageable);
     }
 
+    /** Visão pública (sem usuário): nunca devolve rascunhos nem arquivados. */
     @Transactional(readOnly = true)
     public Page<KnowledgeDocument> listDocuments(String query, Set<String> tags, String status, Pageable pageable) {
+        return listDocuments(query, tags, status, pageable, null, false);
+    }
+
+    /**
+     * Lista com a visibilidade de quem chama. {@code status} opcional: vazio/{@code published}/{@code indexed} →
+     * lista geral; {@code draft} → rascunhos do próprio autor (ADMIN: todos); {@code archived} → arquivados que
+     * quem chama pode editar; {@code deleted} → lixeira (como antes).
+     */
+    @Transactional(readOnly = true)
+    public Page<KnowledgeDocument> listDocuments(String query, Set<String> tags, String status, Pageable pageable,
+                                                 String callerId, boolean isAdmin) {
         // Sem ordenação pedida, a página vinha em ordem arbitrária do banco: mais recentes primeiro.
         if (pageable.isPaged() && pageable.getSort().isUnsorted()) {
             pageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), Sort.by(Sort.Direction.DESC, "updatedAt"));
         }
+        String wanted = status == null ? "" : status.trim();
+        boolean hasQuery = query != null && !query.trim().isEmpty();
         Page<KnowledgeDocument> docsPage;
-        if (query != null && !query.trim().isEmpty()) {
+        if (STATUS_DRAFT.equals(wanted) || STATUS_ARCHIVED.equals(wanted) || (STATUS_DELETED.equals(wanted) && hasQuery)) {
+            docsPage = restrictedList(wanted, hasQuery ? query.trim() : null, pageable, callerId, isAdmin);
+        } else if (STATUS_DELETED.equals(wanted)) {
+            docsPage = knowledgeRepository.findByStatus(STATUS_DELETED, pageable);
+        } else if (!wanted.isEmpty() && !LISTED_STATUSES.contains(wanted)) {
+            docsPage = new PageImpl<>(List.of(), pageable, 0);
+        } else if (hasQuery) {
+            List<String> statuses = wanted.isEmpty() ? LISTED_STATUSES : List.of(wanted);
             String trimmedQuery = query.trim();
             // Tenta busca exata inicial
-            docsPage = knowledgeRepository.searchActive(trimmedQuery, "deleted", pageable);
+            docsPage = knowledgeRepository.searchByStatuses(trimmedQuery, statuses, pageable);
 
             // Se devolver poucos/nenhum resultado e a busca tiver múltiplas palavras, extrai palavras-chave
             if (docsPage.getContent().size() < 3 && trimmedQuery.contains(" ")) {
@@ -108,7 +147,7 @@ public class KnowledgeService {
                         .collect(Collectors.toList());
 
                 if (!keywords.isEmpty()) {
-                    List<KnowledgeDocument> allDocs = knowledgeRepository.findByStatusNot("deleted", Pageable.unpaged()).getContent();
+                    List<KnowledgeDocument> allDocs = knowledgeRepository.findByStatusIn(statuses, Pageable.unpaged()).getContent();
                     List<KnowledgeDocument> matched = allDocs.stream()
                             .map(doc -> {
                                 String text = (doc.getTitle() + " " + doc.getContent() + " " + doc.getCategory() + " " + doc.getFullPath()).toLowerCase();
@@ -128,10 +167,10 @@ public class KnowledgeService {
                     }
                 }
             }
-        } else if (status != null && !status.trim().isEmpty()) {
-            docsPage = knowledgeRepository.findByStatus(status, pageable);
+        } else if (!wanted.isEmpty()) {
+            docsPage = knowledgeRepository.findByStatus(wanted, pageable);
         } else {
-            docsPage = knowledgeRepository.findByStatusNot("deleted", pageable);
+            docsPage = knowledgeRepository.findByStatusIn(LISTED_STATUSES, pageable);
         }
 
         // Se houver filtro de tags, filtramos na memória
@@ -147,7 +186,8 @@ public class KnowledgeService {
 
     @Transactional(readOnly = true)
     public Page<KnowledgeDocument> semanticSearch(float[] queryEmbedding, Pageable pageable) {
-        List<KnowledgeDocument> allDocs = knowledgeRepository.findByStatusNot("deleted", Pageable.unpaged()).getContent();
+        // Só publicados/indexados: rascunho, arquivado e lixeira nunca entram na busca semântica (nem no RAG do assistente).
+        List<KnowledgeDocument> allDocs = knowledgeRepository.findByStatusIn(LISTED_STATUSES, Pageable.unpaged()).getContent();
 
         List<java.util.AbstractMap.SimpleEntry<KnowledgeDocument, Float>> scored = allDocs.stream()
                 .filter(doc -> doc.getEmbedding() != null && doc.getEmbedding().length == queryEmbedding.length)
@@ -173,10 +213,69 @@ public class KnowledgeService {
         return sum;
     }
 
+    /**
+     * Visões "Rascunhos" e "Arquivados" (e busca na lixeira): conjuntos pequenos, filtrados e paginados em memória
+     * porque a visibilidade depende de quem chama (autor/liderança), o que não cabe numa query simples.
+     */
+    private Page<KnowledgeDocument> restrictedList(String status, String query, Pageable pageable, String callerId, boolean isAdmin) {
+        List<KnowledgeDocument> all = knowledgeRepository.findByStatus(status, Pageable.unpaged()).getContent();
+        Map<String, Boolean> leadership = new HashMap<>();
+        String q = query == null ? null : query.toLowerCase();
+        List<String> keywords = q == null ? List.of() : java.util.Arrays.stream(q.split("\\s+"))
+                .map(w -> w.replaceAll("[^a-zA-Z0-9\\-_]", "")).filter(w -> w.length() > 1 && !STOP_WORDS.contains(w)).toList();
+        List<KnowledgeDocument> visible = all.stream()
+                .filter(d -> switch (status) {
+                    case STATUS_DRAFT -> isDraftOwnerOrAdmin(d, callerId, isAdmin);
+                    case STATUS_ARCHIVED -> canEdit(d, callerId, isAdmin, leadership);
+                    default -> true;
+                })
+                .filter(d -> {
+                    if (q == null) return true;
+                    String text = (nullToEmpty(d.getTitle()) + " " + nullToEmpty(d.getContent()) + " "
+                            + nullToEmpty(d.getCategory()) + " " + nullToEmpty(d.getFullPath())).toLowerCase();
+                    return text.contains(q) || keywords.stream().anyMatch(text::contains);
+                })
+                .sorted(java.util.Comparator.comparing(KnowledgeDocument::getUpdatedAt,
+                        java.util.Comparator.nullsLast(java.util.Comparator.<LocalDateTime>reverseOrder())))
+                .collect(Collectors.toList());
+        if (pageable.isUnpaged()) {
+            return new PageImpl<>(visible, pageable, visible.size());
+        }
+        int start = (int) Math.min(pageable.getOffset(), visible.size());
+        int end = Math.min(start + pageable.getPageSize(), visible.size());
+        return new PageImpl<>(visible.subList(start, end), pageable, visible.size());
+    }
+
+    private static boolean isDraftOwnerOrAdmin(KnowledgeDocument doc, String callerId, boolean isAdmin) {
+        return isAdmin || (callerId != null && !callerId.isBlank() && callerId.equals(doc.getAuthorId()));
+    }
+
+    /** Lança "não encontrado" (vira 404, sem revelar que existe) para rascunho de outra pessoa. */
+    private void requireReadable(KnowledgeDocument doc, String callerId, boolean isAdmin) {
+        if (STATUS_DRAFT.equals(doc.getStatus()) && !isDraftOwnerOrAdmin(doc, callerId, isAdmin)) {
+            throw new IllegalArgumentException("Document not found with id: " + doc.getId());
+        }
+    }
+
+    /** O que a API pública (chave de API) e o MCP podem servir: nem rascunho, nem arquivado, nem lixeira. */
+    public static boolean isPubliclyReadable(KnowledgeDocument doc) {
+        String s = doc.getStatus();
+        return !STATUS_DELETED.equals(s) && !STATUS_DRAFT.equals(s) && !STATUS_ARCHIVED.equals(s);
+    }
+
+    /** Leitura sem checagem de visibilidade — uso interno; os endpoints usam {@link #getReadableDocument}. */
     @Transactional(readOnly = true)
     public KnowledgeDocument getDocumentById(UUID id) {
         return knowledgeRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Document not found with id: " + id));
+    }
+
+    /** Leitura por id respeitando o rascunho (só autor/ADMIN); arquivado continua legível por link direto. */
+    @Transactional(readOnly = true)
+    public KnowledgeDocument getReadableDocument(UUID id, String callerId, boolean isAdmin) {
+        KnowledgeDocument doc = getDocumentById(id);
+        requireReadable(doc, callerId, isAdmin);
+        return doc;
     }
 
     @Transactional
@@ -248,6 +347,7 @@ public class KnowledgeService {
     public KnowledgeDocument updateDocument(UUID id, KnowledgeDocument updatedDoc, String callerId, boolean isAdmin) {
         validateDocument(updatedDoc);
         KnowledgeDocument existing = getDocumentById(id);
+        requireReadable(existing, callerId, isAdmin);
         // Editar, mover para a lixeira e restaurar: só autor, liderança da squad do documento ou ADMIN.
         requireCanEdit(existing, callerId, isAdmin);
         String newStatus = updatedDoc.getStatus() != null ? updatedDoc.getStatus() : existing.getStatus();
@@ -413,7 +513,12 @@ public class KnowledgeService {
 
     @Transactional
     public List<KnowledgeVersionDto> listVersions(UUID id) {
-        KnowledgeDocument doc = getDocumentById(id);
+        return listVersions(id, null, true);
+    }
+
+    @Transactional
+    public List<KnowledgeVersionDto> listVersions(UUID id, String callerId, boolean isAdmin) {
+        KnowledgeDocument doc = getReadableDocument(id, callerId, isAdmin);
         ensureBaseline(doc);
         List<KnowledgeDocumentVersion> versions = versionRepository.findByDocumentIdOrderByVersionNumberDesc(id);
         int current = versions.isEmpty() ? 0 : versions.get(0).getVersionNumber();
@@ -423,7 +528,12 @@ public class KnowledgeService {
 
     @Transactional
     public KnowledgeVersionDto getVersion(UUID id, int number) {
-        KnowledgeDocument doc = getDocumentById(id);
+        return getVersion(id, number, null, true);
+    }
+
+    @Transactional
+    public KnowledgeVersionDto getVersion(UUID id, int number, String callerId, boolean isAdmin) {
+        KnowledgeDocument doc = getReadableDocument(id, callerId, isAdmin);
         ensureBaseline(doc);
         KnowledgeDocumentVersion v = versionRepository.findByDocumentIdAndVersionNumber(id, number)
                 .orElseThrow(() -> new IllegalArgumentException("Version not found: " + number));
@@ -438,6 +548,7 @@ public class KnowledgeService {
     @Transactional
     public KnowledgeDocument restoreVersion(UUID id, int number, String callerId, boolean isAdmin) {
         KnowledgeDocument doc = getDocumentById(id);
+        requireReadable(doc, callerId, isAdmin);
         requireCanEdit(doc, callerId, isAdmin);
         ensureBaseline(doc);
         KnowledgeDocumentVersion v = versionRepository.findByDocumentIdAndVersionNumber(id, number)
@@ -497,6 +608,7 @@ public class KnowledgeService {
     @Transactional
     public KnowledgeDocument deleteDocument(UUID id, String callerId, boolean isAdmin) {
         KnowledgeDocument doc = getDocumentById(id);
+        requireReadable(doc, callerId, isAdmin);
         requireCanEdit(doc, callerId, isAdmin);
         doc.setStatus("deleted");
         doc.setDeletedAt(LocalDateTime.now());
@@ -506,7 +618,12 @@ public class KnowledgeService {
 
     @Transactional
     public KnowledgeDocument incrementViews(UUID id) {
-        KnowledgeDocument doc = getDocumentById(id);
+        return incrementViews(id, null, true);
+    }
+
+    @Transactional
+    public KnowledgeDocument incrementViews(UUID id, String callerId, boolean isAdmin) {
+        KnowledgeDocument doc = getReadableDocument(id, callerId, isAdmin);
         doc.setViews(doc.getViews() + 1);
         return knowledgeRepository.save(doc);
     }

@@ -36,6 +36,10 @@ class PromptServiceTest {
     @Mock private PromptCommentRepository commentRepository;
     @Mock private PromptCollectionRepository promptCollectionRepository;
     @Mock private com.agilespace.backend.repository.UserRepository userRepository;
+    @Mock private com.agilespace.backend.repository.PromptFavoriteRepository favoriteRepository;
+    @Mock private com.agilespace.backend.repository.PromptVersionRepository versionRepository;
+    @Mock private com.agilespace.backend.repository.PromptUsageEventRepository usageRepository;
+    @Mock private com.agilespace.backend.repository.PromptQueryRepository queryRepository;
 
     private final PromptCaller owner = new PromptCaller("user-123", "MEMBER");
     private final PromptCaller stranger = new PromptCaller("intruso", "MEMBER");
@@ -167,7 +171,7 @@ class PromptServiceTest {
                     () -> service.deletePrompt(promptId, stranger));
             assertThrows(org.springframework.web.server.ResponseStatusException.class,
                     () -> service.updatePrompt(promptId, Prompt.builder().title("x").build(), stranger));
-            verify(promptRepository, never()).delete(any());
+            verify(promptRepository, never()).delete(any(Prompt.class));
 
             service.deletePrompt(promptId, admin);
             verify(promptRepository).delete(prompt);
@@ -229,6 +233,48 @@ class PromptServiceTest {
 
             assertEquals(List.of(pub), view.getItems());
             assertEquals(2, collection.getItems().size());
+        }
+
+        @Test
+        @DisplayName("Coleção traz itemCount, hiddenCount e canEdit conforme quem lê")
+        void shouldExposeCountsAndCanEdit() {
+            UUID id = UUID.randomUUID();
+            Prompt pub = Prompt.builder().id(UUID.randomUUID()).visibility("public").authorId("a").build();
+            Prompt priv = Prompt.builder().id(UUID.randomUUID()).visibility("private").authorId("a").build();
+            PromptCollection c = PromptCollection.builder().id(id).visibility("public").ownerId("a").build();
+            c.getItems().add(pub);
+            c.getItems().add(priv);
+            when(promptCollectionRepository.findById(id)).thenReturn(Optional.of(c));
+
+            PromptCollection asStranger = service.getCollectionFor(id, stranger);
+            assertEquals(2, asStranger.getItemCount());
+            assertEquals(1, asStranger.getHiddenCount());
+            assertFalse(asStranger.getCanEdit());
+
+            PromptCollection asAdmin = service.getCollectionFor(id, admin);
+            assertEquals(0, asAdmin.getHiddenCount());
+            assertTrue(asAdmin.getCanEdit());
+        }
+
+        @Test
+        @DisplayName("Detalhe público: anônimo vê só itens públicos, sem edição; privada vira inexistente")
+        void shouldServePublicCollectionAnonymously() {
+            UUID id = UUID.randomUUID();
+            UUID privId = UUID.randomUUID();
+            Prompt pub = Prompt.builder().id(UUID.randomUUID()).visibility("public").authorId("a").build();
+            Prompt priv = Prompt.builder().id(UUID.randomUUID()).visibility("private").authorId("a").build();
+            PromptCollection c = PromptCollection.builder().id(id).visibility("public").ownerId("a").build();
+            c.getItems().add(pub);
+            c.getItems().add(priv);
+            when(promptCollectionRepository.findById(id)).thenReturn(Optional.of(c));
+            when(promptCollectionRepository.findById(privId)).thenReturn(Optional.of(
+                    PromptCollection.builder().id(privId).visibility("private").ownerId("a").build()));
+
+            PromptCollection view = service.getPublicCollection(id);
+            assertEquals(List.of(pub), view.getItems());
+            assertEquals(1, view.getHiddenCount());
+            assertFalse(view.getCanEdit());
+            assertThrows(IllegalArgumentException.class, () -> service.getPublicCollection(privId));
         }
 
         @Test

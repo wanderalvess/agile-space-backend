@@ -3,6 +3,20 @@ package com.agilespace.backend.service;
 import com.agilespace.backend.domain.Prompt;
 import com.agilespace.backend.domain.PromptComment;
 import com.agilespace.backend.domain.PromptCollection;
+import com.agilespace.backend.domain.PromptFavorite;
+import com.agilespace.backend.domain.PromptUsageEvent;
+import com.agilespace.backend.domain.PromptVersion;
+import com.agilespace.backend.dto.PromptDto;
+import com.agilespace.backend.dto.PromptFacetsDto;
+import com.agilespace.backend.dto.PromptPageDto;
+import com.agilespace.backend.dto.PromptUsageWeekDto;
+import com.agilespace.backend.dto.PromptVersionDto;
+import com.agilespace.backend.repository.PromptFavoriteRepository;
+import com.agilespace.backend.repository.PromptFilter;
+import com.agilespace.backend.repository.PromptQueryRepository;
+import com.agilespace.backend.repository.PromptSpecs;
+import com.agilespace.backend.repository.PromptUsageEventRepository;
+import com.agilespace.backend.repository.PromptVersionRepository;
 import com.agilespace.backend.repository.PromptCommentRepository;
 import com.agilespace.backend.repository.PromptCollectionRepository;
 import com.agilespace.backend.repository.PromptRepository;
@@ -17,7 +31,19 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.time.DayOfWeek;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.Consumer;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
@@ -37,6 +63,14 @@ public class PromptService {
     private final PromptCommentRepository commentRepository;
     private final PromptCollectionRepository promptCollectionRepository;
     private final UserRepository userRepository;
+    private final PromptFavoriteRepository favoriteRepository;
+    private final PromptVersionRepository versionRepository;
+    private final PromptUsageEventRepository usageRepository;
+    private final PromptQueryRepository queryRepository;
+
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final int MAX_SEARCH_PAGE_SIZE = 100;
+    private static final int MAX_USAGE_WEEKS = 52;
 
     // ───────────── Regras de acesso ─────────────
 
@@ -156,7 +190,9 @@ public class PromptService {
         // Reset counters for new prompt
         prompt.setUseCount(0);
         prompt.setForkCount(0);
-        return promptRepository.save(prompt);
+        Prompt saved = promptRepository.save(prompt);
+        recordVersion(saved, saved == null ? null : saved.getAuthorId(), saved == null ? null : saved.getAuthorName());
+        return saved;
     }
 
     @Transactional
@@ -178,21 +214,21 @@ public class PromptService {
         }
 
         if (existingOpt.isPresent()) {
-            Prompt existing = existingOpt.get();
-            existing.setContent(skillPrompt.getContent());
-            if (skillPrompt.getDescription() != null && !skillPrompt.getDescription().isBlank()) {
-                existing.setDescription(skillPrompt.getDescription());
-            }
-            if (skillPrompt.getTags() != null && !skillPrompt.getTags().isEmpty()) {
-                existing.setTags(skillPrompt.getTags());
-            }
-            if (skillPrompt.getVisibility() != null) {
-                existing.setVisibility(normalizeVisibility(skillPrompt.getVisibility()));
-            }
-            if (skillPrompt.getStatus() != null) {
-                existing.setStatus(skillPrompt.getStatus());
-            }
-            return promptRepository.save(existing);
+            return mutateAndVersion(existingOpt.get(), existing -> {
+                existing.setContent(skillPrompt.getContent());
+                if (skillPrompt.getDescription() != null && !skillPrompt.getDescription().isBlank()) {
+                    existing.setDescription(skillPrompt.getDescription());
+                }
+                if (skillPrompt.getTags() != null && !skillPrompt.getTags().isEmpty()) {
+                    existing.setTags(skillPrompt.getTags());
+                }
+                if (skillPrompt.getVisibility() != null) {
+                    existing.setVisibility(normalizeVisibility(skillPrompt.getVisibility()));
+                }
+                if (skillPrompt.getStatus() != null) {
+                    existing.setStatus(skillPrompt.getStatus());
+                }
+            }, skillPrompt.getAuthorId(), skillPrompt.getAuthorName(), false);
         }
 
         return createPrompt(skillPrompt);
@@ -239,19 +275,20 @@ public class PromptService {
     public Prompt updatePrompt(UUID id, Prompt updatedPrompt, PromptCaller caller) {
         Prompt existing = getVisiblePrompt(id, caller);
         requireManage(existing.getAuthorId(), caller);
-        existing.setTitle(updatedPrompt.getTitle() == null ? null : updatedPrompt.getTitle().trim());
-        existing.setDescription(updatedPrompt.getDescription());
-        existing.setContent(updatedPrompt.getContent());
-        existing.setType(updatedPrompt.getType());
-        existing.setVisibility(normalizeVisibility(updatedPrompt.getVisibility()));
-        existing.setStatus(updatedPrompt.getStatus());
-        existing.setImpact(updatedPrompt.getImpact());
-        existing.setBusinessGoal(updatedPrompt.getBusinessGoal());
-        existing.setTargetAudience(updatedPrompt.getTargetAudience());
-        existing.setGemLink(updatedPrompt.getGemLink());
-        existing.setArchitectureLink(updatedPrompt.getArchitectureLink());
-        existing.setTags(cleanTags(updatedPrompt.getTags()));
-        return promptRepository.save(existing);
+        return mutateAndVersion(existing, p -> {
+            p.setTitle(updatedPrompt.getTitle() == null ? null : updatedPrompt.getTitle().trim());
+            p.setDescription(updatedPrompt.getDescription());
+            p.setContent(updatedPrompt.getContent());
+            p.setType(updatedPrompt.getType());
+            p.setVisibility(normalizeVisibility(updatedPrompt.getVisibility()));
+            p.setStatus(updatedPrompt.getStatus());
+            p.setImpact(updatedPrompt.getImpact());
+            p.setBusinessGoal(updatedPrompt.getBusinessGoal());
+            p.setTargetAudience(updatedPrompt.getTargetAudience());
+            p.setGemLink(updatedPrompt.getGemLink());
+            p.setArchitectureLink(updatedPrompt.getArchitectureLink());
+            p.setTags(cleanTags(updatedPrompt.getTags()));
+        }, caller.id(), authorNameOf(caller), false);
     }
 
     @Transactional
@@ -272,6 +309,7 @@ public class PromptService {
     public Prompt incrementUseCount(UUID id, PromptCaller caller) {
         getVisiblePrompt(id, caller);
         promptRepository.incrementUseCount(id);
+        recordUsage(id, caller, PromptUsageEvent.USE);
         return getPromptById(id);
     }
 
@@ -279,6 +317,7 @@ public class PromptService {
     public Prompt incrementForkCount(UUID id, PromptCaller caller) {
         getVisiblePrompt(id, caller);
         promptRepository.incrementForkCount(id);
+        recordUsage(id, caller, PromptUsageEvent.CLONE);
         return getPromptById(id);
     }
 
@@ -315,8 +354,251 @@ public class PromptService {
                 .forkCount(0)
                 .build();
         Prompt saved = promptRepository.save(copy);
+        recordVersion(saved, caller.id(), authorNameOf(caller));
         promptRepository.incrementForkCount(id);
+        recordUsage(id, caller, PromptUsageEvent.CLONE);
         return saved;
+    }
+
+    // ───────────── Busca, filtros e facets (servidor) ─────────────
+
+    private static Sort sortOf(String sort) {
+        String s = sort == null ? "recent" : sort.trim().toLowerCase(java.util.Locale.ROOT);
+        Sort tie = Sort.by(Sort.Order.desc("updatedAt"), Sort.Order.asc("id"));
+        return switch (s) {
+            case "used" -> Sort.by(Sort.Order.desc("useCount").nullsLast()).and(tie);
+            case "cloned" -> Sort.by(Sort.Order.desc("forkCount").nullsLast()).and(tie);
+            case "az" -> Sort.by(Sort.Order.asc("title").ignoreCase()).and(tie);
+            default -> tie;
+        };
+    }
+
+    /** Busca paginada com filtros e ordenação no banco. caller == null é visitante (só públicos). */
+    @Transactional(readOnly = true)
+    public Page<Prompt> searchPrompts(PromptFilter filter, String sort, PromptCaller caller, int page, int size) {
+        Pageable p = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), MAX_SEARCH_PAGE_SIZE), sortOf(sort));
+        return promptRepository.findAll(PromptSpecs.filtered(filter, caller), p);
+    }
+
+    @Transactional(readOnly = true)
+    public PromptPageDto<PromptDto> searchPromptDtos(PromptFilter filter, String sort, PromptCaller caller, int page, int size) {
+        Page<Prompt> result = searchPrompts(filter, sort, caller, page, size);
+        Set<UUID> favorites = favoriteIds(caller, result.getContent());
+        List<PromptDto> content = result.getContent().stream()
+                .map(p -> dtoOf(p, caller, favorites.contains(p.getId())))
+                .toList();
+        return new PromptPageDto<>(content, result.getNumber(), result.getSize(),
+                result.getTotalElements(), result.getTotalPages());
+    }
+
+    @Transactional(readOnly = true)
+    public PromptDto getVisiblePromptDto(UUID id, PromptCaller caller) {
+        Prompt p = getVisiblePrompt(id, caller);
+        return dtoOf(p, caller, isFavorite(caller, id));
+    }
+
+    @Transactional(readOnly = true)
+    public PromptFacetsDto facets(PromptFilter filter, PromptCaller caller) {
+        long total = promptRepository.count(PromptSpecs.filtered(filter, caller));
+        // Cada faceta ignora o próprio filtro, para a pílula mostrar a distribuição e não só o item marcado.
+        Map<String, Long> typeCounts = queryRepository.countByType(PromptSpecs.filtered(filter.withoutType(), caller));
+        List<PromptFacetsDto.TagCount> topTags = queryRepository.topTags(PromptSpecs.filtered(filter.withoutTag(), caller), 10);
+        PromptFilter base = new PromptFilter(null, null, null, null, null, null, false, null);
+        long items = promptRepository.count(PromptSpecs.filtered(base, caller));
+        long copies = queryRepository.sumUseCount(PromptSpecs.filtered(base, caller));
+        long collections = caller == null || caller.id() == null ? promptCollectionRepository.countPublic()
+                : caller.isAdmin() ? promptCollectionRepository.count()
+                : promptCollectionRepository.countVisibleTo(caller.id());
+        return new PromptFacetsDto(total, typeCounts, topTags, new PromptFacetsDto.Totals(items, copies, collections));
+    }
+
+    PromptDto dtoOf(Prompt p, PromptCaller caller, boolean favorite) {
+        return PromptDto.of(p, favorite, canManage(p.getAuthorId(), caller), caller != null && caller.isAdmin());
+    }
+
+    private Set<UUID> favoriteIds(PromptCaller caller, List<Prompt> prompts) {
+        if (caller == null || caller.id() == null || prompts.isEmpty()) return Set.of();
+        List<UUID> ids = prompts.stream().map(Prompt::getId).toList();
+        Set<UUID> out = new HashSet<>();
+        for (PromptFavorite f : favoriteRepository.findByUserIdAndPromptIdIn(caller.id(), ids)) out.add(f.getPromptId());
+        return out;
+    }
+
+    private boolean isFavorite(PromptCaller caller, UUID promptId) {
+        return caller != null && caller.id() != null
+                && favoriteRepository.existsById(new PromptFavorite.Key(caller.id(), promptId));
+    }
+
+    // ───────────── Favoritos ─────────────
+
+    /** Idempotente: favoritar duas vezes ou desfavoritar quem não está favoritado não é erro. */
+    @Transactional
+    public boolean setFavorite(UUID promptId, PromptCaller caller, boolean favorite) {
+        getVisiblePrompt(promptId, caller);
+        PromptFavorite.Key key = new PromptFavorite.Key(caller.id(), promptId);
+        boolean exists = favoriteRepository.existsById(key);
+        if (favorite && !exists) {
+            favoriteRepository.save(PromptFavorite.builder()
+                    .userId(caller.id()).promptId(promptId).createdAt(Instant.now()).build());
+        } else if (!favorite && exists) {
+            favoriteRepository.deleteById(key);
+        }
+        return favorite;
+    }
+
+    // ───────────── Versões ─────────────
+
+    private static String nz(String s) {
+        return s == null ? "" : s;
+    }
+
+    private static String tagsJson(Set<String> tags) {
+        List<String> sorted = tags == null ? List.of() : tags.stream().filter(Objects::nonNull).sorted().toList();
+        try {
+            return JSON.writeValueAsString(sorted);
+        } catch (Exception e) {
+            return "[]";
+        }
+    }
+
+    private static List<String> parseTags(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try {
+            return JSON.readValue(json, new TypeReference<List<String>>() {});
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    /** Campos que, ao mudar, geram uma versão nova (o resto, como link e contadores, não). */
+    private static String signature(Prompt p) {
+        return String.join("\u0000", nz(p.getTitle()), nz(p.getDescription()), nz(p.getContent()), nz(p.getType()),
+                normalizeVisibility(p.getVisibility()), nz(p.getStatus()), tagsJson(p.getTags()));
+    }
+
+    private static Instant toInstant(java.time.LocalDateTime t) {
+        return t == null ? Instant.now() : t.atZone(java.time.ZoneId.systemDefault()).toInstant();
+    }
+
+    private PromptVersion snapshot(Prompt p, int number, String by, String byName, Instant at) {
+        return PromptVersion.builder()
+                .promptId(p.getId()).versionNumber(number)
+                .title(nz(p.getTitle())).description(p.getDescription()).content(p.getContent())
+                .type(p.getType()).visibility(normalizeVisibility(p.getVisibility())).status(p.getStatus())
+                .tags(tagsJson(p.getTags()))
+                .changedBy(by).changedByName(byName).changedAt(at)
+                .build();
+    }
+
+    private void recordVersion(Prompt p, String by, String byName) {
+        if (p == null || p.getId() == null || versionRepository == null) return;
+        int next = versionRepository.maxVersionNumber(p.getId()) + 1;
+        versionRepository.save(snapshot(p, next, by, byName, Instant.now()));
+    }
+
+    /**
+     * Aplica a edição e grava uma versão se algo versionado mudou (ou sempre, com force). Item antigo
+     * sem histórico ganha antes a versão 1 com o estado anterior à edição.
+     */
+    private Prompt mutateAndVersion(Prompt existing, Consumer<Prompt> mutate, String by, String byName, boolean force) {
+        String before = signature(existing);
+        PromptVersion baseline = versionRepository.maxVersionNumber(existing.getId()) == 0
+                ? snapshot(existing, 1, existing.getAuthorId(), existing.getAuthorName(), toInstant(existing.getCreatedAt()))
+                : null;
+        mutate.accept(existing);
+        Prompt saved = promptRepository.save(existing);
+        if (force || !before.equals(signature(saved))) {
+            if (baseline != null) versionRepository.save(baseline);
+            recordVersion(saved, by, byName);
+        }
+        return saved;
+    }
+
+    /** Item que nunca foi editado ainda não tem linhas: mostra o estado atual como versão 1. */
+    private PromptVersion virtualVersion(Prompt p) {
+        return snapshot(p, 1, p.getAuthorId(), p.getAuthorName(), toInstant(p.getCreatedAt()));
+    }
+
+    private static PromptVersionDto versionDto(PromptVersion v, boolean current, boolean full) {
+        return new PromptVersionDto(v.getVersionNumber(), v.getTitle(), v.getChangedBy(), v.getChangedByName(),
+                v.getChangedAt(), current,
+                full ? v.getDescription() : null, full ? v.getContent() : null, full ? v.getType() : null,
+                full ? v.getVisibility() : null, full ? v.getStatus() : null, full ? parseTags(v.getTags()) : null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<PromptVersionDto> listVersions(UUID promptId, PromptCaller caller) {
+        Prompt p = getVisiblePrompt(promptId, caller);
+        List<PromptVersion> versions = versionRepository.findByPromptIdOrderByVersionNumberDesc(promptId);
+        if (versions.isEmpty()) return List.of(versionDto(virtualVersion(p), true, false));
+        int latest = versions.get(0).getVersionNumber();
+        return versions.stream().map(v -> versionDto(v, v.getVersionNumber() == latest, false)).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public PromptVersionDto getVersion(UUID promptId, int number, PromptCaller caller) {
+        Prompt p = getVisiblePrompt(promptId, caller);
+        List<PromptVersion> versions = versionRepository.findByPromptIdOrderByVersionNumberDesc(promptId);
+        if (versions.isEmpty()) {
+            if (number != 1) throw new IllegalArgumentException("Version not found: " + number);
+            return versionDto(virtualVersion(p), true, true);
+        }
+        int latest = versions.get(0).getVersionNumber();
+        return versions.stream().filter(v -> v.getVersionNumber() == number).findFirst()
+                .map(v -> versionDto(v, v.getVersionNumber() == latest, true))
+                .orElseThrow(() -> new IllegalArgumentException("Version not found: " + number));
+    }
+
+    /** Devolve o item ao conteúdo da versão e grava isso como uma NOVA versão (o histórico nunca é reescrito). */
+    @Transactional
+    public Prompt restoreVersion(UUID promptId, int number, PromptCaller caller) {
+        Prompt existing = getVisiblePrompt(promptId, caller);
+        requireManage(existing.getAuthorId(), caller);
+        if (versionRepository.maxVersionNumber(promptId) == 0 && number == 1) {
+            return existing; // versão 1 virtual = estado atual: nada a restaurar
+        }
+        PromptVersion v = versionRepository.findByPromptIdAndVersionNumber(promptId, number)
+                .orElseThrow(() -> new IllegalArgumentException("Version not found: " + number));
+        return mutateAndVersion(existing, p -> {
+            p.setTitle(v.getTitle());
+            p.setDescription(v.getDescription());
+            p.setContent(v.getContent());
+            p.setType(v.getType());
+            p.setVisibility(normalizeVisibility(v.getVisibility()));
+            p.setStatus(v.getStatus());
+            p.setTags(cleanTags(new LinkedHashSet<>(parseTags(v.getTags()))));
+        }, caller.id(), authorNameOf(caller), true);
+    }
+
+    // ───────────── Uso por semana ─────────────
+
+    private void recordUsage(UUID promptId, PromptCaller caller, String kind) {
+        if (usageRepository == null) return;
+        usageRepository.save(PromptUsageEvent.builder()
+                .promptId(promptId).userId(caller == null ? null : caller.id())
+                .kind(kind).occurredAt(Instant.now()).build());
+    }
+
+    /** Todas as semanas do intervalo (segunda UTC), com zeros, da mais antiga para a atual. */
+    @Transactional(readOnly = true)
+    public List<PromptUsageWeekDto> usageByWeek(UUID promptId, int weeks, PromptCaller caller) {
+        getVisiblePrompt(promptId, caller);
+        int n = Math.min(Math.max(weeks, 1), MAX_USAGE_WEEKS);
+        LocalDate thisMonday = LocalDate.now(ZoneOffset.UTC).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        LocalDate first = thisMonday.minusWeeks(n - 1L);
+        Map<LocalDate, long[]> buckets = new java.util.LinkedHashMap<>();
+        for (int i = 0; i < n; i++) buckets.put(first.plusWeeks(i), new long[2]);
+        Instant since = first.atStartOfDay(ZoneOffset.UTC).toInstant();
+        for (PromptUsageEvent e : usageRepository.findByPromptIdAndOccurredAtGreaterThanEqual(promptId, since)) {
+            LocalDate monday = e.getOccurredAt().atZone(ZoneOffset.UTC).toLocalDate()
+                    .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+            long[] b = buckets.get(monday);
+            if (b == null) continue;
+            if (PromptUsageEvent.CLONE.equals(e.getKind())) b[1]++; else b[0]++;
+        }
+        List<PromptUsageWeekDto> out = new ArrayList<>();
+        buckets.forEach((d, b) -> out.add(new PromptUsageWeekDto(d.toString(), b[0], b[1])));
+        return out;
     }
 
     // ───────────── Comentários ─────────────
@@ -371,6 +653,9 @@ public class PromptService {
                 .ownerName(c.getOwnerName())
                 .items(visible)
                 .createdAt(c.getCreatedAt())
+                .itemCount(c.getItems().size())
+                .hiddenCount(c.getItems().size() - visible.size())
+                .canEdit(canManage(c.getOwnerId(), caller))
                 .build();
     }
 
@@ -412,7 +697,17 @@ public class PromptService {
         return page.map(c -> viewOf(c, caller));
     }
 
-    @Transactional(readOnly = true)
+    /** Detalhe anônimo: só coleção pública; privada e inexistente respondem igual (IllegalArgumentException). */
+    @Transactional(readOnly = true, noRollbackFor = IllegalArgumentException.class)
+    public PromptCollection getPublicCollection(UUID id) {
+        PromptCollection c = getCollectionById(id);
+        if (!PUBLIC.equals(c.getVisibility())) {
+            throw new IllegalArgumentException("Collection not found with id: " + id);
+        }
+        return viewOf(c, null);
+    }
+
+    @Transactional(readOnly = true, noRollbackFor = IllegalArgumentException.class)
     public PromptCollection getCollectionById(UUID id) {
         return promptCollectionRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Collection not found with id: " + id));

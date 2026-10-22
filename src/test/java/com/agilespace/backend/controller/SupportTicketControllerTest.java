@@ -206,6 +206,63 @@ public class SupportTicketControllerTest {
         verifyNoInteractions(supportTicketService);
     }
 
+    // ---------- fechar / reabrir / ler (solicitante) ----------
+
+    @Test
+    public void testCloseUsesAuthenticatedUserNotRole() {
+        when(supportTicketService.closeTicket(ticketId, "u1")).thenReturn(ticket());
+
+        assertEquals(HttpStatus.OK, controller.closeTicket(requestAs("u1", "joao@empresa.com.br", "MEMBER"), ticketId).getStatusCode());
+        verify(supportTicketService).closeTicket(ticketId, "u1");
+    }
+
+    @Test
+    public void testCloseOfSomeoneElsesTicketReturnsNotFound() {
+        when(supportTicketService.closeTicket(ticketId, "intruso")).thenThrow(new IllegalArgumentException("not found"));
+
+        assertEquals(HttpStatus.NOT_FOUND, controller.closeTicket(
+                requestAs("intruso", "x@empresa.com.br", "MEMBER"), ticketId).getStatusCode());
+    }
+
+    @Test
+    public void testReopenReturnsTicketAndPropagatesConflict() {
+        when(supportTicketService.reopenTicket(ticketId, "u1")).thenReturn(ticket());
+        assertEquals(HttpStatus.OK, controller.reopenTicket(requestAs("u1", "j@e.com", "MEMBER"), ticketId).getStatusCode());
+
+        when(supportTicketService.reopenTicket(ticketId, "u2"))
+                .thenThrow(new ResponseStatusException(HttpStatus.CONFLICT, "Só é possível reabrir um chamado fechado."));
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> controller.reopenTicket(requestAs("u2", "j@e.com", "MEMBER"), ticketId));
+        assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
+    }
+
+    @Test
+    public void testReopenOfSomeoneElsesTicketReturnsNotFound() {
+        when(supportTicketService.reopenTicket(ticketId, "intruso")).thenThrow(new IllegalArgumentException("not found"));
+
+        assertEquals(HttpStatus.NOT_FOUND, controller.reopenTicket(
+                requestAs("intruso", "x@empresa.com.br", "MEMBER"), ticketId).getStatusCode());
+    }
+
+    @Test
+    public void testMarkReadReturnsTicketOrNotFound() {
+        when(supportTicketService.markRead(ticketId, "u1")).thenReturn(ticket());
+        assertEquals(HttpStatus.OK, controller.markRead(requestAs("u1", "j@e.com", "MEMBER"), ticketId).getStatusCode());
+
+        when(supportTicketService.markRead(ticketId, "intruso")).thenThrow(new IllegalArgumentException("not found"));
+        assertEquals(HttpStatus.NOT_FOUND, controller.markRead(requestAs("intruso", "x@e.com", "MEMBER"), ticketId).getStatusCode());
+    }
+
+    @Test
+    public void testAddReplyOnClosedTicketPropagatesConflict() {
+        when(supportTicketService.addReply(eq(ticketId), anyString(), anyString(), anyBoolean(), anyString()))
+                .thenThrow(new ResponseStatusException(HttpStatus.CONFLICT, "fechado"));
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> controller.addReply(
+                requestAs("u1", "j@e.com", "MEMBER"), ticketId, Map.of("message", "oi")));
+        assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
+    }
+
     @Test
     public void testGetRepliesPassesAdminFlagFromJwt() {
         when(supportTicketService.getReplies(ticketId, "admin1", true)).thenReturn(List.of());

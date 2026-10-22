@@ -13,7 +13,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 @Repository
-public interface PromptRepository extends JpaRepository<Prompt, UUID> {
+public interface PromptRepository extends JpaRepository<Prompt, UUID>, org.springframework.data.jpa.repository.JpaSpecificationExecutor<Prompt> {
 
     Page<Prompt> findByVisibility(String visibility, Pageable pageable);
 
