@@ -5,6 +5,7 @@ import com.agilespace.backend.dto.SprintPlanDtos.*;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.SquadAccessService;
 import com.agilespace.backend.service.sprintplan.SprintPlanDistributionService;
+import com.agilespace.backend.service.sprintplan.SprintPlanReviewService;
 import com.agilespace.backend.service.sprintplan.SprintPlanScopeService;
 import com.agilespace.backend.service.sprintplan.SprintPlanService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -30,6 +31,7 @@ public class SprintPlanController {
     private final SprintPlanService service;
     private final SprintPlanScopeService scopeService;
     private final SprintPlanDistributionService distributionService;
+    private final SprintPlanReviewService reviewService;
     private final SquadAccessService squadAccessService;
 
     @GetMapping
@@ -149,6 +151,14 @@ public class SprintPlanController {
                                   @RequestBody(required = false) ReorderItemsRequest body, HttpServletRequest request) {
         requireLeadership(squadId, request);
         return scopeService.reorder(squadId, planId, body, true);
+    }
+
+    /** Revisão (E5): resumo, pendências e prévia do que iria ao Jira. Somente leitura. */
+    @GetMapping("/{planId}/review")
+    public com.agilespace.backend.dto.SprintPlanReviewDtos.ReviewView review(@PathVariable String squadId,
+            @PathVariable String planId, HttpServletRequest request) {
+        squadAccessService.requireSquadReadAccess(squadId, request);
+        return reviewService.review(squadId, planId, canEdit(squadId, request));
     }
 
     /** E6: gravação no Jira ainda não existe. */

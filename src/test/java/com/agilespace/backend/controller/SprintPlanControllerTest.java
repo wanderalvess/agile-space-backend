@@ -55,6 +55,7 @@ class SprintPlanControllerTest {
     @Mock SprintPlanCapacityService capacityService;
     @Mock SprintPlanScopeService scopeService;
     @Mock com.agilespace.backend.service.sprintplan.SprintPlanDistributionService distributionService;
+    @Mock com.agilespace.backend.service.sprintplan.SprintPlanReviewService reviewService;
 
     MockMvc mvc;
     SprintPlan plan;
@@ -64,7 +65,7 @@ class SprintPlanControllerTest {
         SprintPlanService service = new SprintPlanService(planRepository, personRepository, reserveTypeRepository,
                 absenceRepository, holidayRepository, itemRepository, assignmentRepository, memberRepository,
                 squadCapacityService, capacityService, scopeService);
-        mvc = MockMvcBuilders.standaloneSetup(new SprintPlanController(service, scopeService, distributionService, access))
+        mvc = MockMvcBuilders.standaloneSetup(new SprintPlanController(service, scopeService, distributionService, reviewService, access))
                 .setControllerAdvice(new ErrorMessageAdvice()).build();
 
         plan = SprintPlan.builder().id("P1").squadId("SQ1").jiraSprintId("S3").sprintName("Sprint 3")
@@ -267,5 +268,14 @@ class SprintPlanControllerTest {
         plan.setStatus(SprintPlan.STATUS_ESCOPO);
         mvc.perform(as(delete("/api/squads/SQ1/sprint-plans/P1"), "pl")).andExpect(status().isNoContent());
         verify(planRepository).delete(plan);
+    }
+
+    @Test
+    @DisplayName("Voltar da REVISAO para a DISTRIBUICAO funciona")
+    void backFromReview() throws Exception {
+        leader("pl");
+        plan.setStatus(SprintPlan.STATUS_REVISAO);
+        mvc.perform(as(post("/api/squads/SQ1/sprint-plans/P1/status"), "pl").content("{\"version\":3,\"to\":\"DISTRIBUICAO\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("DISTRIBUICAO"));
     }
 }

@@ -59,7 +59,7 @@ class SprintPlanScopeControllerTest {
     @BeforeEach
     void setUp() {
         SprintPlanScopeService scope = new SprintPlanScopeService(planRepository, itemRepository, backlogService, capacityService);
-        mvc = MockMvcBuilders.standaloneSetup(new SprintPlanController(planService, scope, distributionService, access))
+        mvc = MockMvcBuilders.standaloneSetup(new SprintPlanController(planService, scope, distributionService, mock(com.agilespace.backend.service.sprintplan.SprintPlanReviewService.class), access))
                 .setControllerAdvice(new ErrorMessageAdvice()).build();
         plan = SprintPlan.builder().id("P1").squadId("SQ1").jiraSprintId("S3").sprintName("Sprint 3")
                 .startDate(LocalDate.of(2026, 11, 2)).endDate(LocalDate.of(2026, 11, 13))
