@@ -1,4 +1,4 @@
-# Importação do Jira na Review: de onde vem cada texto (migração V92)
+# Importação do Jira na Review: de onde vem cada texto (migração V93)
 
 Hoje a importação preenche Problema, Solução e Critérios de aceite com texto que o navegador deduz por regex, sem dizer de
 onde veio. Este contrato acrescenta:
