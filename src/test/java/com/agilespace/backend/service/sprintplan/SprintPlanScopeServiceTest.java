@@ -272,6 +272,23 @@ class SprintPlanScopeServiceTest {
         assertEquals(1, v.items().size());
     }
 
+    @Test
+    @DisplayName("planVersion: view traz a versao atual; apos adicionar/reordenar traz a versao depois da operacao")
+    void planVersion() {
+        assertEquals(1L, service.view("SQ1", "P1", true).planVersion());
+        when(planRepository.saveAndFlush(any())).thenAnswer(i -> {
+            SprintPlan p = i.getArgument(0);
+            p.setVersion(p.getVersion() + 1); // o @Version do JPA incrementa no flush
+            return p;
+        });
+        backlog.put("A-1", parent("A-1", "10", "4", false));
+        backlog.put("A-2", parent("A-2", "10", "4", false));
+        assertEquals(2L, service.addItems("SQ1", "P1", new AddItemsRequest("A-1", null), "lead", true).planVersion());
+        assertEquals(3L, service.addItems("SQ1", "P1", new AddItemsRequest("A-2", null), "lead", true).planVersion());
+        assertEquals(4L, service.reorder("SQ1", "P1",
+                new ReorderItemsRequest(List.of(stored.get(1).getId(), stored.get(0).getId())), true).planVersion());
+    }
+
     // ---- escrita ----
 
     @Test

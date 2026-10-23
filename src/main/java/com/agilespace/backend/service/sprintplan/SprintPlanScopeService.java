@@ -62,7 +62,8 @@ public class SprintPlanScopeService {
         Computed c = compute(itemRepository.findByPlanIdOrderBySortOrderAsc(plan.getId()), index(backlog));
         CapacityView cap = capacityService.compute(plan);
         return new ScopeView(plan.getId(), plan.getStatus(), backlog.syncedAt(), c.items(), c.totals(),
-                capacityService.thermometer(plan, cap, c.totals().allocated()), canEdit);
+                capacityService.thermometer(plan, cap, c.totals().allocated()), canEdit,
+                plan.getVersion() == null ? 0L : plan.getVersion());
     }
 
     /** Itens e totais do plano (usado pelo PlanView e pela lista de planos). */
