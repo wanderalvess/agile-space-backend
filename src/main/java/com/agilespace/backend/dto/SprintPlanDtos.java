@@ -16,7 +16,7 @@ public final class SprintPlanDtos {
     // ---- Requisições ----
 
     public record CreatePlanRequest(String jiraSprintId, String sprintName, LocalDate startDate, LocalDate endDate,
-                                    String goal) {}
+                                    String goal, String jiraGoal) {}
 
     public record PatchPlanRequest(Long version, String sprintName, LocalDate startDate, LocalDate endDate,
                                    String goal, String reserveMode, BigDecimal reservePct, BigDecimal focusFactorPct) {}
@@ -34,6 +34,13 @@ public final class SprintPlanDtos {
     public record HolidayDto(LocalDate day, String label) {}
 
     public record ReserveTypeRequest(String label, BigDecimal hoursPerDay) {}
+
+    /** Corpo opcional de copy-from-previous. */
+    public record CopyFromPreviousRequest(String sourcePlanId) {}
+
+    /** Próxima sprint do quadro no Jira. state: future|active; datas yyyy-MM-dd ou null. */
+    public record NextSprintView(boolean found, String jiraSprintId, String name, String startDate, String endDate,
+                                 String goal, String state) {}
 
     // ---- Respostas ----
 
@@ -96,7 +103,8 @@ public final class SprintPlanDtos {
                               List<UnclassifiedTypeView> unclassifiedTypes) {}
 
     public record ScopeView(String planId, String status, String syncedAt, List<ItemView> items, ScopeTotals totals,
-                            Map<String, SprintPlanCalculator.Thermometer> thermometer, boolean canEditPlan) {}
+                            Map<String, SprintPlanCalculator.Thermometer> thermometer, boolean canEditPlan,
+                            long planVersion) {}
 
     public record AssignmentView(String id, String itemId, String subtaskKey, String accountId, LocalDate startDate,
                                  LocalDate endDate, String cls, BigDecimal hours, Long version) {}
@@ -109,11 +117,12 @@ public final class SprintPlanDtos {
                            List<ItemView> items, ScopeTotals scope, List<AssignmentView> assignments,
                            Map<String, SprintPlanCalculator.Thermometer> thermometer, Permissions permissions,
                            boolean goalSavedInJira, Instant updatedAt,
-                           List<com.agilespace.backend.dto.SprintPlanDistributionDtos.DistWarning> warnings) {
+                           List<com.agilespace.backend.dto.SprintPlanDistributionDtos.DistWarning> warnings,
+                           String jiraGoal) {
         /** Avisos da Distribuição ao avançar para a Revisão (null nas demais respostas). */
         public PlanView withWarnings(List<com.agilespace.backend.dto.SprintPlanDistributionDtos.DistWarning> w) {
             return new PlanView(id, squadId, version, status, sprint, goal, reserve, syncedAt, capacity, absences, holidays,
-                    items, scope, assignments, thermometer, permissions, goalSavedInJira, updatedAt, w);
+                    items, scope, assignments, thermometer, permissions, goalSavedInJira, updatedAt, w, jiraGoal);
         }
     }
 }

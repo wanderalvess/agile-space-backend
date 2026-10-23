@@ -57,6 +57,10 @@ public class SprintPlan {
     @Column(name = "goal", columnDefinition = "TEXT")
     private String goal;
 
+    /** Meta da sprint como está no Jira (lida ao criar a partir da próxima sprint e pelo sync do backlog). */
+    @Column(name = "jira_goal", columnDefinition = "TEXT")
+    private String jiraGoal;
+
     @Column(name = "reserve_mode", nullable = false, length = 16)
     private String reserveMode;
 

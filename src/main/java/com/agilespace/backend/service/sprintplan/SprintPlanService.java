@@ -86,6 +86,7 @@ public class SprintPlanService {
                 .endDate(req.endDate())
                 .status(SprintPlan.STATUS_RASCUNHO)
                 .goal(trimToNull(req.goal()))
+                .jiraGoal(jiraSprintId == null ? null : trimToNull(req.jiraGoal()))
                 .reserveMode(SprintPlan.RESERVE_HORAS)
                 .reservePct(suggestedReservePct(squadId))
                 .createdBy(userId)
@@ -332,7 +333,7 @@ public class SprintPlanService {
                 p.getGoal(), new ReserveView(p.getReserveMode(), p.getReservePct(), p.getFocusFactorPct(), types),
                 null, cap, absences, holidays, scope.items(), scope.totals(), assignments,
                 capacityService.thermometer(p, cap, alloc), perms,
-                SprintPlan.STATUS_ENVIADO.equals(p.getStatus()), p.getUpdatedAt(), null);
+                SprintPlan.STATUS_ENVIADO.equals(p.getStatus()), p.getUpdatedAt(), null, p.getJiraGoal());
     }
 
     private String myAccountId(String squadId, String userId) {

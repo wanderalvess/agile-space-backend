@@ -92,6 +92,18 @@ app:
     # (profile "proxy") use TRUSTED_PROXIES=172.16.0.0/12 (faixa padrão das redes Docker); sem isso todos
     # compartilham o balde do proxy. Ver DEPLOYMENT.md.
     trusted-proxies: ${TRUSTED_PROXIES:}
+  ratelimit:
+    # Limites por minuto (balde em memória, instância única). Padrões = comportamento anterior.
+    # Requisições com JWT válido contam por ID DO USUÁRIO (vários usuários atrás do mesmo IP/NAT não se bloqueiam).
+    user-per-minute: ${RATELIMIT_USER_PER_MINUTE:300}
+    per-user-enabled: ${RATELIMIT_PER_USER_ENABLED:true}
+    # Sem JWT válido: por IP.
+    general-per-ip-per-minute: ${RATELIMIT_GENERAL_PER_IP_PER_MINUTE:300}
+    # login/cadastro/forgot/reset/change-password: sempre por IP, faixa apertada.
+    auth-per-ip-per-minute: ${RATELIMIT_AUTH_PER_IP_PER_MINUTE:10}
+    # Leitura pública de convite (/api/public/invites/**): por IP, balde separado. Em escritório atrás de NAT,
+    # considere 1200.
+    public-invite-per-ip-per-minute: ${RATELIMIT_PUBLIC_INVITE_PER_IP_PER_MINUTE:300}
   brainstorming:
     # Segundos que o facilitador precisa estar offline (sem WebSocket na sala) para outro participante assumir a facilitação.
     # Criador do mural e ADMIN assumem sempre. Ver docs/ceremony-brainstorming-api.md.

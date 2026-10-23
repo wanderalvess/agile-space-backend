@@ -42,6 +42,7 @@ class SprintPlanDistributionServiceTest {
     @Mock SprintPlanItemRepository itemRepository;
     @Mock SprintPlanAssignmentRepository assignmentRepository;
     @Mock SprintPlanHolidayRepository holidayRepository;
+    @Mock SprintPlanAbsenceRepository absenceRepository;
     @Mock SquadMemberRepository memberRepository;
     @Mock PlannerBacklogService backlogService;
     @Mock SprintPlanCapacityService capacityService;
@@ -90,7 +91,7 @@ class SprintPlanDistributionServiceTest {
     @BeforeEach
     void setUp() {
         service = new SprintPlanDistributionService(planRepository, itemRepository, assignmentRepository,
-                holidayRepository, memberRepository, backlogService, capacityService, ws);
+                holidayRepository, absenceRepository, memberRepository, backlogService, capacityService, ws);
         plan = SprintPlan.builder().id("P1").squadId("SQ1").jiraSprintId("S3").sprintName("Sprint 3")
                 .startDate(d(2)).endDate(d(13)).status(SprintPlan.STATUS_DISTRIBUICAO)
                 .reserveMode(SprintPlan.RESERVE_HORAS).reservePct(h("12")).version(1L).build();
@@ -484,6 +485,26 @@ class SprintPlanDistributionServiceTest {
         DistributionView asQa = service.view("SQ1", "P1", DIEGO);
         assertFalse(sub(asQa, "A-1-1").canClaim());
         assertTrue(sub(asQa, "A-1-3").canClaim());
+    }
+
+    @Test
+    @DisplayName("people traz as ausencias da pessoa neste plano (hours null = dia inteiro)")
+    void peopleCarryAbsences() {
+        lenient().when(absenceRepository.findByPlanIdOrderByStartDateAsc("P1")).thenReturn(List.of(
+                SprintPlanAbsence.builder().id("A1").planId("P1").jiraAccountId("acc-ana").startDate(d(5)).endDate(d(6))
+                        .hoursPerDay(null).reason("Ferias").build(),
+                SprintPlanAbsence.builder().id("A2").planId("P1").jiraAccountId("acc-ana").startDate(d(9)).endDate(d(9))
+                        .hoursPerDay(h("4")).build()));
+        DistributionView v = service.view("SQ1", "P1", LEAD);
+        DistPerson ana = v.people().stream().filter(p -> p.accountId().equals("acc-ana")).findFirst().orElseThrow();
+        assertEquals(2, ana.absences().size());
+        assertEquals(d(5), ana.absences().get(0).startDate());
+        assertNull(ana.absences().get(0).hours());
+        assertEquals("Ferias", ana.absences().get(0).reason());
+        assertEquals(0, h("4").compareTo(ana.absences().get(1).hours()));
+        assertNull(ana.absences().get(1).reason());
+        DistPerson diego = v.people().stream().filter(p -> p.accountId().equals("acc-diego")).findFirst().orElseThrow();
+        assertTrue(diego.absences().isEmpty());
     }
 
     @Test

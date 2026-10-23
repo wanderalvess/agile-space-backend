@@ -77,7 +77,7 @@ public class SprintPlanReviewService {
         JiraPreview preview = preview(plan, squad, dist, sent);
         return new ReviewView(plan.getId(), plan.getStatus(), dist.syncedAt(), canEditPlan,
                 new ReviewSprint(plan.getSprintName(), plan.getStartDate(), plan.getEndDate()), plan.getGoal(), sent,
-                people, tasks, pendings, blocking, warning, false, false, preview, jiraSprintUrl(squad));
+                people, tasks, pendings, blocking, warning, false, false, preview, jiraSprintUrl(squad, plan));
     }
 
     private static boolean isDistributable(DistSubtask s) {
@@ -163,9 +163,17 @@ public class SprintPlanReviewService {
         int chg = (int) changes.stream().filter(c -> "CHANGE".equals(c.kind())).count();
         int same = changes.size() - set - chg;
         String goal = plan.getGoal() == null || plan.getGoal().isBlank() ? null : plan.getGoal().trim();
-        GoalChange goalChange = new GoalChange(null, goal, goal == null ? "UNCHANGED" : "SET");
+        GoalChange goalChange = goalChange(plan.getJiraGoal(), goal);
         String note = sent ? RULES_NOTE + ". Mudanças depois do envio: regra em definição." : RULES_NOTE;
         return new JiraPreview(note, goalChange, changes, new PreviewCounts(set, chg, same, issues.size()));
+    }
+
+    /** SET: Jira sem meta; CHANGE: meta do Jira difere da do plano; UNCHANGED: igual (ou plano sem meta). */
+    static GoalChange goalChange(String jiraGoal, String planGoal) {
+        String from = jiraGoal == null || jiraGoal.isBlank() ? null : jiraGoal.trim();
+        if (planGoal == null) return new GoalChange(from, null, "UNCHANGED");
+        String kind = from == null ? "SET" : from.equals(planGoal) ? "UNCHANGED" : "CHANGE";
+        return new GoalChange(from, planGoal, kind);
     }
 
     private static PreviewChange assigneeChange(DistSubtask s, SquadIssueSnapshot ss) {
@@ -202,8 +210,20 @@ public class SprintPlanReviewService {
     }
 
     static String jiraSprintUrl(Squad squad) {
+        return jiraSprintUrl(squad, null);
+    }
+
+    /** Link do quadro; com board vira planning e, com a sprint do plano, já seleciona a sprint. */
+    static String jiraSprintUrl(Squad squad, SprintPlan plan) {
         if (squad == null || squad.getJiraDomain() == null || squad.getJiraDomain().isBlank()) return null;
         String d = squad.getJiraDomain().trim().replaceFirst("^https?://", "").replaceAll("/+$", "");
-        return d.isEmpty() ? null : "https://" + d + "/secure/RapidBoard.jspa";
+        if (d.isEmpty()) return null;
+        String base = "https://" + d + "/secure/RapidBoard.jspa";
+        String board = squad.getRapidViewId() == null ? "" : squad.getRapidViewId().trim();
+        if (!board.matches("[0-9]+")) return base;
+        String url = base + "?rapidView=" + board + "&view=planning&selectedIssue=";
+        String sprint = plan == null || plan.getJiraSprintId() == null ? "" : plan.getJiraSprintId().trim();
+        if (sprint.matches("[0-9]+")) url += "&sprint=" + sprint;
+        return url;
     }
 }

@@ -11,12 +11,25 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+/**
+ * @deprecated API antiga do planejamento (V19, sem squad), substituída pelo Sprint Planner
+ * ({@code /api/squads/{squadId}/sprint-plans}). Tabelas e dados continuam; nada é removido nesta rodada. Cada uso
+ * gera um log de aviso para medir se ainda há consumidores antes da remoção.
+ */
+@Deprecated
 @RestController
 @RequestMapping("/api/sprint-plannings")
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 public class SprintPlanningController {
 
     private final SprintPlanningService sprintPlanningService;
+
+    @ModelAttribute
+    void warnDeprecatedUse(HttpServletRequest request) {
+        log.warn("[DEPRECATED] {} {} usa a API antiga /api/sprint-plannings; use /api/squads/{{squadId}}/sprint-plans.",
+                request.getMethod(), request.getRequestURI());
+    }
 
     @GetMapping
     public ResponseEntity<List<SprintPlanning>> listReadyForPoker(
