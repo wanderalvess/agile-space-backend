@@ -56,7 +56,7 @@ class SprintPlanDistributionControllerTest {
                 new SprintInfo(LocalDate.of(2026, 11, 2), LocalDate.of(2026, 11, 13),
                         List.of(new HolidayEntry(LocalDate.of(2026, 11, 20), "Consciência Negra"))),
                 List.of(new DistTask("I1", "A-1", "Pai", new BigDecimal("9"), new BigDecimal("5"), List.of(s))),
-                List.of(new DistPerson("acc-ana", "Ana", "DEV", 60, 8, 52, 13.33, "VERDE", "DENTRO_DA_CAPACIDADE")),
+                List.of(new DistPerson("acc-ana", "Ana", "DEV", 60, 8, 52, 13.33, "VERDE", "DENTRO_DA_CAPACIDADE", List.of())),
                 List.of(new DistWarning("SUBTASK_NO_DATES", "msg", "A-1-1", "acc-ana")));
     }
 

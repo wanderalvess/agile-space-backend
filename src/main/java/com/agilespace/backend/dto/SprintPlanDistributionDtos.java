@@ -34,7 +34,11 @@ public final class SprintPlanDistributionDtos {
 
     /** zone: VERDE|AMARELO|VERMELHO|SEM_CAPACIDADE; state: DENTRO_DA_CAPACIDADE|COBERTO_PELA_RESERVA|ACIMA_DA_RESERVA|SEM_CAPACIDADE. */
     public record DistPerson(String accountId, String name, String role, double capacityHours, double allocatedHours,
-                             double freeHours, Double pct, String zone, String state) {}
+                             double freeHours, Double pct, String zone, String state,
+                             List<AbsenceEntry> absences) {}
+
+    /** hours: horas por dia da ausência; null = dia inteiro. */
+    public record AbsenceEntry(LocalDate startDate, LocalDate endDate, BigDecimal hours, String reason) {}
 
     public record DistWarning(String code, String message, String subtaskKey, String accountId) {}
 
