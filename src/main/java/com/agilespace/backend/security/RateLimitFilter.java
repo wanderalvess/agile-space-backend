@@ -47,7 +47,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private int authCapacity = 10;
     private int generalCapacity = 300;
     private int userCapacity = 300;
-    private int publicInviteCapacity = 300;
+    private int publicInviteCapacity = 1200;
     private boolean perUserEnabled = true;
 
     @Value("${app.ratelimit.auth-per-ip-per-minute:10}")
@@ -61,7 +61,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     void setUserCapacity(int v) { this.userCapacity = Math.max(1, v); }
 
     /** Leitura pública do convite (/api/public/invites/**): por IP, em balde próprio. */
-    @Value("${app.ratelimit.public-invite-per-ip-per-minute:300}")
+    @Value("${app.ratelimit.public-invite-per-ip-per-minute:1200}")
     void setPublicInviteCapacity(int v) { this.publicInviteCapacity = Math.max(1, v); }
 
     /** false = tudo volta a contar só por IP (comportamento antigo). */
@@ -127,7 +127,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
             response.setHeader("Retry-After", String.valueOf(retryAfterSeconds));
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             response.setCharacterEncoding("UTF-8");
-            response.getWriter().write("{\"error\": \"Muitas requisições. Tente de novo em " + retryAfterSeconds + " s.\"}");
+            // "message" é a chave que o resto da API usa; "error" fica por compatibilidade com quem já lê o formato antigo.
+            String msg = "Muitas requisições. Tente de novo em " + retryAfterSeconds + " s.";
+            response.getWriter().write("{\"error\": \"" + msg + "\", \"message\": \"" + msg + "\"}");
             return;
         }
 

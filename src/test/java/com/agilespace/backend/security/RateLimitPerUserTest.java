@@ -40,6 +40,8 @@ class RateLimitPerUserTest {
         if (res.getStatus() == 429) {
             assertTrue(res.getContentAsString().matches("(?s).*Tente de novo em [0-9]+ s.*"), res.getContentAsString());
             assertNotNull(res.getHeader("Retry-After"));
+            // "message" é a chave padrão da API; "error" fica por compatibilidade.
+            assertTrue(res.getContentAsString().contains("\"message\": \"Muitas requisições. Tente de novo em "), res.getContentAsString());
         }
         return res.getStatus();
     }

@@ -101,9 +101,9 @@ app:
     general-per-ip-per-minute: ${RATELIMIT_GENERAL_PER_IP_PER_MINUTE:300}
     # login/cadastro/forgot/reset/change-password: sempre por IP, faixa apertada.
     auth-per-ip-per-minute: ${RATELIMIT_AUTH_PER_IP_PER_MINUTE:10}
-    # Leitura pública de convite (/api/public/invites/**): por IP, balde separado. Em escritório atrás de NAT,
-    # considere 1200.
-    public-invite-per-ip-per-minute: ${RATELIMIT_PUBLIC_INVITE_PER_IP_PER_MINUTE:300}
+    # Leitura pública de convite (/api/public/invites/**): por IP, balde separado. Folgado (1200) porque
+    # um escritório inteiro atrás de NAT compartilha o mesmo IP.
+    public-invite-per-ip-per-minute: ${RATELIMIT_PUBLIC_INVITE_PER_IP_PER_MINUTE:1200}
   brainstorming:
     # Segundos que o facilitador precisa estar offline (sem WebSocket na sala) para outro participante assumir a facilitação.
     # Criador do mural e ADMIN assumem sempre. Ver docs/ceremony-brainstorming-api.md.
