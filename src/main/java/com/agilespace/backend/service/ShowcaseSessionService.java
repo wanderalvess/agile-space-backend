@@ -88,6 +88,10 @@ public class ShowcaseSessionService {
     @Autowired(required = false)
     private ShowcaseParticipantRepository participantRepository;
 
+    // Opcional pelo mesmo motivo: serviços montados à mão nos testes não guardam a origem dos textos importados.
+    @Autowired(required = false)
+    private ShowcaseTaskOriginService originService;
+
     @Autowired(required = false)
     private ObjectMapper objectMapper;
 
@@ -240,6 +244,9 @@ public class ShowcaseSessionService {
         Map<String, List<ShowcaseTaskFile>> filesByTask = fileService.listBySession(session.getId()).stream()
                 .collect(Collectors.groupingBy(ShowcaseTaskFile::getTaskId));
         tasks.forEach(t -> t.setAttachments(filesByTask.getOrDefault(t.getId(), List.of())));
+        if (originService != null) {
+            originService.attach(session.getId(), tasks);
+        }
         session.setTasks(tasks);
         session.setMembers(memberRepository.findBySessionIdOrderByOrderAsc(session.getId()));
         session.setParticipants(participantsOf(session));
@@ -341,6 +348,14 @@ public class ShowcaseSessionService {
         for (ShowcaseTask task : safeTasks) {
             sanitizeLinks(task);
         }
+        if (originService != null) {
+            // Um 400 por origem inválida sai antes de a sessão ser regravada.
+            for (ShowcaseTask task : safeTasks) {
+                if (task.getOrigins() != null) {
+                    originService.validateOnly(sessionId, task.getId(), task.getOrigins());
+                }
+            }
+        }
         Set<ShowcaseTask> stale = staleCards(safeTasks, stored);
         enforceDecisionLock(safeTasks, stored, stale, callerId, lockSquad, lockCreator);
 
@@ -383,6 +398,15 @@ public class ShowcaseSessionService {
         }
         // Card que saiu da Review leva os anexos junto.
         fileService.removeOrphans(sessionId, toSave.stream().map(ShowcaseTask::getId).collect(Collectors.toSet()));
+        if (originService != null) {
+            Set<String> keep = toSave.stream().map(ShowcaseTask::getId).collect(Collectors.toSet());
+            for (ShowcaseTask saved : toSave) {
+                if (saved.getOrigins() != null) {
+                    originService.replace(sessionId, saved.getId(), saved.getOrigins(), callerId);
+                }
+            }
+            originService.removeOrphans(sessionId, keep);
+        }
 
         int memberOrder = 0;
         for (ShowcaseMember member : safeMembers) {
@@ -500,6 +524,9 @@ public class ShowcaseSessionService {
         ShowcaseTask view = task.copy();
         view.setAttachments(fileService.listBySession(task.getSessionId()).stream()
                 .filter(f -> task.getId().equals(f.getTaskId())).toList());
+        if (originService != null) {
+            originService.attach(task.getSessionId(), List.of(view));
+        }
         return view;
     }
 
