@@ -85,8 +85,8 @@ class SprintPlanReviewServiceTest {
         lenient().when(squadService.getSquad("SQ1")).thenAnswer(i -> Optional.of(squad));
         lenient().when(distributionService.buildView(any(), any())).thenAnswer(i -> new DistributionView("P1",
                 plan.getStatus(), "sync", false, null, new SprintInfo(d(2), d(13), List.of()), tasks,
-                List.of(new DistPerson("acc-ana", "Ana", "DEV", 60, 8, 52, 13.3, "VERDE", "DENTRO_DA_CAPACIDADE"),
-                        new DistPerson("acc-diego", "Diego", "QA", 60, 8, 52, 13.3, "VERDE", "DENTRO_DA_CAPACIDADE")),
+                List.of(new DistPerson("acc-ana", "Ana", "DEV", 60, 8, 52, 13.3, "VERDE", "DENTRO_DA_CAPACIDADE", List.of()),
+                        new DistPerson("acc-diego", "Diego", "QA", 60, 8, 52, 13.3, "VERDE", "DENTRO_DA_CAPACIDADE", List.of())),
                 warnings));
         lenient().when(scopeService.compute(any(SprintPlan.class))).thenAnswer(i -> new SprintPlanScopeService.Computed(items,
                 new ScopeTotals(items.size(), Map.of(), 0, 0, 0, 0, 0, unclassified, 0, List.of())));
@@ -295,6 +295,40 @@ class SprintPlanReviewServiceTest {
         assertEquals("https://totvs.atlassian.net/secure/RapidBoard.jspa", review().jiraSprintUrl());
         squad.setJiraDomain(null);
         assertNull(review().jiraSprintUrl());
+    }
+
+    @Test
+    @DisplayName("link do Jira com board e sprint do plano; sem sprint omite o parametro; sem board usa o link generico")
+    void jiraUrlBoardAndSprint() {
+        squad.setRapidViewId("123");
+        assertEquals("https://totvs.atlassian.net/secure/RapidBoard.jspa?rapidView=123&view=planning&selectedIssue=&sprint=S3".replace("S3", "3"),
+                withSprint("3").jiraSprintUrl());
+        plan.setJiraSprintId(null);
+        assertEquals("https://totvs.atlassian.net/secure/RapidBoard.jspa?rapidView=123&view=planning&selectedIssue=",
+                review().jiraSprintUrl());
+        squad.setRapidViewId("");
+        assertEquals("https://totvs.atlassian.net/secure/RapidBoard.jspa", review().jiraSprintUrl());
+    }
+
+    private ReviewView withSprint(String id) {
+        plan.setJiraSprintId(id);
+        return review();
+    }
+
+    @Test
+    @DisplayName("meta: Jira sem meta = SET; igual = UNCHANGED; diferente = CHANGE com from = meta do Jira")
+    void goalKinds() {
+        plan.setJiraGoal(null);
+        assertEquals("SET", review().jiraPreview().sprintGoal().kind());
+        plan.setJiraGoal("Entregar X");
+        GoalChange same = review().jiraPreview().sprintGoal();
+        assertEquals("UNCHANGED", same.kind());
+        assertEquals("Entregar X", same.from());
+        plan.setJiraGoal("Meta antiga");
+        GoalChange diff = review().jiraPreview().sprintGoal();
+        assertEquals("CHANGE", diff.kind());
+        assertEquals("Meta antiga", diff.from());
+        assertEquals("Entregar X", diff.to());
     }
 
     // ---------------- Acesso ----------------
