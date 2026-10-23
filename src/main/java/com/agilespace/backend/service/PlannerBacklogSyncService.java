@@ -106,6 +106,14 @@ public class PlannerBacklogSyncService {
         this.minInterval = Duration.ofSeconds(Math.max(0, minIntervalSec));
     }
 
+    /** Opcional (não entra no construtor): atualiza a meta atual do Jira nos planos do Sprint Planner após o sync. */
+    private com.agilespace.backend.service.sprintplan.SprintPlanJiraService goalRefresher;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setGoalRefresher(com.agilespace.backend.service.sprintplan.SprintPlanJiraService goalRefresher) {
+        this.goalRefresher = goalRefresher;
+    }
+
     void setClock(Clock clock) { this.clock = clock; }
     void setSleeper(LongConsumer sleeper) { this.sleeper = sleeper; }
 
@@ -190,6 +198,13 @@ public class PlannerBacklogSyncService {
         List<JiraIssue> all = new ArrayList<>(parents.values());
         all.addAll(subtasks.values());
         persist(squadId, all, syncedAt);
+        if (goalRefresher != null) {
+            try {
+                goalRefresher.refreshGoals(squadId, domain, token);
+            } catch (RuntimeException e) {
+                log.warn("[squad:{}] meta do Jira não atualizada: {}", squadId, e.getMessage());
+            }
+        }
         return new SyncResult(syncedAt, parents.size(), carryOver, subtasks.size(), truncated[0]);
     }
 

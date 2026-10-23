@@ -45,6 +45,7 @@ public class SprintPlanDistributionService {
     private final SprintPlanItemRepository itemRepository;
     private final SprintPlanAssignmentRepository assignmentRepository;
     private final SprintPlanHolidayRepository holidayRepository;
+    private final SprintPlanAbsenceRepository absenceRepository;
     private final SquadMemberRepository squadMemberRepository;
     private final PlannerBacklogService backlogService;
     private final SprintPlanCapacityService capacityService;
@@ -254,12 +255,21 @@ public class SprintPlanDistributionService {
 
         Double reserve = plan.getReservePct() == null ? null : plan.getReservePct().doubleValue();
         List<DistPerson> people = new ArrayList<>();
+        Map<String, List<AbsenceEntry>> absencesByPerson = new HashMap<>();
+        List<SprintPlanAbsence> absenceRows = absenceRepository.findByPlanIdOrderByStartDateAsc(planId);
+        if (absenceRows != null) {
+            for (SprintPlanAbsence a : absenceRows) {
+                absencesByPerson.computeIfAbsent(a.getJiraAccountId(), k -> new ArrayList<>())
+                        .add(new AbsenceEntry(a.getStartDate(), a.getEndDate(), a.getHoursPerDay(), a.getReason()));
+            }
+        }
         for (CapacityRow r : cap.people()) {
             if (!r.included() || !("DEV".equals(r.papel()) || "QA".equals(r.papel()))) continue;
             double alloc = SprintPlanCalculator.round2(allocated.getOrDefault(r.accountId(), BigDecimal.ZERO).doubleValue());
             var t = SprintPlanCalculator.thermometer(alloc, r.capacityHours(), reserve);
             people.add(new DistPerson(r.accountId(), r.name(), r.papel(), r.capacityHours(), alloc,
-                    SprintPlanCalculator.round2(r.capacityHours() - alloc), t.pct(), t.zone().name(), t.state().name()));
+                    SprintPlanCalculator.round2(r.capacityHours() - alloc), t.pct(), t.zone().name(), t.state().name(),
+                    absencesByPerson.getOrDefault(r.accountId(), List.of())));
         }
 
         List<DistWarning> warnings = warnings(plan, tasks, people, holidays);
