@@ -124,6 +124,11 @@ public class ShowcaseTask {
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private List<ShowcaseTaskFile> attachments;
 
+    // De onde veio o texto de Problema, Solução e Critérios quando o card nasceu da importação do Jira (showcase_task_origins).
+    // Lido e gravado junto do card; null = o cliente não conhece o campo e nada muda. importedBy/importedAt são do servidor.
+    @Transient
+    private List<com.agilespace.backend.dto.ShowcaseFieldOriginDto> origins;
+
     /** Versão efetiva: linha sem versão (testes, objetos montados à mão) vale 1. */
     public long versionOrDefault() {
         return version != null ? version : 1L;
