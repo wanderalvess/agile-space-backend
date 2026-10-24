@@ -204,6 +204,49 @@ class JiraTextSourceServiceTest {
     }
 
     @Test
+    @DisplayName("stripHtml tira imagem anexada, link e itálico da marcação do Jira, e deixa as palavras com underline em paz")
+    void stripHtmlWikiLeftovers() {
+        assertEquals("Antes depois", JiraTextSourceService.stripHtml("Antes !image-2026-02-03.png|width=707,height=126! depois"));
+        assertEquals("Antes depois", JiraTextSourceService.stripHtml("Antes !print.png! depois"));
+        assertEquals("Antes depois", JiraTextSourceService.stripHtml("Antes _image-2026-02-03.png|width=707,height=126!_ depois"));
+        assertEquals("Como Gestor de Varejo", JiraTextSourceService.stripHtml("Como _Gestor de Varejo_"));
+        assertEquals("veja o manual", JiraTextSourceService.stripHtml("veja [o manual|https://tdn.totvs.com/x]"));
+        // underline dentro de identificador e nome de arquivo sem "!" não são marcação
+        assertEquals("tabela PROCESSO_CARGA_INT e arquivo.png", JiraTextSourceService.stripHtml("tabela PROCESSO_CARGA_INT e arquivo.png"));
+    }
+
+    @Test
+    @DisplayName("Sugestão de Problema grande fica no primeiro parágrafo que cabe, e não despeja a descrição inteira")
+    void guessIsLimited() {
+        String paragraph = "O fluxo atual de carga não contempla a descida dos vendedores. ".repeat(4).strip();
+        String description = paragraph + "\n\n" + "Segundo parágrafo. ".repeat(60) + "\n\n" + "Terceiro parágrafo.";
+
+        IssueSources s = analyze(issue("PTV-40", description));
+
+        String guess = s.problem().candidates().get(0).text();
+        assertEquals(paragraph, guess);
+        assertFalse(s.problem().candidates().get(0).explicit());
+        assertEquals("", value(s.problem()));
+    }
+
+    @Test
+    @DisplayName("Parágrafo único maior que o limite é cortado no fim de uma frase ou numa palavra, com reticências só no corte seco")
+    void singleHugeParagraphIsCut() {
+        String sentences = "Esta frase tem um tamanho razoável para o teste. ".repeat(40);
+        String cut = JiraTextSourceService.limitGuess(sentences, JiraTextSourceService.MAX_GUESS);
+        assertTrue(cut.length() <= JiraTextSourceService.MAX_GUESS);
+        assertTrue(cut.endsWith("."));
+
+        String noPunctuation = "palavra ".repeat(200);
+        String cutWords = JiraTextSourceService.limitGuess(noPunctuation, JiraTextSourceService.MAX_GUESS);
+        assertTrue(cutWords.length() <= JiraTextSourceService.MAX_GUESS + 1);
+        assertTrue(cutWords.endsWith("…"));
+
+        assertEquals("curto", JiraTextSourceService.limitGuess("  curto ", JiraTextSourceService.MAX_GUESS));
+        assertEquals("", JiraTextSourceService.limitGuess(null, 10));
+    }
+
+    @Test
     @DisplayName("shortDate mostra dia/mês como o Jira escreveu, sem converter fuso")
     void shortDateAsWritten() {
         assertEquals("14/10", JiraTextSourceService.shortDate("2026-10-14T23:59:00.000-0300"));

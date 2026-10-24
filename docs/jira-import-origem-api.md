@@ -57,6 +57,12 @@ interface Field {
 - **`vazio`**: nada confiável.
 - Subtarefas e issue pai só entram quando a própria issue **não** tem texto explícito para o campo. Entre as subtarefas, as
   de codificação/desenvolvimento (tipo ou título com "codifica", "desenvolv", "dev", "coding") valem sozinhas quando existem.
+- **Palpite limitado:** o texto de um palpite (início da descrição, linhas de teste) é encurtado para até 600 caracteres: os
+  primeiros parágrafos que cabem; se o primeiro já passa disso, corta no fim de uma frase ou numa palavra e termina em "…".
+  Fonte explícita não é cortada.
+- **Marcação do Jira:** todo texto devolvido passa pela limpeza de sempre (tags HTML, entidades, títulos `h2.`, negrito,
+  cores, citações) e, agora, também sem imagem anexada (`!arquivo.png|width=1!`), sem link `[texto|https://...]` (fica só o
+  texto) e sem itálico `_texto_` (identificadores como `PROCESSO_CARGA` não são mexidos).
 - Ids de fonte: `campo`, `descricao`, `descricao-inicio`, `descricao-linhas`, `comentario-N` (posição do comentário),
   `subtarefa-CHAVE`, `pai-CHAVE`.
 - `label` já vem pronto para a tela: "Comentário de Ana Ribeiro, 14/10", "Descrição, início do texto", "Issue pai · PTV-1290".

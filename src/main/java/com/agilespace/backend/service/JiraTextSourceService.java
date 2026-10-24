@@ -34,6 +34,8 @@ public class JiraTextSourceService {
 
     private static final int FLAGS = Pattern.CASE_INSENSITIVE | Pattern.MULTILINE | Pattern.UNICODE_CASE | Pattern.UNICODE_CHARACTER_CLASS;
     private static final int MAX_LOOPS = 200;
+    /** Tamanho máximo de um palpite: a sugestão não despeja a descrição inteira no campo. */
+    static final int MAX_GUESS = 600;
 
     // ---- Cabeçalhos conhecidos (iguais aos de jiraService.ts) ----
 
@@ -86,6 +88,14 @@ public class JiraTextSourceService {
     private static final Pattern WIKI_BLOCK = Pattern.compile("\\{(?:quote|noformat|code[^}]*)\\}([\\s\\S]*?)\\{/?(?:quote|noformat|code)\\}", FLAGS);
     private static final Pattern WIKI_BOLD = Pattern.compile("\\*(\\S(?:[^*\\n]*\\S)?)\\*");
     private static final Pattern WIKI_RULE = Pattern.compile("^-{3,}[ \\t]*$", FLAGS);
+    // Imagem anexada: !arquivo.png!, !arquivo.png|width=707,height=126! (e o resto que sobra quando o "!" inicial se perdeu).
+    private static final String IMG_EXT = "(?:png|jpe?g|gif|webp|svg|bmp)";
+    private static final Pattern WIKI_IMAGE = Pattern.compile("_?!([^\\s!|]+\\." + IMG_EXT + ")(?:\\|[^!\\n]*)?!_?", FLAGS);
+    private static final Pattern WIKI_IMAGE_TAIL = Pattern.compile("_?[^\\s!|]+\\." + IMG_EXT + "\\|[^!\\s]*!_?", FLAGS);
+    // Link [texto|https://...] vira só o texto.
+    private static final Pattern WIKI_LINK = Pattern.compile("\\[([^\\]|\\n]+)\\|https?://[^\\]\\s]+\\]", FLAGS);
+    // Itálico _texto_ (fora de palavras com underline, como PROCESSO_CARGA).
+    private static final Pattern WIKI_ITALIC = Pattern.compile("(?<![\\p{L}\\p{N}_])_(\\S(?:[^_\\n]*\\S)?)_(?![\\p{L}\\p{N}_])", FLAGS);
     private static final Pattern SPACES = Pattern.compile("[ \\t]+");
     private static final Pattern BLANK_RUNS = Pattern.compile("\\n{3,}");
     private static final Pattern ANY_SPACE_RUN = Pattern.compile("\\s+", Pattern.UNICODE_CHARACTER_CLASS);
@@ -132,7 +142,7 @@ public class JiraTextSourceService {
 
         List<Candidate> problem = new ArrayList<>(fromComments(comments, HEADER_PROBLEM));
         problem.add(new Candidate("descricao", "descricao", "Descrição, seção “Problema”", section(description, HEADER_PROBLEM), true));
-        problem.add(new Candidate("descricao-inicio", "descricao", "Descrição, início do texto", preamble(description), false));
+        problem.add(new Candidate("descricao-inicio", "descricao", "Descrição, início do texto", limitGuess(preamble(description), MAX_GUESS), false));
 
         List<Candidate> solution = new ArrayList<>(fromComments(comments, HEADER_SOLUTION));
         solution.add(new Candidate("descricao", "descricao", "Descrição, seção “Solução”", section(description, HEADER_SOLUTION), true));
@@ -140,7 +150,7 @@ public class JiraTextSourceService {
         List<Candidate> criteria = new ArrayList<>();
         criteria.add(new Candidate("campo", "campo", "Campo “Critérios de aceite” do Jira", stripHtml(nz(issue.criteriaField())), true));
         criteria.add(new Candidate("descricao", "descricao", "Descrição, seção de critérios", section(description, HEADER_CRITERIA), true));
-        criteria.add(new Candidate("descricao-linhas", "descricao", "Descrição, linhas de teste", guessCriteria(description), false));
+        criteria.add(new Candidate("descricao-linhas", "descricao", "Descrição, linhas de teste", limitGuess(guessCriteria(description), MAX_GUESS), false));
 
         return new Own(classify(problem), classify(solution), classify(criteria));
     }
@@ -264,6 +274,29 @@ public class JiraTextSourceService {
         return stripHtml(pre);
     }
 
+    /**
+     * Encurta um palpite: fica com os primeiros parágrafos que cabem em {@code max} caracteres; se o primeiro já passa disso,
+     * corta no fim de uma frase (ou numa palavra) e termina em "…". Texto que cabe volta como está.
+     */
+    static String limitGuess(String text, int max) {
+        if (text == null) return "";
+        String t = text.strip();
+        if (t.length() <= max) return t;
+        StringBuilder kept = new StringBuilder();
+        for (String paragraph : t.split("\\n{2,}")) {
+            int next = kept.length() == 0 ? paragraph.length() : kept.length() + 2 + paragraph.length();
+            if (next > max) break;
+            if (kept.length() > 0) kept.append("\n\n");
+            kept.append(paragraph);
+        }
+        if (kept.length() > 0) return kept.toString().strip();
+        String cut = t.substring(0, max);
+        int sentence = Math.max(cut.lastIndexOf(". "), Math.max(cut.lastIndexOf("? "), cut.lastIndexOf("! ")));
+        if (sentence > max / 3) return cut.substring(0, sentence + 1).strip();
+        int space = cut.lastIndexOf(' ');
+        return (space > max / 3 ? cut.substring(0, space) : cut).strip() + "…";
+    }
+
     /** Sem cabeçalho de critério: bloco de linhas em Gherkin ou lista com marcador, fora das seções já reconhecidas. */
     static String guessCriteria(String text) {
         if (text == null || text.isEmpty()) return "";
@@ -325,6 +358,10 @@ public class JiraTextSourceService {
         t = WIKI_COLOR.matcher(t).replaceAll("$1");
         t = WIKI_BLOCK.matcher(t).replaceAll("$1");
         t = WIKI_BOLD.matcher(t).replaceAll("$1");
+        t = WIKI_IMAGE.matcher(t).replaceAll("");
+        t = WIKI_IMAGE_TAIL.matcher(t).replaceAll("");
+        t = WIKI_LINK.matcher(t).replaceAll("$1");
+        t = WIKI_ITALIC.matcher(t).replaceAll("$1");
         return WIKI_RULE.matcher(t).replaceAll("");
     }
 
