@@ -37,6 +37,7 @@ public class SprintPlanService {
     private final SprintPlanItemRepository itemRepository;
     private final SprintPlanAssignmentRepository assignmentRepository;
     private final SquadMemberRepository squadMemberRepository;
+    private final SquadRepository squadRepository;
     private final SquadCapacityService squadCapacityService;
     private final SprintPlanCapacityService capacityService;
     private final SprintPlanScopeService scopeService;
@@ -76,6 +77,7 @@ public class SprintPlanService {
         if (jiraSprintId != null && planRepository.existsBySquadIdAndJiraSprintId(squadId, jiraSprintId)) {
             throw conflict("Já existe um plano desta squad para essa sprint.");
         }
+        ensureSquadRow(squadId);
         Instant now = Instant.now();
         SprintPlan plan = SprintPlan.builder()
                 .id(UUID.randomUUID().toString())
@@ -96,9 +98,23 @@ public class SprintPlanService {
         try {
             plan = planRepository.saveAndFlush(plan);
         } catch (DataIntegrityViolationException e) {
+            // Só o índice único (squad + sprint do Jira) vira "já existe"; qualquer outra violação não é duplicado.
+            if (jiraSprintId == null) throw e;
             throw conflict("Já existe um plano desta squad para essa sprint.");
         }
         return toView(plan, true, userId);
+    }
+
+    /**
+     * Squad criada sem o Jira só tem o projeto e o vínculo; a linha em {@code squads} (que o plano referencia) só
+     * nascia no primeiro sync. Sem ela o insert do plano violava a chave estrangeira.
+     */
+    private void ensureSquadRow(String squadId) {
+        if (squadRepository.existsById(squadId)) return;
+        Squad squad = new Squad();
+        squad.setId(squadId);
+        squad.setName(squadId);
+        squadRepository.save(squad);
     }
 
     /** Reserva sugerida = a do último plano da squad que chegou à revisão. */

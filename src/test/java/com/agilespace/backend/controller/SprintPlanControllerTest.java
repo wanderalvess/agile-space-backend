@@ -51,6 +51,7 @@ class SprintPlanControllerTest {
     @Mock SprintPlanItemRepository itemRepository;
     @Mock SprintPlanAssignmentRepository assignmentRepository;
     @Mock SquadMemberRepository memberRepository;
+    @Mock SquadRepository squadRepository;
     @Mock SquadCapacityService squadCapacityService;
     @Mock SprintPlanCapacityService capacityService;
     @Mock SprintPlanScopeService scopeService;
@@ -63,7 +64,7 @@ class SprintPlanControllerTest {
     @BeforeEach
     void setUp() {
         SprintPlanService service = new SprintPlanService(planRepository, personRepository, reserveTypeRepository,
-                absenceRepository, holidayRepository, itemRepository, assignmentRepository, memberRepository,
+                absenceRepository, holidayRepository, itemRepository, assignmentRepository, memberRepository, squadRepository,
                 squadCapacityService, capacityService, scopeService);
         mvc = MockMvcBuilders.standaloneSetup(new SprintPlanController(service, scopeService, distributionService, reviewService, access))
                 .setControllerAdvice(new ErrorMessageAdvice()).build();
@@ -196,6 +197,8 @@ class SprintPlanControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("RASCUNHO"))
                 .andExpect(jsonPath("$.reserve.pct").value(12));
+        // Squad criada sem o Jira não tem linha em squads: o plano a cria antes de gravar (senão violava a FK).
+        verify(squadRepository).save(argThat(s -> "SQ1".equals(s.getId())));
         mvc.perform(as(post("/api/squads/SQ1/sprint-plans"), "pl")
                         .content("{\"jiraSprintId\":\"S3\",\"sprintName\":\"Sprint 3\",\"startDate\":\"2026-11-02\",\"endDate\":\"2026-11-13\"}"))
                 .andExpect(status().isConflict());
