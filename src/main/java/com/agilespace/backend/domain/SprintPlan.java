@@ -10,7 +10,7 @@ import java.util.List;
 
 /**
  * Plano de sprint do Sprint Planner (V86). Um por squad+sprint do Jira (decisão 6). Papel/dias/horas por pessoa NÃO
- * ficam aqui: vêm de squad_person_configs via SquadCapacityService, com sprintKey = jiraSprintId, ou "plan:{id}"
+ * ficam aqui: vêm de squad_person_configs via SquadCapacityService, com sprintKey = jiraSprintId, ou "plan-{id}"
  * enquanto o plano não tem sprint do Jira.
  */
 @Entity
@@ -85,6 +85,7 @@ public class SprintPlan {
 
     /** Chave de sprint usada em squad_person_configs para este plano. */
     public String sprintKey() {
-        return jiraSprintId != null && !jiraSprintId.isBlank() ? jiraSprintId : "plan:" + id;
+        // "plan-" e não "plan:": o backlog só aceita [A-Za-z0-9_-] (SubtaskTypeMappingService.normalizeSprintKey).
+        return jiraSprintId != null && !jiraSprintId.isBlank() ? jiraSprintId : "plan-" + id;
     }
 }
