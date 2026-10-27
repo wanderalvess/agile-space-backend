@@ -495,6 +495,7 @@ public class AuthService {
                 .authProvider(user.getAuthProvider())
                 .jiraAccountId(user.getJiraAccountId())
                 .avatarSeed(user.getAvatarSeed())
+                .photoUrl(UserPhotoService.photoUrl(user))
                 .activeProjectId(activeProjId)
                 .activeProjectName(activeProjName)
                 .activeProjectRole(activeProjRole)

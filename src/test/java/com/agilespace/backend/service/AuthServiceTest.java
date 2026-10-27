@@ -451,6 +451,19 @@ public class AuthServiceTest {
     }
 
     @Test
+    public void testGetMeIncluiPhotoUrlSoQuandoHaFoto() {
+        User user = activeUser();
+        user.setDefaultProjectId("DDWMISSI");
+        when(userRepository.findById("u1")).thenReturn(Optional.of(user));
+        when(userProjectResolverService.resolveUserAccess(user)).thenReturn(accessWith("DDWMISSI"));
+        assertNull(service.getMe("u1").getPhotoUrl());
+
+        user.setPhotoKey("avatar-u1-123.png");
+        user.setPhotoUpdatedAt(java.time.Instant.ofEpochMilli(123));
+        assertEquals("/api/users/u1/photo?v=123", service.getMe("u1").getPhotoUrl());
+    }
+
+    @Test
     public void testGetMeUnknownUserReturnsUnauthorized() {
         when(userRepository.findById("ghost")).thenReturn(Optional.empty());
 

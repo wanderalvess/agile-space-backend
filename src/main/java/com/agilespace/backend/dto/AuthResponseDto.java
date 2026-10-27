@@ -26,6 +26,8 @@ public class AuthResponseDto {
     private String authProvider;
     private String jiraAccountId;
     private String avatarSeed;
+    /** /api/users/{id}/photo?v=... ou null quando a pessoa não tem foto própria. */
+    private String photoUrl;
 
     // Governança & Projetos Resolvidos
     private String activeProjectId;
