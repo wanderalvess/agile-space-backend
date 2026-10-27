@@ -22,3 +22,5 @@ Resposta ao exceder: HTTP 429, cabeçalho `Retry-After` e `{"error": "Muitas req
 O balde é de recarga contínua (300/min = 5 por segundo), não uma janela fixa: passar um pouco do limite bloqueia por cerca de 1 s, e o login (10/min) por 5 a 6 s.
 
 Riscos: contadores zeram ao reiniciar e não são compartilhados entre instâncias (um deploy horizontal exigiria limitador distribuído); os mapas de baldes (por IP e por usuário) não expiram entradas.
+
+Foto de perfil (`/api/users/me/photo`, `/api/users/{id}/photo`): sem balde novo; entram no limite por usuario (300/min). A resposta do GET leva `Cache-Control: private, max-age=86400` e ETag (304 em If-None-Match), entao um avatar repetido na tela nao deve bater no servidor. O upload e limitado a 1 MB por validacao no servico.
