@@ -41,6 +41,10 @@ public class JiraAdminService {
     @Autowired
     private UserRepository userRepository;
 
+    /** Auditoria do cargo preenchido pelo Jira. Opcional: sem ele o preenchimento acontece, só não é auditado. */
+    @Autowired(required = false)
+    private CargoPreenchimento cargoPreenchimento;
+
     @Autowired
     private SquadMetricsRollupRepository squadMetricsRollupRepository;
 
@@ -349,6 +353,7 @@ public class JiraAdminService {
 
             if (request.isSyncUsers() && !(sameOtherKey && member.getClaimedByUid() != null)) {
                 try {
+                    boolean cargoFilled = false;
                     User user = userRepository.findById(m.getJiraAccountId()).orElse(null);
                     if (user == null && m.getEmail() != null && !m.getEmail().isBlank()) {
                         user = userRepository.findByEmail(m.getEmail()).orElse(null);
@@ -362,7 +367,8 @@ public class JiraAdminService {
                         user.setId(m.getJiraAccountId());
                         user.setName(m.getDisplayName());
                         user.setEmail(m.getEmail() != null && !m.getEmail().isBlank() ? m.getEmail() : m.getJiraAccountId() + "@empresa.com");
-                        user.setJobTitle(m.getRole()); // Cargo validado pelo usuário (não é tier de autorização)
+                        // Cargo inicial = role do Jira (canônica). Não é tier de autorização.
+                        user.setJobTitle(CargoNames.canonical(m.getRole()));
                         user.setJiraAccountId(m.getJiraAccountId());
                         user.setAvatarSeed(m.getDisplayName());
                         user.setDailyHours(m.getCapacityHoursPerDay() != null ? m.getCapacityHoursPerDay().intValue() : 8);
@@ -370,17 +376,20 @@ public class JiraAdminService {
                         user.setUpdatedAt(LocalDateTime.now());
                         user = userRepository.save(user);
                     } else {
-                        // Atualiza dados e cargo validado. NUNCA grava em user.role: esse campo é o tier
-                        // de autorização (ver User.role/UserRole) e sincronizar squad não deve poder
-                        // rebaixar/elevar o acesso admin de alguém a partir de um texto de cargo do Jira.
+                        // Atualiza dados. NUNCA grava em user.role: esse campo é o tier de autorização
+                        // (ver User.role/UserRole) e sincronizar squad não deve poder rebaixar/elevar o
+                        // acesso admin de alguém a partir de um texto de cargo do Jira.
+                        // Cargo (users.job_title): o definido na administração vale de ponta a ponta, então a
+                        // sincronização NUNCA o sobrescreve; só preenche quem está sem cargo (role do Jira, canônica).
                         user.setName(m.getDisplayName());
-                        user.setJobTitle(m.getRole());
+                        cargoFilled = CargoNames.fillIfBlank(user, m.getRole());
                         user.setJiraAccountId(m.getJiraAccountId());
                         if (m.getCapacityHoursPerDay() != null) {
                             user.setDailyHours(m.getCapacityHoursPerDay().intValue());
                         }
                         user.setUpdatedAt(LocalDateTime.now());
                         user = userRepository.save(user);
+                        if (cargoFilled && cargoPreenchimento != null) cargoPreenchimento.registrar(user, "sincronização do Jira");
                     }
 
                     member.setClaimedByUid(user.getId());

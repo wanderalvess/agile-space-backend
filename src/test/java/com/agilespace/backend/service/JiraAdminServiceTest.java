@@ -229,7 +229,7 @@ class JiraAdminServiceTest {
             verify(userRepository).save(userCaptor.capture());
             User updated = userCaptor.getValue();
             assertEquals("ADMIN", updated.getRole(), "Papel ADMIN não pode ser rebaixado para MEMBER");
-            assertEquals("Developer", updated.getJobTitle());
+            assertEquals("Desenvolvedor(a)", updated.getJobTitle(), "conta sem cargo recebe a role do Jira, canônica");
             assertEquals(6, updated.getDailyHours());
             assertNull(updated.getDefaultProjectId(), "importar do Jira não grava mais squad na conta (vínculo é project_member_roles)");
         }

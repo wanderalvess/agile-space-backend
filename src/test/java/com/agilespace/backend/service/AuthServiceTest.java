@@ -371,6 +371,40 @@ public class AuthServiceTest {
     }
 
     @Test
+    public void testRegisterFillsEmptyJobTitleFromJiraRosterRowButNeverOverwrites() {
+        ReflectionTestUtils.setField(service, "cargoPreenchimento",
+                new CargoPreenchimento(userRepository, mock(com.agilespace.backend.repository.AuditLogRepository.class)));
+        ProjectMemberRole row = ProjectMemberRole.builder().id("r1").projectId("DDWMISSI").roleName("Developer")
+                .email("nova@empresa.com.br").build();
+        when(userRepository.findByEmail("nova@empresa.com.br")).thenReturn(Optional.empty());
+        when(projectMemberRoleRepository.findByEmailIgnoreCase(anyString())).thenReturn(List.of(row));
+        when(squadMemberRepository.findByUserIdentifier(anyString())).thenReturn(List.of());
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(userProjectResolverService.resolveUserAccess(any(User.class))).thenReturn(accessWith("DDWMISSI"));
+
+        service.register(RegisterRequestDto.builder().email("nova@empresa.com.br").name("Nova").password(RAW_PASSWORD).build());
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userRepository, atLeastOnce()).save(captor.capture());
+        assertEquals("Desenvolvedor(a)", captor.getValue().getJobTitle());
+        assertEquals("MEMBER", captor.getValue().getRole(), "o cargo do Jira nunca vira nivel de acesso");
+
+        // conta-fantasma que ja tem cargo definido: o do Jira nao sobrescreve
+        User ghost = new User();
+        ghost.setId("acc-9");
+        ghost.setEmail("velha@empresa.com.br");
+        ghost.setName("Velha");
+        ghost.setJobTitle("Tech Lead");
+        ghost.setActive(false);
+        ProjectMemberRole row2 = ProjectMemberRole.builder().id("r2").projectId("DDWMISSI").roleName("QA")
+                .email("velha@empresa.com.br").build();
+        when(userRepository.findByEmail("velha@empresa.com.br")).thenReturn(Optional.of(ghost));
+        when(projectMemberRoleRepository.findByEmailIgnoreCase("velha@empresa.com.br")).thenReturn(List.of(row2));
+        service.register(RegisterRequestDto.builder().email("velha@empresa.com.br").name("Velha").password(RAW_PASSWORD).build());
+        assertEquals("Tech Lead", ghost.getJobTitle());
+    }
+
+    @Test
     public void testRegisterOnAlreadyClaimedAccountStillReturnsConflict() {
         User claimed = activeUser(); // ja tem passwordHash setado
         when(userRepository.findByEmail("joao.silva@empresa.com.br")).thenReturn(Optional.of(claimed));

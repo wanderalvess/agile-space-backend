@@ -39,6 +39,10 @@ public class JiraProfieldsService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private RosterMergeService rosterMerge;
 
+    /** Cargo de quem entra sem um, a partir da role do Jira (opcional: ausente em testes unitários). */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CargoPreenchimento cargoPreenchimento;
+
     /** GET no Jira pelo JiraService: TLS estrito primeiro, host bloqueado, redirecionamento só no mesmo host, 429 com retry. */
     private ResponseEntity<String> jiraGet(String url, HttpEntity<Void> entity) {
         return jiraService.exchangeGet(java.net.URI.create(url), entity);
@@ -423,7 +427,13 @@ public class JiraProfieldsService {
             // Tenta vincular com usuário do banco se já existir
             if (m.getEmail() != null && !m.getEmail().isBlank()) {
                 Optional<User> existingUser = userRepository.findByEmail(m.getEmail());
-                existingUser.ifPresent(u -> m.setUserId(u.getId()));
+                existingUser.ifPresent(u -> {
+                    m.setUserId(u.getId());
+                    // Conta que já existia e entra no roster por e-mail: sem cargo, recebe a role do Jira (nunca sobrescreve).
+                    if (cargoPreenchimento != null) {
+                        cargoPreenchimento.preencherSeVazio(u, m.getRoleName(), "importação do Profields " + cleanKey);
+                    }
+                });
             }
         }
 
