@@ -62,7 +62,8 @@ s, j = req('POST', '/projects', adm, {'id': 'ADMTIME', 'name': 'Time do Admin'})
 check('admin cria equipe', s in (200, 409), (s, str(j)[:200]))
 s, j = req('GET', '/projects/ADMTIME', adm)
 mem = (j or {}).get('members') or []
-check('admin fundador entra SEM liderança (Developer)', mem and mem[0].get('roleKey') == 'DEVELOPER' and not mem[0].get('leadership'), mem)
+# desde 1003174 (vínculo) quem cria a equipe recebe o vínculo de liderança
+check('admin fundador entra com liderança (AGILE_MASTER)', mem and mem[0].get('roleKey') == 'AGILE_MASTER' and mem[0].get('leadership'), mem)
 
 # Ana vira AM via roster de outra equipe (como se viesse do Jira)
 psql("delete from project_member_roles where project_id='ADMTIME' and role_key='AGILE_MASTER'")
@@ -75,8 +76,14 @@ mem = (j or {}).get('members') or []
 check('AM fundador entra como AGILE_MASTER com liderança', mem and mem[0].get('roleKey') == 'AGILE_MASTER' and mem[0].get('leadership'), mem)
 s, j = req('POST', '/projects/ANATIME/join?roleName=Agile%20Master', bruno)
 check('join com papel de liderança é recusado', s in (400, 403), (s, j))
+# desde 72fdba6 o join só aceita quem consta no roster (e-mail numa linha ainda sem conta), como viria do Jira
 s, j = req('POST', '/projects/ANATIME/join?roleName=Developer', bruno)
-check('join como Developer funciona', s == 200, (s, str(j)[:200]))
+check('join de quem NÃO consta no roster é recusado (403)', s == 403, (s, str(j)[:200]))
+for email, nome, papel, chave in (('bruno.dev@totvs.com.br', 'Bruno Dev', 'Developer', 'DEVELOPER'), ('carla.qa@totvs.com.br', 'Carla QA', 'QA', 'QA')):
+    psql("insert into project_member_roles (id, project_id, role_name, role_key, display_name, email, user_id, is_leadership, created_at, updated_at) "
+         "values (gen_random_uuid()::text, 'ANATIME', '%s', '%s', '%s', '%s', null, false, now(), now())" % (papel, chave, nome, email))
+s, j = req('POST', '/projects/ANATIME/join?roleName=Developer', bruno)
+check('join como Developer funciona (consta no roster)', s == 200, (s, str(j)[:200]))
 s, j = req('GET', '/projects/user/' + ana_id, bruno)
 check('ver projetos de OUTRA pessoa é recusado (403)', s == 403, (s, str(j)[:150]))
 s, j = req('GET', '/projects/user/' + bruno_id, bruno)
@@ -96,15 +103,17 @@ check('criar quadro', s in (200, 201), (s, str(j)[:300]))
 s, j = req('GET', '/retros/' + bid, ana)
 check('quadro volta com timer e colunas', s == 200 and j.get('timer', {}).get('status') == 'stopped' and len(j.get('columns', [])) == 3, (s, str(j)[:300]))
 
-req('POST', '/projects/ANATIME/join?roleName=QA', carla)
+s, j = req('POST', '/projects/ANATIME/join?roleName=QA', carla)
+check('join como QA funciona (consta no roster)', s == 200, (s, str(j)[:200]))
 for tok, uid, nick in ((ana, ana_id, 'Ana'), (bruno, bruno_id, 'Bruno'), (carla, carla_id, 'Carla')):
     s, j = req('POST', '/retros/%s/participants' % bid, tok, {'id': uid, 'boardId': bid, 'nickname': nick, 'role': 'DEV', 'isCreator': uid == ana_id})
     check('participante %s entra' % nick, s in (200, 201), (s, str(j)[:200]))
 
+# regra de 2026-10-09 (docs/fluxos/retro.md): quem recebe o link entra mesmo sendo de outra squad
 s, j = req('GET', '/retros/' + bid, dani)
-check('intruso NÃO lê quadro de outra squad (403)', s == 403, (s, str(j)[:120]))
+check('outra squad com o link lê o quadro (200)', s == 200, (s, str(j)[:120]))
 s, j = req('GET', '/retros/%s/cards' % bid, dani)
-check('intruso NÃO lê cards (403)', s == 403, s)
+check('outra squad com o link lê os cards (200)', s == 200, s)
 s, j = req('POST', '/retros/%s/participants' % bid, dani, {'id': carla_id, 'boardId': bid, 'nickname': 'x', 'isCreator': True})
 check('intruso NÃO se infiltra como participante (id/creator forjados)', s in (403,) or (s in (200, 201) and j.get('id') == dani_id and not j.get('isCreator')), (s, str(j)[:200]))
 
@@ -234,7 +243,7 @@ check('chat geral envia', s in (200, 201), (s, str(j)[:150]))
 s, j = req('GET', '/retros/%s/chat?channelId=geral' % bid, carla)
 check('chat geral lê', s == 200 and len(j) >= 1, (s, str(j)[:150]))
 s, j = req('GET', '/retros/%s/chat?channelId=geral' % bid, dani)
-check('intruso NÃO lê chat (403)', s == 403, s)
+check('outra squad com o link lê o chat geral (200)', s == 200, s)
 
 print()
 ok = sum(1 for r in results if r[1]); print('RESULTADO: %d/%d' % (ok, len(results)))

@@ -30,7 +30,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const bruno = await open('bruno.dev@totvs.com.br', boardId);
   log(bruno.opened, 'participante abre o WebSocket do quadro', bruno.status);
   const dani = await open('dani.fora@totvs.com.br', boardId);
-  log(!dani.opened, 'intruso (fora da squad) NÃO abre o WebSocket', 'abriu');
+  // regra de 2026-10-09 (docs/fluxos/retro.md): quem recebe o link abre o WebSocket mesmo sendo de outra squad
+  log(dani.opened, 'outra squad com o link abre o WebSocket', dani.status);
   const ghost = await open('bruno.dev@totvs.com.br', 'quadro-que-nao-existe');
   log(!ghost.opened, 'quadro inexistente NÃO abre o WebSocket', 'abriu');
 
