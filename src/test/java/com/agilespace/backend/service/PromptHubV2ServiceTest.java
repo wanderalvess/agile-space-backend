@@ -134,6 +134,21 @@ class PromptHubV2ServiceTest {
     }
 
     @Test
+    @DisplayName("nenhuma ordenação usa precedência de nulo: o Hibernate a rejeita em consulta por Specification (500)")
+    void sortNeverUsesNullPrecedence() {
+        when(promptRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(Page.empty());
+        for (String sort : new String[]{"recent", null, "used", "cloned", "az", "lixo"}) {
+            service.searchPrompts(noFilter(), sort, owner, 0, 10);
+        }
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(promptRepository, times(6)).findAll(any(Specification.class), captor.capture());
+        for (Pageable p : captor.getAllValues()) {
+            p.getSort().forEach(o -> assertEquals(org.springframework.data.domain.Sort.NullHandling.NATIVE,
+                    o.getNullHandling(), "ordenação " + o.getProperty()));
+        }
+    }
+
+    @Test
     @DisplayName("ADMIN vê canModerate; visitante nunca tem favorito nem consulta favoritos")
     void adminModeratesAndVisitorHasNoFavorites() {
         when(promptRepository.findAll(any(Specification.class), any(Pageable.class)))

@@ -365,9 +365,11 @@ public class PromptService {
     private static Sort sortOf(String sort) {
         String s = sort == null ? "recent" : sort.trim().toLowerCase(java.util.Locale.ROOT);
         Sort tie = Sort.by(Sort.Order.desc("updatedAt"), Sort.Order.asc("id"));
+        // Sem nullsLast(): o Hibernate não aplica precedência de nulo em consulta por Specification (lança
+        // UnsupportedOperationException e a tela do Prompt Hub vira 500). As contagens são NOT NULL DEFAULT 0 (V96).
         return switch (s) {
-            case "used" -> Sort.by(Sort.Order.desc("useCount").nullsLast()).and(tie);
-            case "cloned" -> Sort.by(Sort.Order.desc("forkCount").nullsLast()).and(tie);
+            case "used" -> Sort.by(Sort.Order.desc("useCount")).and(tie);
+            case "cloned" -> Sort.by(Sort.Order.desc("forkCount")).and(tie);
             case "az" -> Sort.by(Sort.Order.asc("title").ignoreCase()).and(tie);
             default -> tie;
         };
