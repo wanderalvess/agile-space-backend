@@ -140,9 +140,13 @@ public class UserService {
         if (incoming.getTribeName() != null) existing.setTribeName(incoming.getTribeName());
 
         if (isAdmin) {
-            if (incoming.getJobTitle() != null && !incoming.getJobTitle().equals(existing.getJobTitle())) {
-                audit(actorId, "USER_JOBTITLE_CHANGED", existing, "cargo: " + existing.getJobTitle() + " -> " + incoming.getJobTitle());
-                existing.setJobTitle(incoming.getJobTitle());
+            if (incoming.getJobTitle() != null) {
+                // Cargo canônico (Developer/Dev -> Desenvolvedor(a); QA -> Analista de QA); vazio limpa o cargo.
+                String novoCargo = CargoNames.canonical(incoming.getJobTitle());
+                if (!java.util.Objects.equals(novoCargo, existing.getJobTitle())) {
+                    audit(actorId, "USER_JOBTITLE_CHANGED", existing, "cargo: " + existing.getJobTitle() + " -> " + novoCargo);
+                    existing.setJobTitle(novoCargo);
+                }
             }
             // LEAD reenviado sem mudança (o painel devolve o valor atual) não é erro nem altera nada, mesmo com lead-level=off.
             boolean leadUnchanged = UserRole.isLegacyLead(incoming.getRole()) && UserRole.isLegacyLead(existing.getRole());

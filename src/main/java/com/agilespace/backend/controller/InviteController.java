@@ -33,6 +33,8 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class InviteController {
 
+    private static final int DEFAULT_TEAM_MAX_USES = 25;
+
     private final InviteService inviteService;
     private final UserRepository userRepository;
     private final ProjectMemberRoleRepository projectMemberRoleRepository;
@@ -122,6 +124,44 @@ public class InviteController {
         String invitedBy = caller != null ? caller.getEmail() : (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_EMAIL);
         Invite invite = inviteService.createInvite(squadId, roleName, body.get("email"), invitedBy);
         return ResponseEntity.status(HttpStatus.CREATED).body(invite);
+    }
+
+    /**
+     * Convite de equipe (link multiuso). Mesma permissão do convite individual (requireInviteAccess). Corpo:
+     * roleName, maxUses (ausente = 25; null explícito = sem limite, só ADMIN) e validityDays (ausente = 7, máx. 30).
+     */
+    @PostMapping("/api/squads/{squadId}/invites/team")
+    public ResponseEntity<Invite> createTeamInvite(
+            @PathVariable String squadId,
+            @RequestBody Map<String, Object> body,
+            HttpServletRequest request) {
+        User caller = requireInviteAccess(squadId, request);
+        Object role = body.get("roleName");
+        if (!(role instanceof String roleName) || roleName.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "roleName é obrigatório");
+        }
+        Integer maxUses = body.containsKey("maxUses") ? intOrNull(body.get("maxUses"), "maxUses") : Integer.valueOf(DEFAULT_TEAM_MAX_USES);
+        Integer validityDays = intOrNull(body.get("validityDays"), "validityDays");
+        String tokenRole = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+        boolean admin = "ADMIN".equalsIgnoreCase(tokenRole) || (caller != null && "ADMIN".equalsIgnoreCase(caller.getRole()));
+        String invitedBy = caller != null ? caller.getEmail() : (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_EMAIL);
+        Invite invite = inviteService.createTeamInvite(squadId, roleName, maxUses, validityDays, invitedBy, admin);
+        return ResponseEntity.status(HttpStatus.CREATED).body(invite);
+    }
+
+    @GetMapping("/api/squads/{squadId}/invites/{id}/redemptions")
+    public ResponseEntity<List<Map<String, Object>>> listRedemptions(
+            @PathVariable String squadId,
+            @PathVariable String id,
+            HttpServletRequest request) {
+        requireInviteAccess(squadId, request);
+        return ResponseEntity.ok(inviteService.listRedemptions(id, squadId));
+    }
+
+    private static Integer intOrNull(Object value, String field) {
+        if (value == null) return null;
+        if (value instanceof Number n && n.doubleValue() == n.intValue()) return n.intValue();
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " deve ser um número inteiro");
     }
 
     @GetMapping("/api/squads/{squadId}/invites")

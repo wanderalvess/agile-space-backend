@@ -35,8 +35,15 @@ public class JiraAdminService {
     @Autowired(required = false)
     private SquadMemberExclusions squadMemberExclusions;
 
+    @Autowired(required = false)
+    private RosterMergeService rosterMerge;
+
     @Autowired
     private UserRepository userRepository;
+
+    /** Auditoria do cargo preenchido pelo Jira. Opcional: sem ele o preenchimento acontece, só não é auditado. */
+    @Autowired(required = false)
+    private CargoPreenchimento cargoPreenchimento;
 
     @Autowired
     private SquadMetricsRollupRepository squadMetricsRollupRepository;
@@ -305,18 +312,48 @@ public class JiraAdminService {
         for (JiraMemberCandidateDto m : approvedMembers) {
             membersSaved++;
             String dbId = projectKey + "_" + m.getJiraAccountId();
-            SquadMember member = squadMemberRepository.findById(dbId).orElse(new SquadMember());
+            SquadMember member = squadMemberRepository.findById(dbId).orElse(null);
+            boolean sameOtherKey = false; // a pessoa já está no roster com outra chave: dados existentes valem mais
+            if (member == null) {
+                // Conta nova do Jira para quem já está no roster com outra chave (mesmo e-mail, ou pré-cadastro por nome):
+                // funde na linha existente em vez de criar uma segunda pessoa. Id gerado vira a conta real do Jira.
+                SquadMember same = PersonIdentity.resolve(squadMemberRepository.findBySquadIdOrderByDisplayNameAsc(projectKey),
+                        m.getJiraAccountId(), m.getEmail(), m.getDisplayName());
+                if (same != null && PersonIdentity.shouldAdoptIncomingId(same.getJiraAccountId(), m.getJiraAccountId())) {
+                    squadMemberRepository.delete(same);
+                    squadMemberRepository.flush();
+                    if (rosterMerge != null) rosterMerge.movePersonConfigs(projectKey, same.getJiraAccountId(), m.getJiraAccountId());
+                    member = new SquadMember();
+                    member.setClaimedByUid(same.getClaimedByUid());
+                    member.setCalibrationNotes(same.getCalibrationNotes());
+                    member.setOverrideType(same.getOverrideType());
+                    member.setCapacityHoursPerDay(same.getCapacityHoursPerDay());
+                    member.setClaimedByUid(same.getClaimedByUid() != null ? same.getClaimedByUid() : member.getClaimedByUid());
+                } else if (same != null) {
+                    member = same;
+                    dbId = same.getDbId();
+                    sameOtherKey = true;
+                }
+            }
+            if (member == null) member = new SquadMember();
             member.setDbId(dbId);
             member.setSquadId(projectKey);
-            member.setJiraAccountId(m.getJiraAccountId());
-            member.setDisplayName(m.getDisplayName());
-            member.setEmail(m.getEmail());
-            member.setRole(m.getRole());
-            member.setCapacityHoursPerDay(m.getCapacityHoursPerDay() != null ? m.getCapacityHoursPerDay() : 8.0);
+            if (member.getJiraAccountId() == null || dbId.equals(projectKey + "_" + m.getJiraAccountId())) {
+                member.setJiraAccountId(m.getJiraAccountId());
+            }
+            // A chave interna do Jira (JIRAUSER) não traz e-mail: não apaga o que a linha existente já tem.
+            if (!sameOtherKey || member.getDisplayName() == null) member.setDisplayName(PersonIdentity.cleanName(m.getDisplayName()));
+            String incomingEmail = PersonIdentity.normEmail(m.getEmail());
+            if (incomingEmail != null || member.getEmail() == null) member.setEmail(incomingEmail);
+            if (!sameOtherKey || member.getRole() == null) member.setRole(m.getRole());
+            // Horas calibradas à mão valem mais que o padrão da prévia: reimportar não pode zerar a calibração.
+            boolean calibrated = RosterMergeService.MANUAL.equalsIgnoreCase(member.getOverrideType()) && member.getCapacityHoursPerDay() != null;
+            if (!calibrated) member.setCapacityHoursPerDay(m.getCapacityHoursPerDay() != null ? m.getCapacityHoursPerDay() : 8.0);
             member.setUpdatedAt(Instant.now().toString());
 
-            if (request.isSyncUsers()) {
+            if (request.isSyncUsers() && !(sameOtherKey && member.getClaimedByUid() != null)) {
                 try {
+                    boolean cargoFilled = false;
                     User user = userRepository.findById(m.getJiraAccountId()).orElse(null);
                     if (user == null && m.getEmail() != null && !m.getEmail().isBlank()) {
                         user = userRepository.findByEmail(m.getEmail()).orElse(null);
@@ -330,7 +367,8 @@ public class JiraAdminService {
                         user.setId(m.getJiraAccountId());
                         user.setName(m.getDisplayName());
                         user.setEmail(m.getEmail() != null && !m.getEmail().isBlank() ? m.getEmail() : m.getJiraAccountId() + "@empresa.com");
-                        user.setJobTitle(m.getRole()); // Cargo validado pelo usuário (não é tier de autorização)
+                        // Cargo inicial = role do Jira (canônica). Não é tier de autorização.
+                        user.setJobTitle(CargoNames.canonical(m.getRole()));
                         user.setJiraAccountId(m.getJiraAccountId());
                         user.setAvatarSeed(m.getDisplayName());
                         user.setDailyHours(m.getCapacityHoursPerDay() != null ? m.getCapacityHoursPerDay().intValue() : 8);
@@ -338,17 +376,20 @@ public class JiraAdminService {
                         user.setUpdatedAt(LocalDateTime.now());
                         user = userRepository.save(user);
                     } else {
-                        // Atualiza dados e cargo validado. NUNCA grava em user.role: esse campo é o tier
-                        // de autorização (ver User.role/UserRole) e sincronizar squad não deve poder
-                        // rebaixar/elevar o acesso admin de alguém a partir de um texto de cargo do Jira.
+                        // Atualiza dados. NUNCA grava em user.role: esse campo é o tier de autorização
+                        // (ver User.role/UserRole) e sincronizar squad não deve poder rebaixar/elevar o
+                        // acesso admin de alguém a partir de um texto de cargo do Jira.
+                        // Cargo (users.job_title): o definido na administração vale de ponta a ponta, então a
+                        // sincronização NUNCA o sobrescreve; só preenche quem está sem cargo (role do Jira, canônica).
                         user.setName(m.getDisplayName());
-                        user.setJobTitle(m.getRole());
+                        cargoFilled = CargoNames.fillIfBlank(user, m.getRole());
                         user.setJiraAccountId(m.getJiraAccountId());
                         if (m.getCapacityHoursPerDay() != null) {
                             user.setDailyHours(m.getCapacityHoursPerDay().intValue());
                         }
                         user.setUpdatedAt(LocalDateTime.now());
                         user = userRepository.save(user);
+                        if (cargoFilled && cargoPreenchimento != null) cargoPreenchimento.registrar(user, "sincronização do Jira");
                     }
 
                     member.setClaimedByUid(user.getId());
@@ -359,6 +400,7 @@ public class JiraAdminService {
 
             squadMemberRepository.save(member);
         }
+        consolidateRoster(projectKey);
 
         return JiraSyncResult.builder()
                 .squadId(projectKey)
@@ -366,6 +408,17 @@ public class JiraAdminService {
                 .membersFound(membersSaved)
                 .syncedAt(Instant.now().toString())
                 .build();
+    }
+
+    /** Funde pares da mesma pessoa que já estavam no roster (ex.: chave interna JIRAUSER x nome de usuário). Nunca derruba a importação. */
+    private void consolidateRoster(String squadId) {
+        if (rosterMerge == null) return;
+        try {
+            int n = rosterMerge.consolidate(squadId);
+            if (n > 0) log.info("Importação da Squad {}: {} linha(s) duplicada(s) do roster fundida(s).", squadId, n);
+        } catch (Exception e) {
+            log.warn("Importação da Squad {}: não foi possível fundir duplicatas do roster: {}", squadId, e.getMessage());
+        }
     }
 
     /**
@@ -408,6 +461,7 @@ public class JiraAdminService {
                     JsonNode fieldValue = fEntry.getValue();
                     String rawRoleName = fieldNamesMap.getOrDefault(fieldKey, fieldKey);
 
+                    if ("project".equalsIgnoreCase(fieldKey) || "issuetype".equalsIgnoreCase(fieldKey)) continue;
                     if ("assignee".equalsIgnoreCase(fieldKey)) {
                         rawRoleName = "Developer";
                     } else if ("reporter".equalsIgnoreCase(fieldKey) || "creator".equalsIgnoreCase(fieldKey)) {
@@ -490,8 +544,48 @@ public class JiraAdminService {
                combined.contains("automation");
     }
 
+    /** Prefixos de caixa compartilhada/serviço no e-mail ou usuário (ex.: engenharia.vd@...): não é uma pessoa, precisa de revisão. */
+    private static final java.util.regex.Pattern SHARED_MAILBOX = java.util.regex.Pattern.compile(
+            "^(engenharia|suporte|support|atendimento|noreply|no-reply|naoresponda|contato|financeiro|automacao|integracao)[._-].*");
+
+    /**
+     * Conta que parece caixa compartilhada ou de serviço (não pessoa): o e-mail ou o usuário começa com um prefixo de área
+     * seguido de ponto/hífen/sublinhado (engenharia.vd). Só olha a parte local do e-mail e o nome de usuário, nunca o nome
+     * de exibição, para não barrar pessoa real de nome parecido.
+     */
+    static boolean looksLikeSharedMailbox(String email, String accountId) {
+        for (String raw : new String[] {email, accountId}) {
+            if (raw == null || raw.isBlank()) continue;
+            String local = raw.trim().toLowerCase(java.util.Locale.ROOT);
+            int at = local.indexOf('@');
+            if (at >= 0) local = local.substring(0, at);
+            if (SHARED_MAILBOX.matcher(local).matches()) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Conta de aplicativo/integração do Jira Cloud ({@code accountType != atlassian/customer}) ou de add-on do Server
+     * ({@code addon_...}); nunca é pessoa.
+     */
+    static boolean isApplicationAccount(JsonNode node) {
+        if (node == null || !node.isObject()) return false;
+        if (node.hasNonNull("accountType")) {
+            String t = node.get("accountType").asText("").toLowerCase(java.util.Locale.ROOT);
+            if (!t.isEmpty() && !t.equals("atlassian") && !t.equals("customer")) return true;
+        }
+        for (String f : new String[] {"name", "key"}) {
+            if (node.hasNonNull(f) && node.get(f).asText("").toLowerCase(java.util.Locale.ROOT).startsWith("addon_")) return true;
+        }
+        return false;
+    }
+
     private boolean isUserObject(JsonNode node) {
         if (node == null || !node.isObject()) return false;
+        // Objeto com "self" que não é de usuário (projeto, componente, versão, status...) nunca é pessoa. Sem isto, o campo
+        // "project" das issues ({name: "Projeto X - Y", key: "ABC"}) entrava como pessoa sem e-mail com o nome da squad.
+        if (node.hasNonNull("self") && !node.get("self").asText().contains("/user")) return false;
+        if (isApplicationAccount(node)) return false;
         if (node.has("self") && node.get("self").asText().contains("/user")) return true;
         if (node.has("actorUser") && node.get("actorUser").isObject()) return true;
         if (node.has("displayName") && (node.has("name") || node.has("key") || node.has("accountId") || node.has("emailAddress") || node.has("avatarUrls") || node.has("active"))) return true;

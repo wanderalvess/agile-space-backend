@@ -3,6 +3,7 @@ package com.agilespace.backend.service;
 import com.agilespace.backend.domain.ShowcaseMember;
 import com.agilespace.backend.domain.ShowcaseSession;
 import com.agilespace.backend.domain.ShowcaseTask;
+import com.agilespace.backend.dto.ShowcaseFieldOriginDto;
 import com.agilespace.backend.repository.ShowcaseMemberRepository;
 import com.agilespace.backend.repository.ShowcaseSessionRepository;
 import com.agilespace.backend.repository.ShowcaseTaskRepository;
@@ -47,6 +48,9 @@ class ShowcaseSessionServiceTest {
 
     @Mock
     private ShowcaseTaskFileService fileService;
+
+    @Mock
+    private ShowcaseTaskOriginService originService;
 
     @InjectMocks
     private ShowcaseSessionService service;
@@ -319,6 +323,70 @@ class ShowcaseSessionServiceTest {
             assertThrows(ResponseStatusException.class, () -> service.saveSession(blank, "user-author"));
             verify(repository, never()).save(any());
             verify(webSocketHandler, never()).broadcastEvent(any(), any(), any());
+        }
+    }
+    @Nested
+    @DisplayName("Origem dos textos importados do Jira")
+    class OriginTests {
+
+        private ShowcaseFieldOriginDto origin() {
+            return new ShowcaseFieldOriginDto("problem", "descricao", "Descrição, início do texto", "Texto do Jira", null, null);
+        }
+
+        @Test
+        @DisplayName("Card que chega com origins valida antes de regravar e guarda depois, com o autor do token")
+        void shouldValidateThenStoreOrigins() {
+            ShowcaseTask task = ShowcaseTask.builder().id("t1").title("Importada").origins(List.of(origin())).build();
+            sampleSession.setTasks(new ArrayList<>(List.of(task)));
+            when(repository.save(any(ShowcaseSession.class))).thenAnswer(i -> i.getArgument(0));
+
+            service.saveSession(sampleSession, "user-sm");
+
+            var order = inOrder(originService, taskRepository);
+            order.verify(originService).validateOnly(eq("session-456"), eq("t1"), any());
+            order.verify(taskRepository).saveAll(any());
+            order.verify(originService).replace(eq("session-456"), eq("t1"), any(), eq("user-sm"));
+            verify(originService).removeOrphans(eq("session-456"), eq(java.util.Set.of("t1")));
+        }
+
+        @Test
+        @DisplayName("Cliente que não manda origins não mexe nas origens gravadas")
+        void shouldLeaveOriginsAloneWhenClientDoesNotSendThem() {
+            ShowcaseTask task = ShowcaseTask.builder().id("t1").title("Sem origins").build();
+            sampleSession.setTasks(new ArrayList<>(List.of(task)));
+            when(repository.save(any(ShowcaseSession.class))).thenAnswer(i -> i.getArgument(0));
+
+            service.saveSession(sampleSession, "user-sm");
+
+            verify(originService, never()).replace(any(), any(), any(), any());
+            verify(originService, never()).validateOnly(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Origem inválida (400) para antes de a Review ser regravada")
+        void shouldRejectInvalidOriginBeforeRewriting() {
+            ShowcaseTask task = ShowcaseTask.builder().id("t1").title("Ruim").origins(List.of(origin())).build();
+            sampleSession.setTasks(new ArrayList<>(List.of(task)));
+            when(repository.save(any(ShowcaseSession.class))).thenAnswer(i -> i.getArgument(0));
+            doThrow(new ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "origins.field inválido"))
+                    .when(originService).validateOnly(any(), any(), any());
+
+            assertThrows(ResponseStatusException.class, () -> service.saveSession(sampleSession, "user-sm"));
+
+            verify(taskRepository, never()).deleteBySessionId(any());
+            verify(taskRepository, never()).saveAll(any());
+        }
+
+        @Test
+        @DisplayName("Ler a Review monta as origens de cada card")
+        void shouldAttachOriginsOnRead() {
+            ShowcaseTask task = ShowcaseTask.builder().id("t1").sessionId("session-456").title("T").order(0).build();
+            when(repository.findById("session-456")).thenReturn(Optional.of(sampleSession));
+            when(taskRepository.findBySessionIdOrderByOrderAsc("session-456")).thenReturn(List.of(task));
+
+            service.getSession("session-456");
+
+            verify(originService).attach(eq("session-456"), eq(List.of(task)));
         }
     }
 }

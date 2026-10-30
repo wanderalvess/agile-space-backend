@@ -4,10 +4,12 @@ import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
 import io.github.bucket4j.ConsumptionProbe;
 import io.github.bucket4j.Refill;
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -23,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 /**
- * Limite de requisições por IP, em memória — suficiente pra uma instância única (ver
+ * Limite de requisições em memória (por usuário quando há JWT válido, senão por IP) — suficiente pra uma instância única (ver
  * docker-compose.yml/DEPLOYMENT.md; não há deploy horizontal hoje, um limitador distribuído
  * tipo Redis seria over-engineering nesse estágio). Duas faixas: uma bem mais apertada pra
  * /api/auth/** (login/registro são alvo natural de força bruta e enumeração de e-mail) e uma
@@ -38,11 +40,44 @@ import java.util.concurrent.ConcurrentMap;
 @Order(Ordered.HIGHEST_PRECEDENCE + 5)
 public class RateLimitFilter extends OncePerRequestFilter {
 
-    private static final int AUTH_CAPACITY = 10;
-    private static final Duration AUTH_REFILL_PERIOD = Duration.ofMinutes(1);
+    private static final Duration REFILL_PERIOD = Duration.ofMinutes(1);
+    private static final String PUBLIC_INVITE_PREFIX = "/api/public/invites/";
 
-    private static final int GENERAL_CAPACITY = 300;
-    private static final Duration GENERAL_REFILL_PERIOD = Duration.ofMinutes(1);
+    // Padrões = comportamento anterior (10/min nas rotas de entrada, 300/min geral por IP).
+    private int authCapacity = 10;
+    private int generalCapacity = 300;
+    private int userCapacity = 300;
+    private int publicInviteCapacity = 1200;
+    private boolean perUserEnabled = true;
+
+    @Value("${app.ratelimit.auth-per-ip-per-minute:10}")
+    void setAuthCapacity(int v) { this.authCapacity = Math.max(1, v); }
+
+    @Value("${app.ratelimit.general-per-ip-per-minute:300}")
+    void setGeneralCapacity(int v) { this.generalCapacity = Math.max(1, v); }
+
+    /** Requisições com JWT válido contam por id do usuário, não por IP. */
+    @Value("${app.ratelimit.user-per-minute:300}")
+    void setUserCapacity(int v) { this.userCapacity = Math.max(1, v); }
+
+    /** Leitura pública do convite (/api/public/invites/**): por IP, em balde próprio. */
+    @Value("${app.ratelimit.public-invite-per-ip-per-minute:1200}")
+    void setPublicInviteCapacity(int v) { this.publicInviteCapacity = Math.max(1, v); }
+
+    /** false = tudo volta a contar só por IP (comportamento antigo). */
+    @Value("${app.ratelimit.per-user-enabled:true}")
+    void setPerUserEnabled(boolean v) { this.perUserEnabled = v; }
+
+    private final JwtTokenUtil jwtTokenUtil;
+
+    public RateLimitFilter() {
+        this(null);
+    }
+
+    @Autowired
+    public RateLimitFilter(JwtTokenUtil jwtTokenUtil) {
+        this.jwtTokenUtil = jwtTokenUtil;
+    }
 
     /**
      * Proxies reversos confiáveis (IPs/CIDRs, separados por vírgula; TRUSTED_PROXIES). Vazio = X-Forwarded-For é
@@ -58,6 +93,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     private final ConcurrentMap<String, Bucket> authBuckets = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Bucket> generalBuckets = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Bucket> userBuckets = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Bucket> inviteBuckets = new ConcurrentHashMap<>();
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -70,11 +107,18 @@ public class RateLimitFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
-        boolean isAuthPath = isStrictAuthPath(request.getRequestURI());
-        String clientIp = clientIp(request);
-
-        ConcurrentMap<String, Bucket> buckets = isAuthPath ? authBuckets : generalBuckets;
-        Bucket bucket = buckets.computeIfAbsent(clientIp, ip -> isAuthPath ? newAuthBucket() : newGeneralBucket());
+        String uri = request.getRequestURI();
+        Bucket bucket;
+        if (isStrictAuthPath(uri)) {
+            bucket = authBuckets.computeIfAbsent(clientIp(request), k -> newBucket(authCapacity));
+        } else if (uri.startsWith(PUBLIC_INVITE_PREFIX)) {
+            bucket = inviteBuckets.computeIfAbsent(clientIp(request), k -> newBucket(publicInviteCapacity));
+        } else {
+            String userId = authenticatedUserId(request);
+            bucket = userId != null
+                    ? userBuckets.computeIfAbsent(userId, k -> newBucket(userCapacity))
+                    : generalBuckets.computeIfAbsent(clientIp(request), k -> newBucket(generalCapacity));
+        }
 
         ConsumptionProbe probe = bucket.tryConsumeAndReturnRemaining(1);
         if (!probe.isConsumed()) {
@@ -83,7 +127,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
             response.setHeader("Retry-After", String.valueOf(retryAfterSeconds));
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             response.setCharacterEncoding("UTF-8");
-            response.getWriter().write("{\"error\": \"Muitas requisições. Tente novamente em instantes.\"}");
+            // "message" é a chave que o resto da API usa; "error" fica por compatibilidade com quem já lê o formato antigo.
+            String msg = "Muitas requisições. Tente de novo em " + retryAfterSeconds + " s.";
+            response.getWriter().write("{\"error\": \"" + msg + "\", \"message\": \"" + msg + "\"}");
             return;
         }
 
@@ -107,14 +153,25 @@ public class RateLimitFilter extends OncePerRequestFilter {
         return STRICT_AUTH_PATHS.contains(path);
     }
 
-    private Bucket newAuthBucket() {
-        Bandwidth limit = Bandwidth.classic(AUTH_CAPACITY, Refill.greedy(AUTH_CAPACITY, AUTH_REFILL_PERIOD));
+    private static Bucket newBucket(int capacity) {
+        Bandwidth limit = Bandwidth.classic(capacity, Refill.greedy(capacity, REFILL_PERIOD));
         return Bucket.builder().addLimit(limit).build();
     }
 
-    private Bucket newGeneralBucket() {
-        Bandwidth limit = Bandwidth.classic(GENERAL_CAPACITY, Refill.greedy(GENERAL_CAPACITY, GENERAL_REFILL_PERIOD));
-        return Bucket.builder().addLimit(limit).build();
+    /**
+     * Id do usuário se o Bearer for um JWT válido (assinatura e validade conferidas, então um token
+     * forjado cai no balde do IP e não cria baldes por usuário); null caso contrário.
+     */
+    private String authenticatedUserId(HttpServletRequest request) {
+        if (!perUserEnabled || jwtTokenUtil == null) return null;
+        String header = request.getHeader("Authorization");
+        if (header == null || !header.startsWith("Bearer ")) return null;
+        try {
+            JsonNode claims = jwtTokenUtil.validateAndExtractClaims(header);
+            return claims != null && claims.hasNonNull("sub") ? claims.get("sub").asText() : null;
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     private String clientIp(HttpServletRequest request) {

@@ -565,6 +565,39 @@ public class JiraService {
     }
 
     /**
+     * Sprints futuras e ativas de um quadro Scrum (/rest/agile/1.0/board/{id}/sprint?state=future,active). Devolve o
+     * JSON do Jira ({values:[{id,name,state,startDate,endDate,goal}]}).
+     */
+    public ResponseEntity<String> listBoardSprints(String domain, String token, String boardId) {
+        String cleanDomain = cleanDomain(domain);
+        URI jiraUri;
+        try {
+            jiraUri = new URI("https://" + cleanDomain + "/rest/agile/1.0/board/"
+                    + java.net.URLEncoder.encode(boardId.trim(), java.nio.charset.StandardCharsets.UTF_8)
+                    + "/sprint?state=future,active&maxResults=50");
+        } catch (Exception e) {
+            return ResponseEntity.status(statusFor(e))
+                    .body(jsonError("Erro ao construir URL do Jira: " + describe(e)));
+        }
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", "Bearer " + token.trim());
+        headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+        headers.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+        try {
+            ResponseEntity<String> response = exchangeSecure(jiraUri, entity, String.class);
+            return ResponseEntity.ok(response.getBody());
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            log.warn("Jira board sprints failed with status {}", e.getStatusCode());
+            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+        } catch (Exception e) {
+            log.warn("Jira board sprints failed: {}", e.getMessage());
+            return ResponseEntity.status(statusFor(e))
+                    .body(jsonError("Erro ao buscar sprints no Jira: " + describe(e)));
+        }
+    }
+
+    /**
      * Busca metadados oficiais de uma sprint (/rest/agile/1.0/sprint/{id}) —
      * nome/estado/datas vindos direto do Jira, em vez de confiar no blob
      * embutido no customfield Sprint das issues (que no formato Server/DC é

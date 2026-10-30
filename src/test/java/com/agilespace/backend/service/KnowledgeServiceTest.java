@@ -54,15 +54,15 @@ class KnowledgeServiceTest {
     class SearchAndListTests {
 
         @Test
-        @DisplayName("Deve listar documentos ativos excluindo registros deletados quando sem filtros")
+        @DisplayName("Deve listar só publicados e indexados quando sem filtros")
         void shouldListActiveDocumentsWithoutFilter() {
             Page<KnowledgeDocument> page = new PageImpl<>(Collections.singletonList(new KnowledgeDocument()));
-            when(repository.findByStatusNot(eq("deleted"), any(Pageable.class))).thenReturn(page);
+            when(repository.findByStatusIn(eq(KnowledgeService.LISTED_STATUSES), any(Pageable.class))).thenReturn(page);
 
             Page<KnowledgeDocument> result = service.listDocuments(null, null, PageRequest.of(0, 10));
 
             assertEquals(1, result.getTotalElements());
-            verify(repository).findByStatusNot(eq("deleted"), any(Pageable.class));
+            verify(repository).findByStatusIn(eq(KnowledgeService.LISTED_STATUSES), any(Pageable.class));
         }
 
         @Test
@@ -72,7 +72,7 @@ class KnowledgeServiceTest {
                     .tags(new HashSet<>(Arrays.asList("react", "architecture")))
                     .build();
             Page<KnowledgeDocument> page = new PageImpl<>(Collections.singletonList(doc));
-            when(repository.searchActive(eq("arquitetura"), eq("deleted"), any(Pageable.class))).thenReturn(page);
+            when(repository.searchByStatuses(eq("arquitetura"), eq(KnowledgeService.LISTED_STATUSES), any(Pageable.class))).thenReturn(page);
 
             Set<String> tags = Collections.singleton("react");
             Page<KnowledgeDocument> result = service.listDocuments("arquitetura", tags, PageRequest.of(0, 10));

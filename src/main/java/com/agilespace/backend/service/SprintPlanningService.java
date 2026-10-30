@@ -26,6 +26,11 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+/**
+ * @deprecated Serviço da API antiga do planejamento (V19, sem squad); substituído pelo Sprint Planner
+ * ({@code com.agilespace.backend.service.sprintplan}). Não remover dados nesta rodada.
+ */
+@Deprecated
 @Slf4j
 public class SprintPlanningService {
 

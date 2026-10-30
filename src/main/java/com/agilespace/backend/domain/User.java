@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.*;
+import java.time.Instant;
 import java.time.LocalDateTime;
 
 @Entity
@@ -82,6 +83,16 @@ public class User {
 
     @Column(name = "avatar_seed")
     private String avatarSeed;
+
+    /** Chave da foto de perfil no FileStorage. Interna: o cliente só vê photoUrl (UserPhotoService). */
+    @JsonIgnore
+    @Column(name = "photo_key")
+    private String photoKey;
+
+    /** Quando a foto foi trocada; versiona a URL e o ETag. */
+    @JsonIgnore
+    @Column(name = "photo_updated_at")
+    private Instant photoUpdatedAt;
 
     @Column(name = "daily_hours")
     private Integer dailyHours;

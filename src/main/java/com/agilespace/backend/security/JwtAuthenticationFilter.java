@@ -38,9 +38,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             // Conclui a redefinição de senha com o token do link (quem usa não tem sessão).
             "/api/auth/reset-password",
             "/api/public",
-            // Execução pública da transformação JOLT no motor Java Bazaarvoice
-            "/api/jolt/transform",
-            "/api/jolt/engine-info",
+            // /api/jolt/transform e /api/jolt/engine-info exigem login (decisão de 2026-10: antes eram públicos).
             // API pública com API key própria (ApiKeyAuthenticationFilter), não JWT de sessão.
             "/api/v1",
             // Changelog é público por design (visível sem login) — ver ChangelogController.

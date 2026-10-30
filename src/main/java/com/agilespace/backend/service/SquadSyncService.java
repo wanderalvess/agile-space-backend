@@ -82,6 +82,7 @@ public class SquadSyncService {
     private final SquadCapacityService squadCapacityService;
     private final UserJiraConfigRepository userJiraConfigRepository;
     private final ObjectMapper objectMapper;
+    private final JiraDateFieldResolver dateFieldResolver;
 
     private static List<String> concat(List<String> base, String extra) {
         List<String> out = new ArrayList<>(base);
@@ -140,11 +141,13 @@ public class SquadSyncService {
 
         List<String> baseFields = rankingEnabled ? SQUAD_SYNC_FIELDS_WITH_WORKLOG : SQUAD_SYNC_FIELDS_BASE;
         List<String> fields = sprintFieldConfigured ? concat(baseFields, config.getSprintFieldId()) : baseFields;
+        JiraDateFieldResolver.IdPair dateIds = resolveDateFieldIds(config, creds);
+        fields = withDateFields(fields, dateIds);
 
         String deltaJql = isFull ? config.getSyncJql()
                 : "(" + config.getSyncJql() + ") AND updated >= \"" + formatForJql(subtractMinutesToIso(config.getLastSyncAt(), 2)) + "\"";
 
-        FetchResult fetched = fetchAllIssues(creds.domain(), creds.token(), deltaJql, fields, config.getSprintFieldId(), isFull);
+        FetchResult fetched = fetchAllIssues(creds.domain(), creds.token(), deltaJql, fields, config.getSprintFieldId(), isFull, dateIds);
         List<ParsedJiraIssue> issues = fetched.issues();
         boolean truncated = fetched.truncated();
 
@@ -164,7 +167,7 @@ public class SquadSyncService {
         if (!isFull && !isBlank(config.getActiveSprintId())
                 && !effectiveSprintId.equals(config.getActiveSprintId()) && !UNMAPPED_SPRINT_ID.equals(effectiveSprintId)) {
             isFull = true;
-            FetchResult full = fetchAllIssues(creds.domain(), creds.token(), config.getSyncJql(), fields, config.getSprintFieldId(), true);
+            FetchResult full = fetchAllIssues(creds.domain(), creds.token(), config.getSyncJql(), fields, config.getSprintFieldId(), true, dateIds);
             issues = full.issues();
             truncated = truncated || full.truncated();
             mapped = mapIssuesToSnapshots(issues, syncedAt);
@@ -289,6 +292,8 @@ public class SquadSyncService {
         boolean rankingEnabled = Boolean.TRUE.equals(config.getRankingEnabled());
         List<String> baseFields = rankingEnabled ? SQUAD_SYNC_FIELDS_WITH_WORKLOG : SQUAD_SYNC_FIELDS_BASE;
         List<String> fields = !isBlank(config.getSprintFieldId()) ? concat(baseFields, config.getSprintFieldId()) : baseFields;
+        JiraDateFieldResolver.IdPair dateIds = resolveDateFieldIds(config, creds);
+        fields = withDateFields(fields, dateIds);
 
         String targetJql = Pattern.compile("sprint\\s+in\\s+openSprints\\(\\)", Pattern.CASE_INSENSITIVE)
                 .matcher(config.getSyncJql()).find()
@@ -296,7 +301,7 @@ public class SquadSyncService {
                         .matcher(config.getSyncJql()).replaceFirst("sprint = " + Matcher.quoteReplacement(targetSprintId))
                 : "project = " + config.getJiraProjectKey() + " AND sprint = " + targetSprintId;
 
-        FetchResult fetched = fetchAllIssues(creds.domain(), creds.token(), targetJql, fields, config.getSprintFieldId(), true);
+        FetchResult fetched = fetchAllIssues(creds.domain(), creds.token(), targetJql, fields, config.getSprintFieldId(), true, dateIds);
         if (fetched.truncated()) {
             log.warn("[squad:{}] forceResyncSprint truncado no teto de páginas — pode haver issues fora do escopo sincronizado.", squadId);
         }
@@ -469,14 +474,16 @@ public class SquadSyncService {
 
     private record WorklogEntry(String authorId, String authorName, long timeSpentSeconds, Instant started) {}
 
-    private record ParsedJiraIssue(
+    record ParsedJiraIssue(
             String key, String title, String type, boolean isBug, String status, String statusCategory,
             long estimateSec, long remainingSec, long loggedSec,
             String updatedAtJira, String createdAtJira, String resolutionDate, String dueDate,
             String targetStart, String targetEnd, boolean datesAreInferred,
             String assigneeId, String assigneeName, String parentKey, String parentTitle,
             JsonNode sprintRaw, List<String> subtaskKeys, List<WorklogEntry> worklogs,
-            List<ChangelogEntry> changelog
+            List<ChangelogEntry> changelog,
+            // Sprint Planner (V89): ids e estimativa PRÓPRIA (sem aggregate*). Não entram em métrica nenhuma.
+            String typeId, String statusId, Long ownEstimateSec, Long ownRemainingSec
     ) {}
 
     // field usa nomes diferentes conforme o campo do Jira: status manda fromString/toString
@@ -485,14 +492,28 @@ public class SquadSyncService {
     private record ChangelogEntry(Instant created, List<ChangelogItem> items) {}
 
     private FetchResult fetchAllIssues(String domain, String token, String jql, List<String> fields, String sprintFieldId) {
-        return fetchAllIssues(domain, token, jql, fields, sprintFieldId, false);
+        return fetchAllIssues(domain, token, jql, fields, sprintFieldId, false, JiraDateFieldResolver.IdPair.NONE);
+    }
+
+    private JiraDateFieldResolver.IdPair resolveDateFieldIds(Squad config, JiraCreds creds) {
+        if (dateFieldResolver == null) return JiraDateFieldResolver.IdPair.NONE;
+        return dateFieldResolver.effectiveIds(config, creds.domain(), creds.token());
+    }
+
+    private static List<String> withDateFields(List<String> fields, JiraDateFieldResolver.IdPair ids) {
+        List<String> out = new ArrayList<>(fields);
+        for (String id : new String[]{ids.start(), ids.end()}) {
+            if (id != null && !id.isBlank() && !out.contains(id)) out.add(id);
+        }
+        return out;
     }
 
     // includeChangelog liga expand=changelog no Jira — payload bem mais pesado (histórico
     // inteiro de transições por issue), então só o sync FULL pede isso, pra cycle
     // time/scope churn (ver buildRollup) — nunca no sync delta. Ver plano de unificação
     // Squad Pulse, Fase 7.
-    private FetchResult fetchAllIssues(String domain, String token, String jql, List<String> fields, String sprintFieldId, boolean includeChangelog) {
+    private FetchResult fetchAllIssues(String domain, String token, String jql, List<String> fields, String sprintFieldId, boolean includeChangelog,
+                                       JiraDateFieldResolver.IdPair dateIds) {
         List<ParsedJiraIssue> all = new ArrayList<>();
         int total = Integer.MAX_VALUE;
         int startAt = 0;
@@ -519,7 +540,7 @@ public class SquadSyncService {
             }
             total = root.path("total").asInt(0);
             List<ParsedJiraIssue> pageIssues = new ArrayList<>();
-            for (JsonNode issueNode : root.path("issues")) pageIssues.add(parseIssue(issueNode, sprintFieldId));
+            for (JsonNode issueNode : root.path("issues")) pageIssues.add(parseIssue(issueNode, sprintFieldId, dateIds.start(), dateIds.end()));
             if (pageIssues.isEmpty()) break;
             all.addAll(pageIssues);
             startAt += pageIssues.size();
@@ -529,7 +550,11 @@ public class SquadSyncService {
         return new FetchResult(all, truncated);
     }
 
-    private ParsedJiraIssue parseIssue(JsonNode issueNode, String sprintFieldId) {
+    ParsedJiraIssue parseIssue(JsonNode issueNode, String sprintFieldId) {
+        return parseIssue(issueNode, sprintFieldId, null, null);
+    }
+
+    ParsedJiraIssue parseIssue(JsonNode issueNode, String sprintFieldId, String startFieldId, String endFieldId) {
         String key = issueNode.path("key").asText("");
         JsonNode fields = issueNode.path("fields");
 
@@ -548,14 +573,21 @@ public class SquadSyncService {
         String dueDate = toSafeString(fields.get("duedate"));
         String created = toSafeString(fields.get("created"));
 
-        String realTargetStart = firstNonBlank(toSafeString(fields.get("customfield_10015")), toSafeString(fields.get("startDate")), toSafeString(fields.get("target_start")));
-        String realTargetEnd = firstNonBlank(toSafeString(fields.get("customfield_10014")), dueDate, toSafeString(fields.get("target_end")));
+        // Campos de data e hora planejadas resolvidos (por nome ou configurados na squad): guardam o horário.
+        String plannedStart = isBlank(startFieldId) ? "" : JiraDateParser.normalize(toSafeString(fields.get(startFieldId)));
+        String plannedEnd = isBlank(endFieldId) ? "" : JiraDateParser.normalize(toSafeString(fields.get(endFieldId)));
+        String realTargetStart = firstNonBlank(plannedStart, toSafeString(fields.get("customfield_10015")), toSafeString(fields.get("startDate")), toSafeString(fields.get("target_start")));
+        String realTargetEnd = firstNonBlank(plannedEnd, toSafeString(fields.get("customfield_10014")), dueDate, toSafeString(fields.get("target_end")));
         String targetStart = !realTargetStart.isBlank() ? realTargetStart : substring10(created);
         String targetEnd = !realTargetEnd.isBlank() ? realTargetEnd : substring10(updatedAtJira);
         // toSquadIssueSnapshotBase aplica uma segunda camada de fallback por cima desta.
         targetStart = firstNonBlank(targetStart, dueDate, substring10(updatedAtJira));
         targetEnd = firstNonBlank(targetEnd, dueDate, substring10(updatedAtJira));
-        boolean datesAreInferred = realTargetStart.isBlank() || realTargetEnd.isBlank();
+        // Com os dois campos resolvidos, só vale o que veio deles; senão, a precedência antiga.
+        boolean bothFieldsResolved = !isBlank(startFieldId) && !isBlank(endFieldId);
+        boolean datesAreInferred = bothFieldsResolved
+                ? (plannedStart.isBlank() || plannedEnd.isBlank())
+                : (realTargetStart.isBlank() || realTargetEnd.isBlank());
 
         JsonNode assignee = fields.path("assignee");
         String assigneeId = firstNonBlank(assignee.path("accountId").asText(""), assignee.path("key").asText(""));
@@ -602,7 +634,19 @@ public class SquadSyncService {
 
         return new ParsedJiraIssue(key, title, type, isBug, status, statusCategory, estimateSec, remainingSec, loggedSec,
                 updatedAtJira, created, resolutionDate, dueDate, targetStart, targetEnd, datesAreInferred,
-                assigneeId, assigneeName, parentKey, parentTitle, sprintRaw, subtaskKeys, worklogs, changelog);
+                assigneeId, assigneeName, parentKey, parentTitle, sprintRaw, subtaskKeys, worklogs, changelog,
+                blankToNull(fields.path("issuetype").path("id").asText("")), blankToNull(fields.path("status").path("id").asText("")),
+                ownSeconds(fields, "timeoriginalestimate"), ownSeconds(fields, "timeestimate"));
+    }
+
+    private static String blankToNull(String v) {
+        return v == null || v.isBlank() ? null : v;
+    }
+
+    /** Valor próprio do campo de tempo (segundos) ou null quando o Jira não manda. */
+    static Long ownSeconds(JsonNode fields, String field) {
+        JsonNode v = fields.get(field);
+        return v == null || v.isNull() || !v.canConvertToLong() ? null : v.asLong();
     }
 
     private static JsonNode extractSprintRaw(JsonNode fields, String sprintFieldId) {
@@ -711,7 +755,8 @@ public class SquadSyncService {
                 continue;
             }
             squadService.getIssueByKey(squadId, s.getParentKey()).ifPresent(parentSnap -> {
-                if (!isBlank(parentSnap.getSprintId())) {
+                // Pai que só está no backlog do planner não empresta sprint (PLANNER_BACKLOG não é sprint de verdade).
+                if (!isBlank(parentSnap.getSprintId()) && !SquadIssueSnapshot.PLANNER_BACKLOG_SPRINT_ID.equals(parentSnap.getSprintId())) {
                     s.setSprintId(parentSnap.getSprintId());
                     s.setSprintName(parentSnap.getSprintName());
                 }
@@ -791,6 +836,10 @@ public class SquadSyncService {
                 .assigneeName(issue.assigneeName())
                 .parentKey(issue.parentKey())
                 .parentTitle(issue.parentTitle())
+                .issueTypeId(issue.typeId())
+                .statusId(issue.statusId())
+                .ownOriginalEstimateSec(issue.ownEstimateSec())
+                .ownRemainingSec(issue.ownRemainingSec())
                 .syncedAt(syncedAt)
                 .build();
     }
@@ -837,12 +886,41 @@ public class SquadSyncService {
         for (List<SquadMember> group : chunk(rosterSeeds, BATCH_CHUNK_SIZE)) {
             squadService.batchUpsertMembers(squadId, group);
         }
+        try {
+            // O Jira Server mostra a mesma conta como JIRAUSER<n> nas issues e como nome de usuário nos papéis do projeto:
+            // junta os pares que já estavam no roster (sem perder e-mail, vínculo nem horas calibradas).
+            squadService.consolidateRoster(squadId);
+        } catch (Exception e) {
+            log.warn("[squad:{}] não foi possível fundir duplicatas do roster: {}", squadId, e.getMessage());
+        }
+        if (!rosterSeeds.isEmpty() || !seenAssignees.isEmpty()) {
+            // O upsert casa por conta > e-mail > nome: um responsável que já está no roster com outra chave (id gerado,
+            // pré-cadastro por nome) é fundido em vez de ganhar uma linha fantasma. Relê o roster para a capacidade
+            // seguir a linha que ficou (a chave pode ter virado a conta real do Jira).
+            List<SquadMember> fresh = squadService.getMembers(squadId);
+            for (SquadMember m : fresh) {
+                if (m.getJiraAccountId() != null) rosterMap.put(m.getJiraAccountId(), m);
+            }
+            // Responsável cuja chave (JIRAUSER) foi fundida em outra linha: a capacidade segue a linha que ficou.
+            for (Map.Entry<String, String> e : seenAssignees.entrySet()) {
+                SquadMember canon = canonicalMember(fresh, e.getKey(), e.getValue());
+                if (canon != null) rosterMap.put(e.getKey(), canon);
+            }
+        }
 
         Map<String, SquadMember> finalRosterMap = rosterMap;
         return assigneeId -> {
             SquadMember m = finalRosterMap.get(assigneeId);
             return (m != null && m.getCapacityHoursPerDay() != null) ? m.getCapacityHoursPerDay() : defaultCapacity;
         };
+    }
+
+    /** Linha do roster que representa o responsável: a da própria chave, ou a fundida por nome (ver PersonIdentity). */
+    static SquadMember canonicalMember(List<SquadMember> roster, String assigneeId, String assigneeName) {
+        for (SquadMember m : roster) {
+            if (m.getJiraAccountId() != null && m.getJiraAccountId().equalsIgnoreCase(assigneeId)) return m;
+        }
+        return PersonIdentity.resolve(roster, assigneeId, null, assigneeName);
     }
 
     // ===================== Segurança de migração =====================
@@ -860,7 +938,7 @@ public class SquadSyncService {
                     "A sincronização ia apagar " + migrationToDelete.size() + " de " + allExisting.size() + " issues de uma vez — abortado por segurança. Confira a JQL.");
         }
         for (List<String> group : chunk(migrationToDelete, BATCH_CHUNK_SIZE)) {
-            squadService.batchDeleteIssues(squadId, group);
+            squadService.batchDeleteIssuesKeepingPlannerBacklog(squadId, group);
         }
     }
 
@@ -902,8 +980,10 @@ public class SquadSyncService {
         for (List<SquadIssueSnapshot> group : chunk(groupSnapshots, BATCH_CHUNK_SIZE)) {
             squadService.batchUpsertIssues(squadId, group);
         }
+        // Reconciliação: linha que sumiu da JQL da sprint mas está no backlog do Sprint Planner não é apagada
+        // (vira sprint_id PLANNER_BACKLOG); ver SquadService.batchDeleteIssuesKeepingPlannerBacklog.
         for (List<String> group : chunk(keysToDelete, BATCH_CHUNK_SIZE)) {
-            squadService.batchDeleteIssues(squadId, group);
+            squadService.batchDeleteIssuesKeepingPlannerBacklog(squadId, group);
         }
     }
 
@@ -1098,9 +1178,13 @@ public class SquadSyncService {
     private ObjectNode buildCycleTimeByStatus(String squadId, String sprintId, List<ParsedJiraIssue> groupRawIssues) {
         Map<String, Double> totalsByStatus = new LinkedHashMap<>();
         Map<String, Double> capacityCache = new HashMap<>();
+        List<SquadMember> roster = squadService.getMembers(squadId);
         for (ParsedJiraIssue issue : groupRawIssues) {
             if (isBlank(issue.assigneeId())) continue;
-            double horasProdutivas = capacityCache.computeIfAbsent(issue.assigneeId(),
+            // As configurações por pessoa vivem na chave canônica do roster (nome de usuário), não na JIRAUSER das issues.
+            SquadMember canon = roster == null ? null : canonicalMember(roster, issue.assigneeId(), issue.assigneeName());
+            String configId = canon != null && canon.getJiraAccountId() != null ? canon.getJiraAccountId() : issue.assigneeId();
+            double horasProdutivas = capacityCache.computeIfAbsent(configId,
                     id -> squadCapacityService.resolve(squadId, sprintId, id).horasProdutivas());
             accumulateCycleTime(issue, horasProdutivas, totalsByStatus);
         }
@@ -1221,7 +1305,7 @@ public class SquadSyncService {
         try {
             String jql = "project = " + jiraProjectKey + " AND updated >= \"" + formatForJql(sprintStart.toString())
                     + "\" AND sprint != " + sprintId;
-            FetchResult result = fetchAllIssues(domain, token, jql, fields, null, true);
+            FetchResult result = fetchAllIssues(domain, token, jql, fields, null, true, JiraDateFieldResolver.IdPair.NONE);
             int count = 0;
             for (ParsedJiraIssue issue : result.issues()) {
                 for (RawSprintTransition t : sprintFieldTransitions(issue)) {

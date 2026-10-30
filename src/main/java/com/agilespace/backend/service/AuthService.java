@@ -1,5 +1,6 @@
 package com.agilespace.backend.service;
 
+import com.agilespace.backend.domain.MembershipSource;
 import com.agilespace.backend.domain.ProjectConfig;
 import com.agilespace.backend.domain.ProjectMemberRole;
 import com.agilespace.backend.domain.SquadMember;
@@ -57,6 +58,10 @@ public class AuthService {
      */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private MembershipService membershipService;
+
+    /** Preenche o cargo de quem está sem um com a role do Jira da linha do roster. Opcional (montagem manual: não preenche). */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CargoPreenchimento cargoPreenchimento;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private MembershipShadowService membershipShadowService;
@@ -171,6 +176,7 @@ public class AuthService {
                         squadMemberRepository.save(sm);
                     }
                 }
+                preencherCargoDoRoster(user, matchedMembers, "login por roster");
                 resolved = resolveAccess(user);
             }
         }
@@ -190,6 +196,15 @@ public class AuthService {
         }
 
         return buildAuthResponse(user, resolved);
+    }
+
+    /** Cargo vazio + roster do Jira da pessoa: usa a role da linha mais recente (updated_at) que tiver role. */
+    private void preencherCargoDoRoster(User user, List<SquadMember> linhas, String origem) {
+        if (cargoPreenchimento == null || linhas == null) return;
+        linhas.stream()
+                .filter(sm -> sm.getRole() != null && !sm.getRole().isBlank())
+                .max(java.util.Comparator.comparing(sm -> sm.getUpdatedAt() == null ? "" : sm.getUpdatedAt()))
+                .ifPresent(sm -> cargoPreenchimento.preencherSeVazio(user, sm.getRole(), origem));
     }
 
     private static boolean hasSquadTrace(String squad) {
@@ -323,6 +338,15 @@ public class AuthService {
         for (SquadMember sm : squadMembers) {
             sm.setClaimedByUid(user.getId());
             squadMemberRepository.save(sm);
+        }
+
+        // Cadastro que casa com o roster do Jira (por e-mail): quem está sem cargo recebe o que o Jira trouxe.
+        if (cargoPreenchimento != null) {
+            for (ProjectMemberRole r : roles) {
+                if (MembershipSource.importOwned(r.getSource())
+                        && cargoPreenchimento.preencherSeVazio(user, r.getRoleName(), "cadastro por e-mail do roster")) break;
+            }
+            preencherCargoDoRoster(user, squadMembers, "cadastro por e-mail do roster");
         }
 
         return buildAuthResponse(user, resolveAccess(user));
@@ -495,6 +519,7 @@ public class AuthService {
                 .authProvider(user.getAuthProvider())
                 .jiraAccountId(user.getJiraAccountId())
                 .avatarSeed(user.getAvatarSeed())
+                .photoUrl(UserPhotoService.photoUrl(user))
                 .activeProjectId(activeProjId)
                 .activeProjectName(activeProjName)
                 .activeProjectRole(activeProjRole)

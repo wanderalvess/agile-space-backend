@@ -51,6 +51,10 @@ public class OnboardingService {
     private final SquadMemberRepository squadMemberRepository;
     private final UserRepository userRepository;
 
+    /** Preenche o cargo de quem está sem um com a role do Jira da linha. Opcional (montagem manual: não preenche). */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CargoPreenchimento cargoPreenchimento;
+
     /** Minúsculo, sem acento e com espaços colapsados — base de toda comparação de nome. */
     static String normalize(String value) {
         if (value == null) return "";
@@ -243,6 +247,8 @@ public class OnboardingService {
     private void applyLink(ProjectMemberRole row, User user, String linkSource) {
         // Registra como a conta entrou na linha. Linha de decisão humana (MANUAL/INVITE/MIGRATION) mantém a origem.
         boolean alreadyMine = user.getId() != null && user.getId().equals(row.getUserId());
+        // Só linha que o Jira "possui" (legado/JIRA/BACKFILL) carrega o cargo do Jira; MANUAL/INVITE/MIGRATION é decisão humana.
+        boolean linhaDoJira = com.agilespace.backend.domain.MembershipSource.importOwned(row.getSource());
         if (!alreadyMine) row.setSource(com.agilespace.backend.domain.MembershipSource.afterLink(row.getSource(), linkSource));
         row.setUserId(user.getId());
         projectMemberRoleRepository.save(row);
@@ -257,6 +263,11 @@ public class OnboardingService {
         }
         if (userChanged) {
             userRepository.save(user);
+        }
+
+        // Quem entra sem cargo recebe o que o Jira trouxe para a linha (nunca sobrescreve um cargo já definido).
+        if (linhaDoJira && cargoPreenchimento != null) {
+            cargoPreenchimento.preencherSeVazio(user, row.getRoleName(), "vínculo " + linkSource + " na linha " + row.getId());
         }
     }
 

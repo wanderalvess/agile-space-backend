@@ -41,7 +41,7 @@ public class SquadSyncServiceTest {
     @BeforeEach
     public void setup() {
         MockitoAnnotations.openMocks(this);
-        syncService = new SquadSyncService(squadService, jiraService, squadCapacityService, userJiraConfigRepository, new ObjectMapper());
+        syncService = new SquadSyncService(squadService, jiraService, squadCapacityService, userJiraConfigRepository, new ObjectMapper(), null);
     }
 
     private Squad baseSquad() {
@@ -110,7 +110,7 @@ public class SquadSyncServiceTest {
                 () -> syncService.syncSquad("SQ1", "u1", true));
 
         assertTrue(ex.getReason().contains("0 issues"));
-        verify(squadService, never()).batchDeleteIssues(anyString(), any());
+        verify(squadService, never()).batchDeleteIssuesKeepingPlannerBacklog(anyString(), any());
     }
 
     @Test

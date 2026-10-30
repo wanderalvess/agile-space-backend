@@ -148,12 +148,12 @@ class KnowledgeServiceHardeningTest {
     @Test
     @DisplayName("Listagem sem ordenação passa a ordenar por updatedAt decrescente")
     void listDefaultsToNewestFirst() {
-        when(repository.findByStatusNot(eq("deleted"), any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
+        when(repository.findByStatusIn(eq(KnowledgeService.LISTED_STATUSES), any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
 
         service.listDocuments(null, null, null, PageRequest.of(0, 20));
 
         ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
-        verify(repository).findByStatusNot(eq("deleted"), captor.capture());
+        verify(repository).findByStatusIn(eq(KnowledgeService.LISTED_STATUSES), captor.capture());
         Sort.Order order = captor.getValue().getSort().getOrderFor("updatedAt");
         assertNotNull(order);
         assertTrue(order.isDescending());

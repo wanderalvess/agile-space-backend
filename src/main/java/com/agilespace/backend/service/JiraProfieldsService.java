@@ -35,6 +35,14 @@ public class JiraProfieldsService {
     private final SquadMemberExclusions squadMemberExclusions;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /** Fusão de duplicatas do roster após a importação (opcional: ausente em testes unitários). */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private RosterMergeService rosterMerge;
+
+    /** Cargo de quem entra sem um, a partir da role do Jira (opcional: ausente em testes unitários). */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CargoPreenchimento cargoPreenchimento;
+
     /** GET no Jira pelo JiraService: TLS estrito primeiro, host bloqueado, redirecionamento só no mesmo host, 429 com retry. */
     private ResponseEntity<String> jiraGet(String url, HttpEntity<Void> entity) {
         return jiraService.exchangeGet(java.net.URI.create(url), entity);
@@ -73,9 +81,28 @@ public class JiraProfieldsService {
      * e toda linha com user_id, e removendo só linha legado/JIRA sem conta que o Jira deixou de listar.
      */
     ProjectDetailDto persistImport(ProjectConfig project, List<ProjectMemberRole> members, List<ProjectMemberRole> jiraMembers) {
+        ProjectDetailDto result = persistImportRows(project, members, jiraMembers);
+        // A importação do time (project_member_roles) não cria linhas do roster, mas deixa o roster coerente: pares da mesma
+        // pessoa (JIRAUSER x usuário) viram uma linha só, sem perder e-mail, vínculo nem horas calibradas. Fora da transação
+        // da importação e sem derrubá-la.
+        if (rosterMerge != null) {
+            try {
+                int n = rosterMerge.consolidate(project.getId());
+                if (n > 0) log.info("Reimportação do time {}: {} linha(s) duplicada(s) do roster fundida(s).", project.getId(), n);
+            } catch (Exception e) {
+                log.warn("Reimportação do time {}: não foi possível fundir duplicatas do roster: {}", project.getId(), e.getMessage());
+            }
+        }
+        return result;
+    }
+
+    private ProjectDetailDto persistImportRows(ProjectConfig project, List<ProjectMemberRole> members, List<ProjectMemberRole> jiraMembers) {
         return new org.springframework.transaction.support.TransactionTemplate(transactionManager).execute(status -> {
             String cleanKey = project.getId();
             ProjectConfig saved = projectConfigRepository.save(project);
+            // E-mail sempre sem espaços e em minúsculas: o casamento e a unicidade não dependem de caixa.
+            for (ProjectMemberRole r : members) r.setEmail(PersonIdentity.normEmail(r.getEmail()));
+            for (ProjectMemberRole r : jiraMembers) r.setEmail(PersonIdentity.normEmail(r.getEmail()));
             List<ProjectMemberRole> existing = projectMemberRoleRepository.findByProjectId(cleanKey);
             // Quem a liderança removeu à mão do time não volta só porque o Jira ainda lista a pessoa.
             SquadMemberExclusions.Removed removedByHand = SquadMemberExclusions.of(squadMemberExclusions, cleanKey);
@@ -392,6 +419,7 @@ public class JiraProfieldsService {
                 project.getLocality() != null, project.getVpArea() != null, project.getStatus() != null,
                 project.getDevTeamSize(), members.size());
 
+        members = dropNonPeople(members, cleanKey, project.getName(), jiraProjectName);
         members = dedupeMembers(members);
         embedAvatars(members, cleanDomain, token);
 
@@ -399,7 +427,13 @@ public class JiraProfieldsService {
             // Tenta vincular com usuário do banco se já existir
             if (m.getEmail() != null && !m.getEmail().isBlank()) {
                 Optional<User> existingUser = userRepository.findByEmail(m.getEmail());
-                existingUser.ifPresent(u -> m.setUserId(u.getId()));
+                existingUser.ifPresent(u -> {
+                    m.setUserId(u.getId());
+                    // Conta que já existia e entra no roster por e-mail: sem cargo, recebe a role do Jira (nunca sobrescreve).
+                    if (cargoPreenchimento != null) {
+                        cargoPreenchimento.preencherSeVazio(u, m.getRoleName(), "importação do Profields " + cleanKey);
+                    }
+                });
             }
         }
 
@@ -744,6 +778,32 @@ public class JiraProfieldsService {
      * diferente e o mesmo e-mail). Junta por e-mail (sem caixa) ou nome normalizado e fica com o cargo de maior
      * prioridade: liderança > cargo específico > Developer.
      */
+    /**
+     * Tira da lista o que o Jira devolveu mas não é pessoa: (1) entrada sem e-mail cujo nome é o do próprio projeto/squad
+     * ou a chave (o objeto "project" das issues lido como usuário); (2) caixa compartilhada/serviço (engenharia.vd) e conta
+     * de aplicativo, que ficam de fora do acesso até alguém revisar e cadastrar à mão. Pessoa real nunca é barrada: o filtro
+     * olha só a parte local do e-mail e o usuário, e só sem e-mail ou com prefixo de área.
+     */
+    static List<ProjectMemberRole> dropNonPeople(List<ProjectMemberRole> in, String projectKey, String... projectNames) {
+        List<ProjectMemberRole> out = new ArrayList<>();
+        java.util.Set<String> labels = new HashSet<>();
+        if (projectKey != null) labels.add(PersonIdentity.nameKey(projectKey));
+        for (String n : projectNames) if (n != null && !n.isBlank()) labels.add(PersonIdentity.nameKey(n));
+        for (ProjectMemberRole m : in) {
+            boolean noEmail = isBlank(m.getEmail());
+            boolean projectLike = noEmail && (labels.contains(PersonIdentity.nameKey(m.getDisplayName()))
+                    || labels.contains(PersonIdentity.nameKey(m.getJiraAccountId())));
+            boolean shared = JiraAdminService.looksLikeSharedMailbox(m.getEmail(), m.getJiraAccountId()) && !m.isLeadership();
+            if (projectLike || shared) {
+                log.warn("Importação do time {}: '{}' ({}) ignorado(a) por não parecer pessoa ({}); precisa de revisão, cadastre à mão se for pessoa.",
+                        projectKey, m.getDisplayName(), m.getJiraAccountId(), projectLike ? "nome do projeto" : "caixa compartilhada/serviço");
+                continue;
+            }
+            out.add(m);
+        }
+        return out;
+    }
+
     static List<ProjectMemberRole> dedupeMembers(List<ProjectMemberRole> in) {
         List<ProjectMemberRole> out = new ArrayList<>();
         for (ProjectMemberRole m : in) {
@@ -1151,7 +1211,7 @@ public class JiraProfieldsService {
                 .roleKey(founderRole[1])
                 .jiraAccountId(creator.getJiraAccountId())
                 .displayName(creator.getName())
-                .email(creator.getEmail())
+                .email(PersonIdentity.normEmail(creator.getEmail()))
                 .userId(creator.getId())
                 .isLeadership(isTeamManagerRow(ProjectMemberRole.builder().roleKey(founderRole[1]).build()))
                 .source(com.agilespace.backend.domain.MembershipSource.MANUAL)

@@ -19,7 +19,7 @@ import java.util.concurrent.*;
 @Slf4j
 public class JoltJavaEngineService {
 
-    /** Limites de entrada: o endpoint é público (ver JwtAuthenticationFilter), então precisa ser barato de recusar. */
+    /** Limites de entrada: o endpoint exige login, mas qualquer pessoa logada pode mandar payload grande: precisa ser barato de recusar. */
     static final int MAX_INPUT_NODES = 200_000;
     static final int MAX_SPEC_NODES = 20_000;
     static final int MAX_DEPTH = 64;
@@ -62,7 +62,7 @@ public class JoltJavaEngineService {
             try {
                 future = executor.submit(() -> run(request));
             } catch (RejectedExecutionException busy) {
-                return failure("O motor JOLT está ocupado. Tente novamente em instantes.", startTime);
+                return failure("O servidor está ocupado com outras transformações. Tente novamente em instantes.", startTime);
             }
             Object result;
             try {
@@ -282,7 +282,7 @@ public class JoltJavaEngineService {
      * Operação TOTVS {@code custom-decode}/{@code custom-totvs}: decodifica campos Base64 (JSON vira objeto, texto fica
      * texto) antes do Chainr, que não conhece a operação. A regra segue o mesmo formato das outras specs: chaves com o
      * nome do campo, {@code "*"} (ou {@code "[*]"}) para cada item de lista ou valor de objeto, e na folha uma ação que
-     * começa com {@code =base64ToObject}. Mesmo comportamento do motor JS do sandbox (jolt-lite.ts).
+     * começa com {@code =base64ToObject}. O motor JS do navegador (jolt-lite) foi removido: a Sandbox executa só aqui.
      */
     private Object handleBase64Preprocess(Object input, List<Object> specList) {
         Object current = input;

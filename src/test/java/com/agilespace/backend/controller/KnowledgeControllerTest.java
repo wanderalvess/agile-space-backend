@@ -39,7 +39,7 @@ public class KnowledgeControllerTest {
     @Test
     public void testListDocuments() {
         Page<KnowledgeDocument> page = new PageImpl<>(Arrays.asList(new KnowledgeDocument()));
-        when(service.listDocuments(eq("query"), any(), any(), any(PageRequest.class))).thenReturn(page);
+        when(service.listDocuments(eq("query"), any(), any(), any(PageRequest.class), any(), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(page);
         
         ResponseEntity<Page<KnowledgeDocument>> response = controller.listDocuments("query", null, PageRequest.of(0, 20));
         
@@ -49,7 +49,7 @@ public class KnowledgeControllerTest {
     @Test
     public void testGetDocumentByIdFound() {
         UUID id = UUID.randomUUID();
-        when(service.getDocumentById(id)).thenReturn(new KnowledgeDocument());
+        when(service.getReadableDocument(eq(id), any(), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(new KnowledgeDocument());
         
         ResponseEntity<KnowledgeDocument> response = controller.getDocumentById(id, mockRequest("u1", "MEMBER"));
         
