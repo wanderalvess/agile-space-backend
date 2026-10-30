@@ -116,10 +116,13 @@ check('config Jira de outra pessoa = 403', s == 403, s)
 
 # ---------------- Jolt ----------------
 sample = {'input': {'a': 1}, 'spec': [{'operation': 'shift', 'spec': {'a': 'b'}}]}
+# desde 2026-10 /jolt/transform exige login (antes era público)
 s, j = req('POST', '/jolt/transform', None, sample)
-check('jolt: transform simples funciona (execução pública)', s == 200 and (j or {}).get('success', True) is not False, (s, str(j)[:200]))
+check('jolt: transform sem login é recusado (401)', s == 401, (s, str(j)[:200]))
+s, j = req('POST', '/jolt/transform', bruno, sample)
+check('jolt: transform simples funciona (logado)', s == 200 and (j or {}).get('success', True) is not False, (s, str(j)[:200]))
 big = {'input': {'k%d' % i: i for i in range(2000)}, 'spec': [{'operation': 'shift', 'spec': {'*': '&'}}] * 60}
-s, j = req('POST', '/jolt/transform', None, big)
+s, j = req('POST', '/jolt/transform', bruno, big)
 check('jolt: spec com operações demais é recusada', s in (400, 413, 422) or (isinstance(j, dict) and j.get('success') is False), (s, str(j)[:200]))
 deep = cur = {}
 for i in range(100):
