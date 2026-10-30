@@ -729,4 +729,265 @@ public class JiraService {
                     .body(jsonError("Erro ao buscar dados do quadro Greenhopper: " + describe(e)));
         }
     }
+
+    // =====================================================================================================
+    // Escrita no Jira — usada pela publicação do Poker (JiraPublishService). Só existem TRÊS operações de
+    // escrita aqui, de propósito: renomear o título de uma issue, criar uma sub-tarefa e comentar. Não há
+    // delete, transição nem edição de outros campos; qualquer nova escrita precisa ser adicionada
+    // explicitamente e revisada. Todas passam pelas mesmas proteções do proxy de leitura (host bloqueado,
+    // TLS estrito antes do trust-all, retry em 429). Escritas NUNCA seguem redirecionamento: o corpo e o
+    // Bearer só vão para a URL montada aqui.
+    // =====================================================================================================
+
+    /** Falha de escrita no Jira com o status HTTP devolvido (0 = sem resposta) e um motivo curto, sem token nem URL. */
+    public static class JiraWriteException extends RuntimeException {
+        private final int status;
+        public JiraWriteException(int status, String message) { super(message); this.status = status; }
+        public int getStatus() { return status; }
+    }
+
+    static String assertIssueKey(String key) {
+        String k = key == null ? "" : key.trim();
+        if (!k.matches("[A-Za-z][A-Za-z0-9_]{0,19}-[0-9]{1,9}")) {
+            throw new JiraWriteException(400, "Chave de issue inválida.");
+        }
+        return k;
+    }
+
+    private HttpHeaders bearerHeaders(String token) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", "Bearer " + token.trim());
+        headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return headers;
+    }
+
+    /** Lê uma issue (campos informados). Devolve o JSON da issue ou lança JiraWriteException com o status do Jira. */
+    public JsonNode getIssue(String domain, String token, String issueKey, List<String> fields) {
+        String cleanDomain = cleanDomain(domain);
+        String key = assertIssueKey(issueKey);
+        URI uri;
+        try {
+            String f = (fields == null || fields.isEmpty()) ? "summary,issuetype,project,subtasks" : String.join(",", fields);
+            uri = new URI("https://" + cleanDomain + "/rest/api/2/issue/" + key + "?fields="
+                    + java.net.URLEncoder.encode(f, java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            throw new JiraWriteException(400, "Erro ao construir URL do Jira.");
+        }
+        try {
+            ResponseEntity<String> response = exchangeSecure(uri, new HttpEntity<>(bearerHeaders(token)), String.class);
+            return objectMapper.readTree(response.getBody());
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            throw new JiraWriteException(e.getStatusCode().value(), jiraErrorReason(e, "ler a issue " + key));
+        } catch (JiraWriteException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new JiraWriteException(0, "Erro ao ler a issue " + key + ": " + describe(e));
+        }
+    }
+
+    /** Sub-tarefas já existentes sob a pai (chave + título + tipo): base da checagem anti-duplicação. */
+    public List<JsonNode> listSubtasks(String domain, String token, String parentKey) {
+        String cleanDomain = cleanDomain(domain);
+        String key = assertIssueKey(parentKey);
+        URI uri;
+        try {
+            String jql = java.net.URLEncoder.encode("parent = " + key, java.nio.charset.StandardCharsets.UTF_8);
+            uri = new URI("https://" + cleanDomain + "/rest/api/2/search?jql=" + jql + "&fields=summary,issuetype&maxResults=100");
+        } catch (Exception e) {
+            throw new JiraWriteException(400, "Erro ao construir URL do Jira.");
+        }
+        try {
+            ResponseEntity<String> response = exchangeSecure(uri, new HttpEntity<>(bearerHeaders(token)), String.class);
+            JsonNode root = objectMapper.readTree(response.getBody());
+            List<JsonNode> out = new java.util.ArrayList<>();
+            JsonNode issues = root.path("issues");
+            if (issues.isArray()) issues.forEach(out::add);
+            return out;
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            throw new JiraWriteException(e.getStatusCode().value(), jiraErrorReason(e, "listar sub-tarefas de " + key));
+        } catch (JiraWriteException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new JiraWriteException(0, "Erro ao listar sub-tarefas de " + key + ": " + describe(e));
+        }
+    }
+
+    /**
+     * Tipos de issue que o projeto aceita criar, com a flag de sub-tarefa (createmeta). A tela de configuração
+     * usa isso para a pessoa escolher o nome exato em vez de digitar.
+     */
+    public List<JsonNode> listProjectIssueTypes(String domain, String token, String projectKey) {
+        String cleanDomain = cleanDomain(domain);
+        String pk = projectKey == null ? "" : projectKey.trim();
+        if (!pk.matches("[A-Za-z][A-Za-z0-9_]{0,19}")) {
+            throw new JiraWriteException(400, "Chave de projeto inválida.");
+        }
+        URI uri;
+        try {
+            uri = new URI("https://" + cleanDomain + "/rest/api/2/issue/createmeta?projectKeys=" + pk);
+        } catch (Exception e) {
+            throw new JiraWriteException(400, "Erro ao construir URL do Jira.");
+        }
+        try {
+            ResponseEntity<String> response = exchangeSecure(uri, new HttpEntity<>(bearerHeaders(token)), String.class);
+            JsonNode root = objectMapper.readTree(response.getBody());
+            List<JsonNode> out = new java.util.ArrayList<>();
+            for (JsonNode project : root.path("projects")) {
+                for (JsonNode type : project.path("issuetypes")) out.add(type);
+            }
+            return out;
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            throw new JiraWriteException(e.getStatusCode().value(), jiraErrorReason(e, "listar tipos do projeto " + pk));
+        } catch (JiraWriteException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new JiraWriteException(0, "Erro ao listar tipos do projeto " + pk + ": " + describe(e));
+        }
+    }
+
+    /** Escrita 1/3: troca SÓ o título (summary) da issue. Nenhum outro campo é enviado. */
+    public void updateIssueSummary(String domain, String token, String issueKey, String newSummary) {
+        String key = assertIssueKey(issueKey);
+        if (newSummary == null || newSummary.isBlank()) throw new JiraWriteException(400, "Título vazio.");
+        if (newSummary.length() > 255) throw new JiraWriteException(400, "Título com mais de 255 caracteres.");
+        ObjectNode body = objectMapper.createObjectNode();
+        body.putObject("fields").put("summary", newSummary.trim());
+        writeJson(domain, token, "/rest/api/2/issue/" + key, HttpMethod.PUT, body, "renomear " + key);
+    }
+
+    /**
+     * Escrita 2/3: cria uma sub-tarefa sob `parentKey`. Campos enviados: projeto, pai, tipo, título e, se houver,
+     * estimativa original em horas. Devolve a chave criada.
+     */
+    public String createSubtask(String domain, String token, String projectKey, String parentKey, String issueTypeName,
+                                String summary, Double estimateHours) {
+        String parent = assertIssueKey(parentKey);
+        if (issueTypeName == null || issueTypeName.isBlank()) throw new JiraWriteException(400, "Tipo da sub-tarefa vazio.");
+        if (summary == null || summary.isBlank()) throw new JiraWriteException(400, "Título da sub-tarefa vazio.");
+        ObjectNode fields = objectMapper.createObjectNode();
+        fields.putObject("project").put("key", projectKey.trim());
+        fields.putObject("parent").put("key", parent);
+        fields.putObject("issuetype").put("name", issueTypeName.trim());
+        fields.put("summary", summary.trim().length() > 255 ? summary.trim().substring(0, 255) : summary.trim());
+        if (estimateHours != null && estimateHours > 0) {
+            fields.putObject("timetracking").put("originalEstimate", formatJiraDuration(estimateHours));
+        }
+        ObjectNode body = objectMapper.createObjectNode();
+        body.set("fields", fields);
+        JsonNode created = writeJson(domain, token, "/rest/api/2/issue", HttpMethod.POST, body, "criar sub-tarefa em " + parent);
+        String key = created == null ? null : created.path("key").asText(null);
+        if (key == null || key.isBlank()) throw new JiraWriteException(502, "O Jira criou a sub-tarefa mas não devolveu a chave.");
+        return key;
+    }
+
+    /** Escrita 3/3: comenta na issue. Devolve o id do comentário. */
+    public String addComment(String domain, String token, String issueKey, String commentBody) {
+        String key = assertIssueKey(issueKey);
+        if (commentBody == null || commentBody.isBlank()) throw new JiraWriteException(400, "Comentário vazio.");
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("body", commentBody.trim());
+        JsonNode created = writeJson(domain, token, "/rest/api/2/issue/" + key + "/comment", HttpMethod.POST, body, "comentar em " + key);
+        return created == null ? null : created.path("id").asText(null);
+    }
+
+    /** Horas decimais → duração do Jira ("10h", "1h 30m"). */
+    static String formatJiraDuration(double hours) {
+        long totalMinutes = Math.round(hours * 60);
+        long h = totalMinutes / 60;
+        long m = totalMinutes % 60;
+        if (m == 0) return h + "h";
+        if (h == 0) return m + "m";
+        return h + "h " + m + "m";
+    }
+
+    private JsonNode writeJson(String domain, String token, String path, HttpMethod method, JsonNode body, String action) {
+        String cleanDomain = cleanDomain(domain);
+        URI uri;
+        try {
+            uri = new URI("https://" + cleanDomain + path);
+        } catch (Exception e) {
+            throw new JiraWriteException(400, "Erro ao construir URL do Jira.");
+        }
+        assertNotBlockedHost(uri);
+        HttpEntity<String> entity;
+        try {
+            entity = new HttpEntity<>(objectMapper.writeValueAsString(body), bearerHeaders(token));
+        } catch (Exception e) {
+            throw new JiraWriteException(400, "Erro ao montar o pedido para o Jira.");
+        }
+        try {
+            ResponseEntity<String> response;
+            try {
+                response = writeWithRetry(strictRestTemplate, uri, method, entity);
+            } catch (org.springframework.web.client.ResourceAccessException e) {
+                if (!isTlsTrustFailure(e)) throw e;
+                log.warn("TLS handshake falhou com validação padrão para {} — tentando com trust-all na escrita.", uri.getHost());
+                response = writeWithRetry(trustAllRestTemplate, uri, method, entity);
+            }
+            int status = response.getStatusCode().value();
+            if (status >= 300 && status < 400) {
+                // Redirecionamento em escrita não é seguido: o Jira respondeu algo que não é a API esperada.
+                throw new JiraWriteException(status, "O Jira redirecionou ao " + action + "; verifique o domínio configurado.");
+            }
+            String respBody = response.getBody();
+            return (respBody == null || respBody.isBlank()) ? null : objectMapper.readTree(respBody);
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            log.warn("Escrita no Jira falhou ({}): status {}", action, e.getStatusCode().value());
+            throw new JiraWriteException(e.getStatusCode().value(), jiraErrorReason(e, action));
+        } catch (JiraWriteException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("Escrita no Jira falhou ({}): {}", action, describe(e));
+            throw new JiraWriteException(0, "Erro ao " + action + ": " + describe(e));
+        }
+    }
+
+    private ResponseEntity<String> writeWithRetry(RestTemplate restTemplate, URI uri, HttpMethod method, HttpEntity<String> entity) {
+        int attempt = 0;
+        while (true) {
+            try {
+                return restTemplate.exchange(uri, method, entity, String.class);
+            } catch (org.springframework.web.client.HttpStatusCodeException e) {
+                if (e.getStatusCode().value() == 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
+                    long waitMs = retryAfterMillis(e, attempt);
+                    log.warn("Jira rate limited (429) on write to {}, retry {}/{} after {}ms", uri.getHost(), attempt + 1, MAX_RATE_LIMIT_RETRIES, waitMs);
+                    sleepUninterruptibly(waitMs);
+                    attempt++;
+                    continue;
+                }
+                throw e;
+            }
+        }
+    }
+
+    /**
+     * Motivo legível a partir do erro do Jira: junta `errorMessages` e `errors` do corpo (ex.: "issuetype: tipo
+     * inválido"), ou um texto por status. Nunca inclui token nem URL.
+     */
+    private String jiraErrorReason(org.springframework.web.client.HttpStatusCodeException e, String action) {
+        int status = e.getStatusCode().value();
+        String prefix = "Não foi possível " + action;
+        try {
+            JsonNode root = objectMapper.readTree(e.getResponseBodyAsString());
+            List<String> parts = new java.util.ArrayList<>();
+            for (JsonNode m : root.path("errorMessages")) parts.add(m.asText());
+            JsonNode errors = root.path("errors");
+            if (errors.isObject()) {
+                errors.fields().forEachRemaining(f -> parts.add(f.getKey() + ": " + f.getValue().asText()));
+            }
+            if (!parts.isEmpty()) {
+                String joined = String.join("; ", parts);
+                return prefix + " (" + status + "): " + (joined.length() > 500 ? joined.substring(0, 500) : joined);
+            }
+        } catch (Exception ignored) {
+            // corpo não é JSON; cai no texto por status
+        }
+        return switch (status) {
+            case 401 -> prefix + ": token do Jira inválido ou expirado (401).";
+            case 403 -> prefix + ": sem permissão no Jira para esta ação (403).";
+            case 404 -> prefix + ": issue não encontrada no Jira (404).";
+            default -> prefix + " (" + status + ").";
+        };
+    }
 }
