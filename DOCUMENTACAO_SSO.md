@@ -15,7 +15,7 @@ Esta documentação descreve o plano de chaveamento para substituir o Firebase A
 
 3. **Atualização da Tabela de Usuários**
    - Garantir que a coluna `sso_id` seja populada com o `sub` (subject) do JWT proveniente do provedor de SSO.
-   - A amarração final entre o usuário do Jira e do Agile Space continuará usando o `email` corporativo como chave de unificação, e posteriormente o `sso_id`.
+   - A amarração final entre o usuário do Jira e do Portal Tech V&D continuará usando o `email` corporativo como chave de unificação, e posteriormente o `sso_id`.
 
 4. **Nova Classe de Segurança (SecurityConfig)**
    - Modificar a validação do token JWT atual (do Firebase) para validar o token do provedor corporativo utilizando um JWK Set Uri (`spring.security.oauth2.resourceserver.jwt.jwk-set-uri`).

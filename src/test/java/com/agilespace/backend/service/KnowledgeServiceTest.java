@@ -101,7 +101,7 @@ class KnowledgeServiceTest {
         @Test
         @DisplayName("Deve publicar novo documento com status padrão 'published'")
         void shouldSaveNewDocumentAsPublished() {
-            KnowledgeDocument doc = KnowledgeDocument.builder().title("Manual Agile Space").build();
+            KnowledgeDocument doc = KnowledgeDocument.builder().title("Manual Portal Tech V&D").build();
             when(repository.save(any(KnowledgeDocument.class))).thenAnswer(i -> i.getArgument(0));
 
             KnowledgeDocument saved = service.saveOrUpdateDocument(doc);

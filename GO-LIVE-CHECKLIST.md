@@ -1,4 +1,4 @@
-# Checklist de Go-Live — Agile Space
+# Checklist de Go-Live — Portal Tech V&D
 
 Ambiente de homologação: `https://app.espacoagil.com.br` (Oracle Cloud A1 ARM, 2 OCPU / 12 GB, uma VM com db + backend + frontend + Caddy via `docker compose --profile proxy`).
 
