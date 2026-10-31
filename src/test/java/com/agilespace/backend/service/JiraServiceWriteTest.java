@@ -186,6 +186,18 @@ class JiraServiceWriteTest {
     }
 
     @Test
+    void listaComentariosDaIssueSoLendo() {
+        server.expect(requestTo("https://jira.empresa.com.br/rest/api/2/issue/DDW-1/comment?maxResults=100&orderBy=-created"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("Referer", "https://jira.empresa.com.br/"))
+                .andRespond(withSuccess("{\"comments\":[{\"id\":\"9\",\"body\":\"Apoio docker\"},{\"id\":\"8\",\"body\":\"antigo\"}]}", MediaType.APPLICATION_JSON));
+
+        List<JsonNode> comments = service.listComments("jira.empresa.com.br", "tok", "DDW-1");
+        assertEquals(2, comments.size());
+        assertEquals("Apoio docker", comments.get(0).get("body").asText());
+    }
+
+    @Test
     void formataDuracaoDoJira() {
         assertEquals("10h", JiraService.formatJiraDuration(10));
         assertEquals("1h 30m", JiraService.formatJiraDuration(1.5));

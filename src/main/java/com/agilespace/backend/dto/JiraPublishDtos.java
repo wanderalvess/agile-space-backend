@@ -84,5 +84,64 @@ public final class JiraPublishDtos {
         private LocalDateTime updatedAt;
         private LocalDateTime finishedAt;
         private List<Step> steps;
+        // Só na tela de fila da squad (nulos no resto):
+        private String requestedByName;
+        private String roomTitle;
+        /** Envio "em andamento" sem sinal de vida há mais de 10 minutos (servidor reiniciou no meio, por exemplo). */
+        private boolean stale;
+    }
+
+    /** Fila da squad: os envios de todas as salas e o domínio do Jira para montar os links de cada issue. */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SquadQueue {
+        private String squadId;
+        private String jiraDomain;
+        private List<Job> jobs;
+    }
+
+    /** Uma linha do log de um envio. */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class Event {
+        private String id;
+        private Integer stepPosition;
+        private String kind;
+        private String action;   // SUBMITTED | RETRY | STEP_DONE | STEP_ERROR | JOB_DONE | VERIFIED
+        private Boolean ok;
+        private String message;
+        private String resultKey;
+        private String userId;
+        private String userName;
+        private LocalDateTime createdAt;
+    }
+
+    /** Resultado da conferência (somente leitura) de um passo contra o que existe hoje no Jira. */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class VerifyCheck {
+        private Integer index;
+        private String kind;
+        private String status;   // OK | DIVERGENT | NOT_SENT
+        private String detail;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class VerifyResult {
+        private String jobId;
+        private LocalDateTime checkedAt;
+        private boolean allOk;
+        private int confirmed;
+        private int total;
+        private List<VerifyCheck> checks;
     }
 }

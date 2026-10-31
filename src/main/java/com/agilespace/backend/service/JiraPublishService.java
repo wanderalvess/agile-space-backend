@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -39,9 +40,16 @@ public class JiraPublishService {
     private static final Set<String> KINDS = Set.of(JiraPublishStep.RENAME_PARENT, JiraPublishStep.CREATE_SUBTASK, JiraPublishStep.ADD_COMMENT);
     private static final int MAX_STEPS = 60;
     private static final int MAX_COMMENT_LENGTH = 30_000;
+    private static final int MAX_QUEUE_JOBS = 200;
+    private static final int MAX_EVENTS = 500;
+    /** Sem sinal de vida por tanto tempo, um envio "em andamento" é tratado como travado (dá para retomar ou descartar). */
+    static final long STALE_MINUTES = 10;
 
     private final JiraPublishJobRepository jobRepository;
     private final JiraPublishStepRepository stepRepository;
+    private final JiraPublishEventRepository eventRepository;
+    private final UserRepository userRepository;
+    private final SquadAccessService squadAccessService;
     private final SquadSubtaskTemplateRepository templateRepository;
     private final PokerRoomRepository roomRepository;
     private final PokerParticipantRepository participantRepository;
@@ -175,8 +183,10 @@ public class JiraPublishService {
         job = jobRepository.save(job);
         for (JiraPublishStep s : steps) s.setJobId(job.getId());
         steps = stepRepository.saveAll(steps);
+        logEvent(job.getId(), null, null, JiraPublishEvent.SUBMITTED, null,
+                "Envio criado com " + steps.size() + (steps.size() == 1 ? " passo." : " passos."), null, callerId);
 
-        run(job, steps, creds);
+        run(job, steps, creds, callerId);
         return toDto(job, stepRepository.findByJobIdOrderByPositionAsc(job.getId()));
     }
 
@@ -187,14 +197,24 @@ public class JiraPublishService {
         JiraPublishJob job = jobRepository.findById(jobId)
                 .filter(j -> roomId.equals(j.getRoomId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Envio não encontrado."));
+        return doRetry(job, callerId);
+    }
+
+    /** Mesma retentativa, pela tela de fila da squad (qualquer membro da squad, com o próprio token do Jira). */
+    public JiraPublishDtos.Job retryJob(String jobId, String callerId, String callerRole) {
+        JiraPublishJob job = requireJobForSquadMember(jobId, callerId, callerRole);
+        return doRetry(job, callerId);
+    }
+
+    private JiraPublishDtos.Job doRetry(JiraPublishJob job, String callerId) {
         if (JiraPublishJob.DONE.equals(job.getStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Este envio já foi concluído.");
         }
-        if (JiraPublishJob.RUNNING.equals(job.getStatus())) {
+        if ((JiraPublishJob.RUNNING.equals(job.getStatus()) || JiraPublishJob.PENDING.equals(job.getStatus())) && !isStale(job)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Este envio está em andamento.");
         }
         Creds creds = requireCreds(callerId, job.getSquadId());
-        List<JiraPublishStep> steps = stepRepository.findByJobIdOrderByPositionAsc(jobId);
+        List<JiraPublishStep> steps = stepRepository.findByJobIdOrderByPositionAsc(job.getId());
         for (JiraPublishStep s : steps) {
             if (JiraPublishStep.ERROR.equals(s.getStatus())) {
                 s.setStatus(JiraPublishStep.PENDING);
@@ -202,7 +222,10 @@ public class JiraPublishService {
             }
         }
         steps = stepRepository.saveAll(steps);
-        run(job, steps, creds);
+        long pending = steps.stream().filter(s -> !JiraPublishStep.DONE.equals(s.getStatus()) && !JiraPublishStep.SKIPPED.equals(s.getStatus())).count();
+        logEvent(job.getId(), null, null, JiraPublishEvent.RETRY, null,
+                "Nova tentativa pedida: " + pending + (pending == 1 ? " passo pendente." : " passos pendentes."), null, callerId);
+        run(job, steps, creds, callerId);
         return toDto(job, stepRepository.findByJobIdOrderByPositionAsc(job.getId()));
     }
 
@@ -228,6 +251,11 @@ public class JiraPublishService {
      * assim que termina, então uma queda no meio não perde o que já foi feito.
      */
     void run(JiraPublishJob job, List<JiraPublishStep> steps, Creds creds) {
+        run(job, steps, creds, job.getRequestedBy());
+    }
+
+    /** `actorId` é quem disparou esta execução (envio ou retentativa) e aparece no log de cada passo. */
+    void run(JiraPublishJob job, List<JiraPublishStep> steps, Creds creds, String actorId) {
         job.setStatus(JiraPublishJob.RUNNING);
         job.setErrorMessage(null);
         jobRepository.save(job);
@@ -240,6 +268,7 @@ public class JiraPublishService {
         for (JiraPublishStep step : steps) {
             if (JiraPublishStep.DONE.equals(step.getStatus()) || JiraPublishStep.SKIPPED.equals(step.getStatus())) continue;
             step.setAttempts((step.getAttempts() == null ? 0 : step.getAttempts()) + 1);
+            String note;
             try {
                 switch (step.getKind()) {
                     case JiraPublishStep.RENAME_PARENT -> {
@@ -249,6 +278,9 @@ public class JiraPublishService {
                         if (!desired.trim().equals(currentSummary.trim())) {
                             jiraService.assertSummaryEditable(creds.domain(), creds.token(), step.getTargetKey());
                             jiraService.updateIssueSummary(creds.domain(), creds.token(), step.getTargetKey(), desired);
+                            note = "Título de " + step.getTargetKey() + " alterado.";
+                        } else {
+                            note = "O título de " + step.getTargetKey() + " já estava assim no Jira; nada alterado.";
                         }
                         step.setResultKey(step.getTargetKey());
                     }
@@ -261,6 +293,7 @@ public class JiraPublishService {
                         String found = findExisting(existingSubtasks, summary, type);
                         if (found != null) {
                             step.setResultKey(found); // já existe: não duplica
+                            note = "A sub-tarefa " + found + " já existia no Jira; reaproveitada, nada criado.";
                         } else {
                             Double hours = step.getPayload().hasNonNull("estimateHours") ? step.getPayload().get("estimateHours").asDouble() : null;
                             String created = jiraService.createSubtask(creds.domain(), creds.token(),
@@ -270,6 +303,7 @@ public class JiraPublishService {
                             fake.put("key", created);
                             fake.putObject("fields").put("summary", summary).putObject("issuetype").put("name", type);
                             existingSubtasks.add(fake);
+                            note = "Sub-tarefa " + created + " criada.";
                         }
                     }
                     case JiraPublishStep.ADD_COMMENT -> {
@@ -282,18 +316,29 @@ public class JiraPublishService {
                             throw new JiraService.JiraWriteException(409, "A sub-tarefa deste comentário ainda não foi criada.");
                         }
                         step.setTargetKey(target);
-                        String id = jiraService.addComment(creds.domain(), creds.token(), target, step.getPayload().path("body").asText());
-                        step.setResultKey(id);
+                        String body = step.getPayload().path("body").asText();
+                        // Mesmo texto já comentado nesta issue (envio refeito, ou queda entre o Jira e o banco): não repete.
+                        String already = findExistingComment(jiraService.listComments(creds.domain(), creds.token(), target), body);
+                        if (already != null) {
+                            step.setResultKey(already);
+                            note = "O mesmo comentário já estava em " + target + "; não repetido.";
+                        } else {
+                            String id = jiraService.addComment(creds.domain(), creds.token(), target, body);
+                            step.setResultKey(id);
+                            note = "Comentário publicado em " + target + ".";
+                        }
                     }
                     default -> throw new JiraService.JiraWriteException(400, "Tipo de passo desconhecido: " + step.getKind());
                 }
                 step.setStatus(JiraPublishStep.DONE);
                 step.setErrorMessage(null);
                 stepRepository.save(step);
+                logEvent(job.getId(), step.getPosition(), step.getKind(), JiraPublishEvent.STEP_DONE, true, note, step.getResultKey(), actorId);
             } catch (JiraService.JiraWriteException e) {
                 step.setStatus(JiraPublishStep.ERROR);
                 step.setErrorMessage(e.getMessage());
                 stepRepository.save(step);
+                logEvent(job.getId(), step.getPosition(), step.getKind(), JiraPublishEvent.STEP_ERROR, false, e.getMessage(), null, actorId);
                 job.setStatus(JiraPublishJob.ERROR);
                 job.setErrorMessage("Passo " + (step.getPosition() + 1) + " (" + describeKind(step.getKind()) + "): " + e.getMessage());
                 jobRepository.save(job);
@@ -304,6 +349,8 @@ public class JiraPublishService {
                 step.setStatus(JiraPublishStep.ERROR);
                 step.setErrorMessage("Erro inesperado no servidor.");
                 stepRepository.save(step);
+                logEvent(job.getId(), step.getPosition(), step.getKind(), JiraPublishEvent.STEP_ERROR, false,
+                        "Erro inesperado no servidor: " + e.getClass().getSimpleName(), null, actorId);
                 job.setStatus(JiraPublishJob.ERROR);
                 job.setErrorMessage("Passo " + (step.getPosition() + 1) + " (" + describeKind(step.getKind()) + "): erro inesperado no servidor.");
                 jobRepository.save(job);
@@ -314,7 +361,218 @@ public class JiraPublishService {
         job.setStatus(JiraPublishJob.DONE);
         job.setFinishedAt(LocalDateTime.now());
         jobRepository.save(job);
+        logEvent(job.getId(), null, null, JiraPublishEvent.JOB_DONE, true, "Envio concluído: todos os passos foram feitos no Jira.", null, actorId);
         broadcast(job, steps);
+    }
+
+    // ------------------------------------------------------------------ fila da squad, log, descarte e conferência
+
+    /** Todos os envios da squad (todas as salas), com quem enviou e de qual sala, para a tela "Envios para o Jira". */
+    public JiraPublishDtos.SquadQueue listForSquad(String squadId, String callerId, String callerRole) {
+        requireSquadMember(squadId, callerId, callerRole);
+        List<JiraPublishJob> jobs = jobRepository.findBySquadIdIgnoreCaseOrderByCreatedAtDesc(squadId, PageRequest.of(0, MAX_QUEUE_JOBS));
+        Map<String, List<JiraPublishStep>> byJob = new HashMap<>();
+        if (!jobs.isEmpty()) {
+            for (JiraPublishStep s : stepRepository.findByJobIdInOrderByJobIdAscPositionAsc(jobs.stream().map(JiraPublishJob::getId).toList())) {
+                byJob.computeIfAbsent(s.getJobId(), k -> new ArrayList<>()).add(s);
+            }
+        }
+        Map<String, String> userNames = namesOf(jobs.stream().map(JiraPublishJob::getRequestedBy).toList());
+        Map<String, String> roomTitles = new HashMap<>();
+        Set<String> roomIds = new HashSet<>();
+        for (JiraPublishJob j : jobs) if (j.getRoomId() != null) roomIds.add(j.getRoomId());
+        if (!roomIds.isEmpty()) {
+            for (PokerRoom r : roomRepository.findAllById(roomIds)) roomTitles.put(r.getId(), r.getTitle());
+        }
+        List<JiraPublishDtos.Job> out = new ArrayList<>();
+        for (JiraPublishJob j : jobs) {
+            JiraPublishDtos.Job dto = toDto(j, byJob.getOrDefault(j.getId(), List.of()));
+            dto.setRequestedByName(userNames.get(j.getRequestedBy()));
+            dto.setRoomTitle(roomTitles.get(j.getRoomId()));
+            out.add(dto);
+        }
+        return JiraPublishDtos.SquadQueue.builder().squadId(squadId).jiraDomain(jiraDomainFor(callerId, squadId)).jobs(out).build();
+    }
+
+    /** O log de tentativas do envio, do mais antigo para o mais novo. */
+    public List<JiraPublishDtos.Event> listEvents(String jobId, String callerId, String callerRole) {
+        requireJobForSquadMember(jobId, callerId, callerRole);
+        List<JiraPublishEvent> events = eventRepository.findByJobIdOrderByCreatedAtAsc(jobId, PageRequest.of(0, MAX_EVENTS));
+        Map<String, String> names = namesOf(events.stream().map(JiraPublishEvent::getUserId).toList());
+        List<JiraPublishDtos.Event> out = new ArrayList<>();
+        for (JiraPublishEvent e : events) {
+            out.add(JiraPublishDtos.Event.builder()
+                    .id(e.getId()).stepPosition(e.getStepPosition()).kind(e.getKind()).action(e.getAction()).ok(e.getOk())
+                    .message(e.getMessage()).resultKey(e.getResultKey()).userId(e.getUserId()).userName(names.get(e.getUserId()))
+                    .createdAt(e.getCreatedAt()).build());
+        }
+        return out;
+    }
+
+    /**
+     * Descarta um envio com erro (ou travado): some da fila para a tarefa poder ser montada de novo. Só apaga o
+     * registro no portal. O que já foi feito no Jira continua lá e nada é desfeito; ao reenviar, o título igual e as
+     * sub-tarefas e comentários já existentes são reconhecidos e não se repetem.
+     */
+    public void discard(String jobId, String callerId, String callerRole) {
+        JiraPublishJob job = requireJobForSquadMember(jobId, callerId, callerRole);
+        boolean mine = callerId != null && callerId.equals(job.getRequestedBy());
+        if (!mine && !squadAccessService.canManageSquad(job.getSquadId(), callerId, callerRole)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só quem fez o envio, a liderança da squad ou administradores descartam um envio.");
+        }
+        boolean discardable = JiraPublishJob.ERROR.equals(job.getStatus()) || isStale(job);
+        if (!discardable) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, JiraPublishJob.DONE.equals(job.getStatus())
+                    ? "Este envio já foi concluído; não há o que descartar."
+                    : "Este envio está em andamento; espere terminar.");
+        }
+        List<JiraPublishStep> steps = stepRepository.findByJobIdOrderByPositionAsc(jobId);
+        log.info("Envio ao Jira {} ({}) descartado por {}; passos concluídos no Jira: {}", jobId, job.getParentKey(), callerId,
+                steps.stream().filter(s -> JiraPublishStep.DONE.equals(s.getStatus())).count());
+        jobRepository.delete(job); // passos e log saem junto (ON DELETE CASCADE)
+        job.setStatus("DISCARDED");
+        broadcast(job, steps);
+    }
+
+    /**
+     * Confere, só lendo, se o que o envio diz ter feito existe hoje no Jira: o título da pai, cada sub-tarefa criada e
+     * cada comentário. Nada é escrito. Passos que não chegaram a ser enviados aparecem como não enviados.
+     */
+    public JiraPublishDtos.VerifyResult verify(String jobId, String callerId, String callerRole) {
+        JiraPublishJob job = requireJobForSquadMember(jobId, callerId, callerRole);
+        Creds creds = requireCreds(callerId, job.getSquadId());
+        List<JiraPublishStep> steps = stepRepository.findByJobIdOrderByPositionAsc(jobId);
+        List<JiraPublishDtos.VerifyCheck> checks = new ArrayList<>();
+        int confirmed = 0;
+        int done = 0;
+        try {
+            String currentSummary = null;
+            List<JsonNode> subtasks = null;
+            Map<String, List<JsonNode>> commentsByIssue = new HashMap<>();
+            for (JiraPublishStep s : steps) {
+                if (!JiraPublishStep.DONE.equals(s.getStatus())) {
+                    checks.add(check(s, "NOT_SENT", JiraPublishStep.ERROR.equals(s.getStatus())
+                            ? "Falhou e não foi enviado; use \"Tentar novamente\"." : "Ainda não foi enviado."));
+                    continue;
+                }
+                done++;
+                switch (s.getKind()) {
+                    case JiraPublishStep.RENAME_PARENT -> {
+                        if (currentSummary == null) {
+                            currentSummary = jiraService.getIssue(creds.domain(), creds.token(), job.getParentKey(), List.of("summary"))
+                                    .path("fields").path("summary").asText("");
+                        }
+                        String wanted = s.getPayload().path("summary").asText("");
+                        if (wanted.trim().equals(currentSummary.trim())) {
+                            confirmed++;
+                            checks.add(check(s, "OK", "O título no Jira é o enviado."));
+                        } else {
+                            checks.add(check(s, "DIVERGENT", "No Jira o título é \"" + currentSummary + "\" (foi enviado \"" + wanted
+                                    + "\"). Pode ter sido editado depois."));
+                        }
+                    }
+                    case JiraPublishStep.CREATE_SUBTASK -> {
+                        if (subtasks == null) subtasks = jiraService.listSubtasks(creds.domain(), creds.token(), job.getParentKey());
+                        String key = s.getResultKey();
+                        boolean found = key != null && subtasks.stream().anyMatch(n -> key.equalsIgnoreCase(n.path("key").asText("")));
+                        if (found) {
+                            confirmed++;
+                            checks.add(check(s, "OK", "A sub-tarefa " + key + " existe sob " + job.getParentKey() + "."));
+                        } else {
+                            checks.add(check(s, "DIVERGENT", "A sub-tarefa " + key + " não aparece sob " + job.getParentKey()
+                                    + ". Pode ter sido apagada ou movida no Jira."));
+                        }
+                    }
+                    case JiraPublishStep.ADD_COMMENT -> {
+                        String target = s.getTargetKey();
+                        List<JsonNode> comments = target == null ? List.of() : commentsByIssue.computeIfAbsent(target,
+                                k -> jiraService.listComments(creds.domain(), creds.token(), k));
+                        String body = s.getPayload().path("body").asText("");
+                        if (findExistingComment(comments, body) != null) {
+                            confirmed++;
+                            checks.add(check(s, "OK", "O comentário está em " + target + "."));
+                        } else {
+                            checks.add(check(s, "DIVERGENT", "O comentário não aparece em " + target + " entre os 100 mais recentes."));
+                        }
+                    }
+                    default -> checks.add(check(s, "DIVERGENT", "Tipo de passo desconhecido."));
+                }
+            }
+        } catch (JiraService.JiraWriteException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Não foi possível conferir no Jira: " + e.getMessage());
+        }
+        boolean allOk = done > 0 && confirmed == done;
+        logEvent(jobId, null, null, JiraPublishEvent.VERIFIED, allOk,
+                "Conferido no Jira: " + confirmed + " de " + done + (done == 1 ? " passo concluído confirmado." : " passos concluídos confirmados."),
+                null, callerId);
+        return JiraPublishDtos.VerifyResult.builder()
+                .jobId(jobId).checkedAt(LocalDateTime.now()).allOk(allOk).confirmed(confirmed).total(done).checks(checks).build();
+    }
+
+    private static JiraPublishDtos.VerifyCheck check(JiraPublishStep s, String status, String detail) {
+        return JiraPublishDtos.VerifyCheck.builder().index(s.getPosition()).kind(s.getKind()).status(status).detail(detail).build();
+    }
+
+    private JiraPublishJob requireJobForSquadMember(String jobId, String callerId, String callerRole) {
+        JiraPublishJob job = jobRepository.findById(jobId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Envio não encontrado."));
+        requireSquadMember(job.getSquadId(), callerId, callerRole);
+        return job;
+    }
+
+    private void requireSquadMember(String squadId, String callerId, String callerRole) {
+        if (!squadAccessService.matchesSquad(squadId, callerId, callerRole)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito a membros desta squad ou administradores.");
+        }
+    }
+
+    private static boolean isStale(JiraPublishJob job) {
+        if (!JiraPublishJob.RUNNING.equals(job.getStatus()) && !JiraPublishJob.PENDING.equals(job.getStatus())) return false;
+        LocalDateTime last = job.getUpdatedAt() != null ? job.getUpdatedAt() : job.getCreatedAt();
+        return last != null && last.isBefore(LocalDateTime.now().minusMinutes(STALE_MINUTES));
+    }
+
+    private Map<String, String> namesOf(List<String> userIds) {
+        Set<String> ids = new HashSet<>();
+        for (String id : userIds) if (id != null) ids.add(id);
+        Map<String, String> out = new HashMap<>();
+        if (ids.isEmpty()) return out;
+        for (User u : userRepository.findAllById(ids)) out.put(u.getId(), isBlank(u.getName()) ? u.getEmail() : u.getName());
+        return out;
+    }
+
+    /** Domínio para os links da tela: o configurado pelo usuário, ou o da squad. Sem token envolvido. */
+    private String jiraDomainFor(String callerId, String squadId) {
+        UserJiraConfig cfg = callerId == null ? null : userJiraConfigRepository.findById(callerId).orElse(null);
+        if (cfg != null && !isBlank(cfg.getDomain())) return cfg.getDomain().trim();
+        Squad squad = squadRepository.findById(squadId).orElse(null);
+        return squad == null || isBlank(squad.getJiraDomain()) ? null : squad.getJiraDomain().trim();
+    }
+
+    private static String normalizeBody(String s) {
+        return s == null ? "" : s.replace("\r\n", "\n").trim();
+    }
+
+    /** Id do comentário que já tem exatamente este texto, ou null. */
+    static String findExistingComment(List<JsonNode> comments, String body) {
+        String wanted = normalizeBody(body);
+        if (wanted.isEmpty() || comments == null) return null;
+        for (JsonNode c : comments) {
+            if (wanted.equals(normalizeBody(c.path("body").asText(null)))) return c.path("id").asText(null);
+        }
+        return null;
+    }
+
+    /** Grava uma linha do log; nunca derruba o envio se o log falhar. */
+    private void logEvent(String jobId, Integer position, String kind, String action, Boolean ok, String message, String resultKey, String actorId) {
+        try {
+            eventRepository.save(JiraPublishEvent.builder()
+                    .id(UUID.randomUUID().toString()).jobId(jobId).stepPosition(position).kind(kind).action(action).ok(ok)
+                    .message(truncate(message, 2000)).resultKey(truncate(resultKey, 60)).userId(actorId)
+                    .createdAt(LocalDateTime.now()).build());
+        } catch (RuntimeException e) {
+            log.warn("Falha ao gravar o log do envio {}: {}", jobId, e.getMessage());
+        }
     }
 
     // ------------------------------------------------------------------ validação
@@ -573,7 +831,7 @@ public class JiraPublishService {
                 .parentKey(job.getParentKey()).parentSummary(job.getParentSummary()).requestedBy(job.getRequestedBy())
                 .status(job.getStatus()).errorMessage(job.getErrorMessage())
                 .createdAt(job.getCreatedAt()).updatedAt(job.getUpdatedAt()).finishedAt(job.getFinishedAt())
-                .steps(dtoSteps)
+                .steps(dtoSteps).stale(isStale(job))
                 .build();
     }
 

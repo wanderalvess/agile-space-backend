@@ -889,6 +889,33 @@ public class JiraService {
     }
 
     /**
+     * Leitura: os comentários mais recentes da issue (id e corpo). Base da checagem anti-duplicação do passo de
+     * comentar e da conferência do envio. Até 100, do mais novo para o mais antigo.
+     */
+    public List<JsonNode> listComments(String domain, String token, String issueKey) {
+        String cleanDomain = cleanDomain(domain);
+        String key = assertIssueKey(issueKey);
+        URI uri;
+        try {
+            uri = new URI("https://" + cleanDomain + "/rest/api/2/issue/" + key + "/comment?maxResults=100&orderBy=-created");
+        } catch (Exception e) {
+            throw new JiraWriteException(400, "Erro ao construir URL do Jira.");
+        }
+        try {
+            ResponseEntity<String> response = exchangeSecure(uri, new HttpEntity<>(bearerHeaders(token, cleanDomain)), String.class);
+            List<JsonNode> out = new java.util.ArrayList<>();
+            objectMapper.readTree(response.getBody()).path("comments").forEach(out::add);
+            return out;
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            throw new JiraWriteException(e.getStatusCode().value(), jiraErrorReason(e, "ler os comentários de " + key));
+        } catch (JiraWriteException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new JiraWriteException(0, "Erro ao ler os comentários de " + key + ": " + describe(e));
+        }
+    }
+
+    /**
      * Leitura: GET editmeta diz quais campos este usuário pode editar nesta issue (permissão, tela e status).
      * Lança 403 com motivo claro quando "summary" não é editável, para não confundir com bloqueio de proxy no PUT.
      */

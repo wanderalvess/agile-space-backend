@@ -10,4 +10,6 @@ import java.util.List;
 public interface JiraPublishJobRepository extends JpaRepository<JiraPublishJob, String> {
     List<JiraPublishJob> findByRoomIdOrderByCreatedAtDesc(String roomId);
     List<JiraPublishJob> findByRoomIdAndIssueIdOrderByCreatedAtDesc(String roomId, String issueId);
+    /** Fila da squad inteira (todas as salas), mais recentes primeiro; o serviço limita pelo Pageable. */
+    List<JiraPublishJob> findBySquadIdIgnoreCaseOrderByCreatedAtDesc(String squadId, org.springframework.data.domain.Pageable pageable);
 }

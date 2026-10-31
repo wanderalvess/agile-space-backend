@@ -33,6 +33,9 @@ class JiraPublishServiceTest {
 
     @Mock JiraPublishJobRepository jobRepository;
     @Mock JiraPublishStepRepository stepRepository;
+    @Mock JiraPublishEventRepository eventRepository;
+    @Mock UserRepository userRepository;
+    @Mock SquadAccessService squadAccessService;
     @Mock SquadSubtaskTemplateRepository templateRepository;
     @Mock PokerRoomRepository roomRepository;
     @Mock PokerParticipantRepository participantRepository;
@@ -47,7 +50,7 @@ class JiraPublishServiceTest {
 
     @BeforeEach
     void setup() {
-        service = new JiraPublishService(jobRepository, stepRepository, templateRepository, roomRepository,
+        service = new JiraPublishService(jobRepository, stepRepository, eventRepository, userRepository, squadAccessService, templateRepository, roomRepository,
                 participantRepository, squadRepository, userJiraConfigRepository, jiraService, webSocketHandler, mapper);
 
         room = new PokerRoom();
