@@ -114,6 +114,15 @@ public class JiraPublishService {
             }
         }
 
+        if (templates.isEmpty()) {
+            // Sem sub-tarefas as notas não têm para onde ir: propomos um comentário na pai, editável e removível.
+            String parentComment = parentCommentFromNotes(devNotes, devHours, qaNotes, qaHours);
+            if (parentComment != null) {
+                steps.add(JiraPublishDtos.Step.builder()
+                        .index(steps.size()).kind(JiraPublishStep.ADD_COMMENT).targetKey(parentKey).comment(parentComment).build());
+            }
+        }
+
         return JiraPublishDtos.Preview.builder()
                 .roomId(room.getId()).issueId(issueId).squadId(squadId)
                 .projectKey(projectKeyOf(parentKey)).parentKey(parentKey).parentIssueType(parentType)
@@ -398,6 +407,19 @@ public class JiraPublishService {
 
     // ------------------------------------------------------------------ apoio
 
+    /** Notas da sala viram "DEV (10h):", quebra de linha, texto; depois "QA (4h):" idem. Null sem nota nenhuma. */
+    static String parentCommentFromNotes(String devNotes, Double devHours, String qaNotes, Double qaHours) {
+        StringBuilder sb = new StringBuilder();
+        if (!isBlank(devNotes)) {
+            sb.append("DEV").append(devHours != null && devHours > 0 ? " (" + formatHours(devHours) + "h)" : "").append(':').append('\n').append(devNotes.trim());
+        }
+        if (!isBlank(qaNotes)) {
+            if (sb.length() > 0) sb.append('\n').append('\n');
+            sb.append("QA").append(qaHours != null && qaHours > 0 ? " (" + formatHours(qaHours) + "h)" : "").append(':').append('\n').append(qaNotes.trim());
+        }
+        return sb.length() == 0 ? null : truncate(sb.toString(), MAX_COMMENT_LENGTH);
+    }
+
     static String stripEstimateSuffix(String title) {
         if (title == null) return "";
         Matcher m = ESTIMATE_SUFFIX.matcher(title);
@@ -407,8 +429,9 @@ public class JiraPublishService {
 
     static String estimateSuffix(Double devHours, Double qaHours) {
         List<String> parts = new ArrayList<>();
-        if (devHours != null) parts.add("DEV " + formatHours(devHours) + "h");
-        if (qaHours != null) parts.add("QA " + formatHours(qaHours) + "h");
+        // Papel sem estimativa (ou com 0h) fica fora do sufixo: "(DEV 10h)" em vez de "(DEV 10h / QA 0h)".
+        if (devHours != null && devHours > 0) parts.add("DEV " + formatHours(devHours) + "h");
+        if (qaHours != null && qaHours > 0) parts.add("QA " + formatHours(qaHours) + "h");
         return parts.isEmpty() ? "" : " (" + String.join(" / ", parts) + ")";
     }
 

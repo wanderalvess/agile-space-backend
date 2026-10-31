@@ -129,8 +129,15 @@ class JiraPublishServiceTest {
                     .thenReturn(List.of(template("t4", "Só Manutenção", "DEV", "{pai}", null, "Manutenção")));
 
             JiraPublishDtos.Preview p = service.preview("room-1", "iss-1", "user-1", "USER");
-            assertEquals(1, p.getSteps().size());
+            assertEquals(2, p.getSteps().size());
             assertEquals(JiraPublishStep.RENAME_PARENT, p.getSteps().get(0).getKind());
+            // as notas da sala não se perdem: viram um comentário proposto na própria pai
+            JiraPublishDtos.Step c = p.getSteps().get(1);
+            assertEquals(JiraPublishStep.ADD_COMMENT, c.getKind());
+            assertEquals("DDWMISSI-100", c.getTargetKey());
+            assertEquals(null, c.getDependsOnIndex());
+            assertTrue(c.getComment().startsWith("DEV (10h):" + '\n' + "Trocar o cálculo de ST"));
+            assertTrue(c.getComment().contains("QA (12h):" + '\n'));
             assertTrue(p.getWarnings().stream().anyMatch(w -> w.contains("Nenhuma sub-tarefa configurada")));
         }
 
@@ -479,6 +486,8 @@ class JiraPublishServiceTest {
             assertEquals(" (DEV 1,5h)", JiraPublishService.estimateSuffix(1.5, null));
             assertEquals(" (QA 4h)", JiraPublishService.estimateSuffix(null, 4.0));
             assertEquals("", JiraPublishService.estimateSuffix(null, null));
+            assertEquals(" (DEV 10h)", JiraPublishService.estimateSuffix(10.0, 0.0));
+            assertEquals("", JiraPublishService.estimateSuffix(0.0, 0.0));
         }
 
         @Test
