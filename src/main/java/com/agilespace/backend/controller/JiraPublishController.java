@@ -8,6 +8,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.util.Map;
 
 import java.util.List;
 
@@ -52,5 +55,15 @@ public class JiraPublishController {
 
     private static String role(HttpServletRequest request) {
         return (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
+    }
+
+    // Em produção o Spring oculta a razão das ResponseStatusException (include-message: never);
+    // aqui a mensagem é orientação ao usuário (ex.: configurar sub-tarefas), então devolvemos explícito.
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<Map<String, String>> handleStatus(ResponseStatusException ex) {
+        return ResponseEntity.status(ex.getStatusCode()).body(Map.of(
+                "error", String.valueOf(ex.getStatusCode().value()),
+                "message", ex.getReason() == null ? "" : ex.getReason()
+        ));
     }
 }

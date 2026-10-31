@@ -11,6 +11,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import org.springframework.web.server.ResponseStatusException;
+
 import java.util.List;
 import java.util.Map;
 
@@ -52,5 +54,15 @@ public class SquadSubtaskTemplateController {
         if (!squadAccessService.canManageSquad(squadId, request)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Só a liderança da squad ou administradores alteram as sub-tarefas do time.");
         }
+    }
+
+    // Em produção o Spring oculta a razão das ResponseStatusException (include-message: never);
+    // aqui a mensagem é orientação ao usuário (ex.: configurar sub-tarefas), então devolvemos explícito.
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<Map<String, String>> handleStatus(ResponseStatusException ex) {
+        return ResponseEntity.status(ex.getStatusCode()).body(Map.of(
+                "error", String.valueOf(ex.getStatusCode().value()),
+                "message", ex.getReason() == null ? "" : ex.getReason()
+        ));
     }
 }

@@ -14,6 +14,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 import java.util.List;
+import java.util.Map;
+import org.springframework.web.server.ResponseStatusException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
@@ -62,5 +64,15 @@ class JiraPublishControllerTest {
 
         when(service.retry("room-1", "j1", "user-1", "USER")).thenReturn(JiraPublishDtos.Job.builder().id("j1").build());
         assertEquals("j1", controller.retry("room-1", "j1", request).getBody().getId());
+    }
+
+    @Test
+    void erroDeNegocioVaiComMensagemNoCorpoMesmoEmProducao() {
+        ResponseEntity<Map<String, String>> r = controller.handleStatus(
+                new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nenhuma sub-tarefa configurada para a squad X. Configure em Sub-tarefas do time."));
+
+        assertEquals(HttpStatus.BAD_REQUEST, r.getStatusCode());
+        assertEquals("400", r.getBody().get("error"));
+        assertEquals("Nenhuma sub-tarefa configurada para a squad X. Configure em Sub-tarefas do time.", r.getBody().get("message"));
     }
 }
