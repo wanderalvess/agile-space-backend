@@ -973,7 +973,9 @@ public class JiraService {
             String respBody = response.getBody();
             return (respBody == null || respBody.isBlank()) ? null : objectMapper.readTree(respBody);
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
-            log.warn("Escrita no Jira falhou ({}): status {}", action, e.getStatusCode().value());
+            // Corpo e content-type ajudam a distinguir "sem permissão" (JSON do Jira) de bloqueio de proxy/XSRF (HTML).
+            log.warn("Escrita no Jira falhou ({}): status {}, content-type {}, corpo: {}", action, e.getStatusCode().value(),
+                    e.getResponseHeaders() == null ? null : e.getResponseHeaders().getContentType(), snippet(e.getResponseBodyAsString(), 600));
             throw new JiraWriteException(e.getStatusCode().value(), jiraErrorReason(e, action));
         } catch (JiraWriteException e) {
             throw e;
@@ -1023,11 +1025,26 @@ public class JiraService {
         } catch (Exception ignored) {
             // corpo não é JSON; cai no texto por status
         }
+        String raw = e.getResponseBodyAsString();
+        if (raw != null && raw.stripLeading().regionMatches(true, 0, "<", 0, 1)) {
+            // HTML no lugar da API: proxy/WAF ou checagem XSRF do Jira, não é falta de permissão do usuário.
+            java.util.regex.Matcher t = java.util.regex.Pattern.compile("(?is)<title>\\s*(.*?)\\s*</title>").matcher(raw);
+            String title = t.find() ? snippet(t.group(1), 120) : "";
+            return prefix + " (" + status + "): o Jira respondeu uma página HTML em vez da API"
+                    + (title.isEmpty() ? "" : " (\"" + title + "\")") + "; provável bloqueio de proxy/XSRF, não falta de permissão.";
+        }
         return switch (status) {
             case 401 -> prefix + ": token do Jira inválido ou expirado (401).";
             case 403 -> prefix + ": sem permissão no Jira para esta ação (403).";
             case 404 -> prefix + ": issue não encontrada no Jira (404).";
             default -> prefix + " (" + status + ").";
         };
+    }
+
+    /** Primeiros n caracteres, sem quebras de linha, para log/mensagem. */
+    private static String snippet(String s, int n) {
+        if (s == null) return "";
+        String one = s.replaceAll("\\s+", " ").trim();
+        return one.length() > n ? one.substring(0, n) + "…" : one;
     }
 }
