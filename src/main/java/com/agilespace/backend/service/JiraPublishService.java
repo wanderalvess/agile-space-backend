@@ -71,17 +71,16 @@ public class JiraPublishService {
         }
         String parentType = text(issue, "jiraType");
         List<SquadSubtaskTemplate> templates = templatesFor(squadId, parentType);
-        if (templates.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Nenhuma sub-tarefa configurada para a squad " + squadId
-                            + (parentType != null ? " com issue pai do tipo \"" + parentType + "\"" : "")
-                            + ". Configure em Sub-tarefas do time.");
-        }
 
         boolean hoursDeck = "hours".equalsIgnoreCase(room.getDeckType());
         Double devHours = hoursDeck ? parseHours(roleValue(issue, "dev")) : null;
         Double qaHours = hoursDeck ? parseHours(roleValue(issue, "qa")) : null;
         List<String> warnings = new ArrayList<>();
+        if (templates.isEmpty()) {
+            warnings.add("Nenhuma sub-tarefa configurada para a squad " + squadId
+                    + (parentType != null ? " com issue pai do tipo \"" + parentType + "\"" : "")
+                    + ": o envio só renomeia a pai (e comenta nela, se você escrever um comentário). Configure em Sub-tarefas do time.");
+        }
         if (!hoursDeck) warnings.add("A sala não usa o baralho de horas: as sub-tarefas vão sem estimativa.");
         if (hoursDeck && devHours == null) warnings.add("Sem estimativa DEV para esta tarefa.");
         if (hoursDeck && qaHours == null) warnings.add("Sem estimativa QA para esta tarefa.");
@@ -372,14 +371,23 @@ public class JiraPublishService {
                     if (body.length() > MAX_COMMENT_LENGTH) {
                         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Passo " + (i + 1) + ": comentário longo demais.");
                     }
-                    // Comentário só em sub-tarefa criada por este mesmo envio: nunca na pai nem em issue avulsa.
+                    // Comentário só em sub-tarefa criada por este mesmo envio ou na própria issue pai: nunca em issue avulsa.
                     Integer dep = s.getDependsOnIndex();
-                    if (dep == null || !createIdsByIndex.containsKey(dep)) {
-                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                                "Passo " + (i + 1) + ": o comentário precisa apontar para uma sub-tarefa criada neste envio.");
+                    if (dep != null) {
+                        if (!createIdsByIndex.containsKey(dep)) {
+                            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                                    "Passo " + (i + 1) + ": o comentário precisa apontar para uma sub-tarefa criada neste envio.");
+                        }
+                        b.dependsOn(createIdsByIndex.get(dep));
+                    } else {
+                        String target = s.getTargetKey() == null ? "" : s.getTargetKey().trim();
+                        if (!parentKey.equalsIgnoreCase(target)) {
+                            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                                    "Passo " + (i + 1) + ": comentário sem sub-tarefa só pode ir na issue pai " + parentKey + ".");
+                        }
+                        b.targetKey(parentKey);
                     }
                     payload.put("body", body);
-                    b.dependsOn(createIdsByIndex.get(dep));
                 }
                 default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Passo " + (i + 1) + ": ação não permitida.");
             }

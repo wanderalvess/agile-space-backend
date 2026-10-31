@@ -123,15 +123,15 @@ class JiraPublishServiceTest {
         }
 
         @Test
-        void semTemplatesParaOTipoDaPaiDa400Orientando() {
+        void semTemplatesParaOTipoDaPaiSoRenomeiaEAvisa() {
             when(roomRepository.findById("room-1")).thenReturn(Optional.of(room));
             when(templateRepository.findBySquadIdIgnoreCaseOrderByPositionAsc("DDWMISSI"))
                     .thenReturn(List.of(template("t4", "Só Manutenção", "DEV", "{pai}", null, "Manutenção")));
 
-            ResponseStatusException ex = assertThrows(ResponseStatusException.class,
-                    () -> service.preview("room-1", "iss-1", "user-1", "USER"));
-            assertEquals(HttpStatus.BAD_REQUEST, ex.getStatusCode());
-            assertTrue(ex.getReason().contains("Nenhuma sub-tarefa configurada"));
+            JiraPublishDtos.Preview p = service.preview("room-1", "iss-1", "user-1", "USER");
+            assertEquals(1, p.getSteps().size());
+            assertEquals(JiraPublishStep.RENAME_PARENT, p.getSteps().get(0).getKind());
+            assertTrue(p.getWarnings().stream().anyMatch(w -> w.contains("Nenhuma sub-tarefa configurada")));
         }
 
         @Test
@@ -197,10 +197,37 @@ class JiraPublishServiceTest {
         }
 
         @Test
-        void comentarioPrecisaApontarParaSubCriadaNoMesmoEnvio() {
+        void comentarioSemDependenciaSoPodeIrNaPai() {
             JiraPublishDtos.Step c = step(JiraPublishStep.ADD_COMMENT);
             c.setComment("oi");
-            c.setTargetKey("DDWMISSI-100"); // tentar comentar na pai: ignorado, exige dependsOnIndex
+            c.setTargetKey("DDWMISSI-999"); // outra issue: proibido
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                    () -> service.validateSteps(List.of(c), "DDWMISSI-100", Set.of("codificação")));
+            assertTrue(ex.getReason().contains("só pode ir na issue pai"));
+
+            JiraPublishDtos.Step semAlvo = step(JiraPublishStep.ADD_COMMENT);
+            semAlvo.setComment("oi");
+            assertThrows(ResponseStatusException.class,
+                    () -> service.validateSteps(List.of(semAlvo), "DDWMISSI-100", Set.of("codificação")));
+        }
+
+        @Test
+        void comentarioNaPaiEhAceitoEMiraAPai() {
+            JiraPublishDtos.Step c = step(JiraPublishStep.ADD_COMMENT);
+            c.setComment("Issue de teste: só renomear e comentar.");
+            c.setTargetKey("ddwmissi-100");
+            List<JiraPublishStep> out = service.validateSteps(List.of(c), "DDWMISSI-100", Set.of());
+            assertEquals(1, out.size());
+            assertEquals("DDWMISSI-100", out.get(0).getTargetKey());
+            assertEquals(null, out.get(0).getDependsOn());
+            assertEquals("Issue de teste: só renomear e comentar.", out.get(0).getPayload().path("body").asText());
+        }
+
+        @Test
+        void comentarioComDependenciaInvalidaDa400() {
+            JiraPublishDtos.Step c = step(JiraPublishStep.ADD_COMMENT);
+            c.setComment("oi");
+            c.setDependsOnIndex(7);
             ResponseStatusException ex = assertThrows(ResponseStatusException.class,
                     () -> service.validateSteps(List.of(c), "DDWMISSI-100", Set.of("codificação")));
             assertTrue(ex.getReason().contains("sub-tarefa criada neste envio"));
