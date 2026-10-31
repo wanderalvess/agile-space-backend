@@ -1,6 +1,6 @@
-# Agile Space Backend 🚀
+# Portal Tech V&D Backend 🚀
 
-O **Agile Space Backend** é o motor central (API REST, WebSockets e Servidor MCP) da plataforma **Espaço Ágil**. Este repositório foi construído utilizando uma arquitetura escalável e resiliente em **Java 17+ com Spring Boot 3.5**, responsável por gerenciar cerimônias ágeis em tempo real, métricas e consolidação de squads, segurança de segredos (Vault), base de conhecimento com RAG vetorial e integrações para agentes de inteligência artificial.
+O **Portal Tech V&D Backend** é o motor central (API REST, WebSockets e Servidor MCP) do **Portal Tech V&D**, o hub de tecnologia de Varejo e Distribuição. Este repositório foi construído utilizando uma arquitetura escalável e resiliente em **Java 17+ com Spring Boot 3.5**, responsável por gerenciar cerimônias ágeis em tempo real, métricas e consolidação de squads, segurança de segredos (Vault), base de conhecimento com RAG vetorial e integrações para agentes de inteligência artificial.
 
 ---
 
@@ -297,4 +297,4 @@ keytool -importcert \
 
 ---
 
-**Agile Space Backend** — Potencializando a colaboração e a engenharia de software de alta performance.
+**Portal Tech V&D Backend** — o servidor do hub de tecnologia de Varejo e Distribuição.
