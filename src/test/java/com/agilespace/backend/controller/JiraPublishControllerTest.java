@@ -30,8 +30,8 @@ class JiraPublishControllerTest {
     @BeforeEach
     void setup() {
         request = mock(HttpServletRequest.class);
-        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("user-1");
-        when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE)).thenReturn("USER");
+        lenient().when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("user-1");
+        lenient().when(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE)).thenReturn("USER");
     }
 
     @Test
