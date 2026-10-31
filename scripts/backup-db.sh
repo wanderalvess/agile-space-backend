@@ -1,5 +1,5 @@
 #!/bin/sh
-# Backup do Postgres do Agile Space via "docker exec pg_dump" — não depende de ter o
+# Backup do Postgres do Portal Tech V&D via "docker exec pg_dump" — não depende de ter o
 # cliente do Postgres instalado no host, só do container "db" (docker-compose.yml) estar
 # de pé. Pensado pra rodar via cron/systemd timer no servidor de produção, sem argumentos.
 #
