@@ -787,11 +787,18 @@ public class JiraService {
         return k;
     }
 
+    /** Mesmos cabeçalhos das leituras (importação/sync): o proxy do Jira corporativo responde 403 ao User-Agent padrão do Java. */
+    static final String BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
     private HttpHeaders bearerHeaders(String token) {
         HttpHeaders headers = new HttpHeaders();
         headers.set("Authorization", "Bearer " + token.trim());
         headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
         headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("User-Agent", BROWSER_USER_AGENT);
+        headers.set("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7");
+        // Com User-Agent de navegador o Jira Data Center aplica a checagem XSRF em POST/PUT; este header a dispensa.
+        headers.set("X-Atlassian-Token", "no-check");
         return headers;
     }
 
