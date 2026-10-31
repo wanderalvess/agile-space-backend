@@ -247,6 +247,7 @@ public class JiraPublishService {
                         JsonNode current = jiraService.getIssue(creds.domain(), creds.token(), step.getTargetKey(), List.of("summary"));
                         String currentSummary = current.path("fields").path("summary").asText("");
                         if (!desired.trim().equals(currentSummary.trim())) {
+                            jiraService.assertSummaryEditable(creds.domain(), creds.token(), step.getTargetKey());
                             jiraService.updateIssueSummary(creds.domain(), creds.token(), step.getTargetKey(), desired);
                         }
                         step.setResultKey(step.getTargetKey());

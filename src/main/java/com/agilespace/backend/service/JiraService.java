@@ -886,6 +886,36 @@ public class JiraService {
         }
     }
 
+    /**
+     * Leitura: GET editmeta diz quais campos este usuário pode editar nesta issue (permissão, tela e status).
+     * Lança 403 com motivo claro quando "summary" não é editável, para não confundir com bloqueio de proxy no PUT.
+     */
+    public void assertSummaryEditable(String domain, String token, String issueKey) {
+        String cleanDomain = cleanDomain(domain);
+        String key = assertIssueKey(issueKey);
+        URI uri;
+        try {
+            uri = new URI("https://" + cleanDomain + "/rest/api/2/issue/" + key + "/editmeta");
+        } catch (Exception e) {
+            throw new JiraWriteException(400, "Erro ao construir URL do Jira.");
+        }
+        JsonNode meta;
+        try {
+            ResponseEntity<String> response = exchangeSecure(uri, new HttpEntity<>(bearerHeaders(token)), String.class);
+            meta = objectMapper.readTree(response.getBody());
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            throw new JiraWriteException(e.getStatusCode().value(), jiraErrorReason(e, "consultar o que pode ser editado em " + key));
+        } catch (JiraWriteException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new JiraWriteException(0, "Erro ao consultar o editmeta de " + key + ": " + describe(e));
+        }
+        if (!meta.path("fields").has("summary")) {
+            throw new JiraWriteException(403, "O Jira não deixa este usuário editar o título de " + key
+                    + " (permissão de edição no projeto, tela de edição sem o campo ou status da issue). Não é bloqueio de proxy.");
+        }
+    }
+
     /** Escrita 1/3: troca SÓ o título (summary) da issue. Nenhum outro campo é enviado. */
     public void updateIssueSummary(String domain, String token, String issueKey, String newSummary) {
         String key = assertIssueKey(issueKey);

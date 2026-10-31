@@ -151,6 +151,40 @@ class JiraServiceWriteTest {
     }
 
     @Test
+    void editmetaComSummaryLiberaRenomear() {
+        server.expect(requestTo("https://jira.empresa.com.br/rest/api/2/issue/DDW-1/editmeta"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"fields\":{\"summary\":{\"name\":\"Summary\"}}}", MediaType.APPLICATION_JSON));
+
+        assertDoesNotThrow(() -> service.assertSummaryEditable("jira.empresa.com.br", "tok", "DDW-1"));
+    }
+
+    @Test
+    void editmetaSemSummaryDa403ComMotivoClaro() {
+        server.expect(requestTo("https://jira.empresa.com.br/rest/api/2/issue/DDW-1/editmeta"))
+                .andRespond(withSuccess("{\"fields\":{\"description\":{}}}", MediaType.APPLICATION_JSON));
+
+        JiraService.JiraWriteException ex = assertThrows(JiraService.JiraWriteException.class,
+                () -> service.assertSummaryEditable("jira.empresa.com.br", "tok", "DDW-1"));
+        assertEquals(403, ex.getStatus());
+        assertTrue(ex.getMessage().contains("editar o título"));
+    }
+
+    @Test
+    void escritaRecusadaComHtmlExplicaProxyOuXsrf() {
+        server.expect(requestTo("https://jira.empresa.com.br/rest/api/2/issue/DDW-1"))
+                .andExpect(method(HttpMethod.PUT))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN).contentType(MediaType.TEXT_HTML)
+                        .body("<html><head><title>XSRF check failed</title></head><body>…</body></html>"));
+
+        JiraService.JiraWriteException ex = assertThrows(JiraService.JiraWriteException.class,
+                () -> service.updateIssueSummary("jira.empresa.com.br", "tok", "DDW-1", "Novo"));
+        assertEquals(403, ex.getStatus());
+        assertTrue(ex.getMessage().contains("página HTML"));
+        assertTrue(ex.getMessage().contains("XSRF check failed"));
+    }
+
+    @Test
     void formataDuracaoDoJira() {
         assertEquals("10h", JiraService.formatJiraDuration(10));
         assertEquals("1h 30m", JiraService.formatJiraDuration(1.5));
