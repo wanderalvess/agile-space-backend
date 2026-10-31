@@ -38,6 +38,7 @@ class JiraServiceWriteTest {
                 .andExpect(header("Authorization", "Bearer tok"))
                 .andExpect(header("User-Agent", JiraService.BROWSER_USER_AGENT))
                 .andExpect(header("X-Atlassian-Token", "no-check"))
+                .andExpect(header("Referer", "https://jira.empresa.com.br/"))
                 .andExpect(jsonPath("$.fields.summary").value("Novo (DEV 10h / QA 2h)"))
                 .andExpect(jsonPath("$.fields.length()").value(1))
                 .andRespond(withStatus(HttpStatus.NO_CONTENT));

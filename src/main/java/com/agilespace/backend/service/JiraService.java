@@ -790,7 +790,7 @@ public class JiraService {
     /** Mesmos cabeçalhos das leituras (importação/sync): o proxy do Jira corporativo responde 403 ao User-Agent padrão do Java. */
     static final String BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
-    private HttpHeaders bearerHeaders(String token) {
+    private HttpHeaders bearerHeaders(String token, String cleanDomain) {
         HttpHeaders headers = new HttpHeaders();
         headers.set("Authorization", "Bearer " + token.trim());
         headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
@@ -799,6 +799,8 @@ public class JiraService {
         headers.set("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7");
         // Com User-Agent de navegador o Jira Data Center aplica a checagem XSRF em POST/PUT; este header a dispensa.
         headers.set("X-Atlassian-Token", "no-check");
+        // Sondado em 2026-10-31 no Jira TOTVS: com UA de navegador o XSRF só passa com Referer do próprio Jira.
+        headers.set("Referer", "https://" + cleanDomain + "/");
         return headers;
     }
 
@@ -815,7 +817,7 @@ public class JiraService {
             throw new JiraWriteException(400, "Erro ao construir URL do Jira.");
         }
         try {
-            ResponseEntity<String> response = exchangeSecure(uri, new HttpEntity<>(bearerHeaders(token)), String.class);
+            ResponseEntity<String> response = exchangeSecure(uri, new HttpEntity<>(bearerHeaders(token, cleanDomain)), String.class);
             return objectMapper.readTree(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             throw new JiraWriteException(e.getStatusCode().value(), jiraErrorReason(e, "ler a issue " + key));
@@ -838,7 +840,7 @@ public class JiraService {
             throw new JiraWriteException(400, "Erro ao construir URL do Jira.");
         }
         try {
-            ResponseEntity<String> response = exchangeSecure(uri, new HttpEntity<>(bearerHeaders(token)), String.class);
+            ResponseEntity<String> response = exchangeSecure(uri, new HttpEntity<>(bearerHeaders(token, cleanDomain)), String.class);
             JsonNode root = objectMapper.readTree(response.getBody());
             List<JsonNode> out = new java.util.ArrayList<>();
             JsonNode issues = root.path("issues");
@@ -870,7 +872,7 @@ public class JiraService {
             throw new JiraWriteException(400, "Erro ao construir URL do Jira.");
         }
         try {
-            ResponseEntity<String> response = exchangeSecure(uri, new HttpEntity<>(bearerHeaders(token)), String.class);
+            ResponseEntity<String> response = exchangeSecure(uri, new HttpEntity<>(bearerHeaders(token, cleanDomain)), String.class);
             JsonNode root = objectMapper.readTree(response.getBody());
             List<JsonNode> out = new java.util.ArrayList<>();
             for (JsonNode project : root.path("projects")) {
@@ -901,7 +903,7 @@ public class JiraService {
         }
         JsonNode meta;
         try {
-            ResponseEntity<String> response = exchangeSecure(uri, new HttpEntity<>(bearerHeaders(token)), String.class);
+            ResponseEntity<String> response = exchangeSecure(uri, new HttpEntity<>(bearerHeaders(token, cleanDomain)), String.class);
             meta = objectMapper.readTree(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             throw new JiraWriteException(e.getStatusCode().value(), jiraErrorReason(e, "consultar o que pode ser editado em " + key));
@@ -982,7 +984,7 @@ public class JiraService {
         assertNotBlockedHost(uri);
         HttpEntity<String> entity;
         try {
-            entity = new HttpEntity<>(objectMapper.writeValueAsString(body), bearerHeaders(token));
+            entity = new HttpEntity<>(objectMapper.writeValueAsString(body), bearerHeaders(token, cleanDomain));
         } catch (Exception e) {
             throw new JiraWriteException(400, "Erro ao montar o pedido para o Jira.");
         }
