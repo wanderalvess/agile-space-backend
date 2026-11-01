@@ -60,10 +60,13 @@ services:
       # Rede do proxy reverso (Caddy) cujo X-Forwarded-For o limitador de login pode ler. Vazio = ignora o cabeçalho.
       # Com o profile "proxy": TRUSTED_PROXIES=172.16.0.0/12 (faixa padrão das redes do Docker; confira com docker network inspect).
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
-      # Migração do vínculo (docs/membership-api.md): legacy | shadow (padrão) | new. Reverter = legacy.
-      APP_MEMBERSHIP_MODE: ${APP_MEMBERSHIP_MODE:-shadow}
-      # Autorização por squad (Etapa 2, ALTO RISCO): legacy (padrão) | shadow | new. Reverter = legacy. Ver docs/membership-api.md.
-      APP_MEMBERSHIP_AUTHZ: ${APP_MEMBERSHIP_AUTHZ:-legacy}
+      # Migração do vínculo (docs/membership-api.md): legacy | shadow | new (padrão). Reverter = legacy.
+      APP_MEMBERSHIP_MODE: ${APP_MEMBERSHIP_MODE:-new}
+      # Autorização por squad (Etapa 2): legacy | shadow | new (padrão). Reverter = legacy. Ver docs/membership-api.md.
+      # Em legacy, users.default_project_id vale como "é da squad" (sem vínculo nenhum); em new só vale o vínculo
+      # (project_member_roles). Instalação nova deve ficar em new. Quem vem de legacy roda antes
+      # GET /api/admin/membership/authz-diff e confere WOULD_LOSE_ACCESS.
+      APP_MEMBERSHIP_AUTHZ: ${APP_MEMBERSHIP_AUTHZ:-new}
       # Review (docs/ceremony-review-api.md): trava de decisão do PO/SME no servidor. enforce (padrão) | off (desliga a trava).
       APP_SHOWCASE_DECISION_LOCK: ${APP_SHOWCASE_DECISION_LOCK:-enforce}
       # Pedido de vínculo aprovado pela liderança da squad (Etapa 3): on (padrão) | off (só ADMIN aprova; rotas por squad 404).
@@ -73,7 +76,9 @@ services:
       APP_MEMBERSHIP_BOOTSTRAP: ${APP_MEMBERSHIP_BOOTSTRAP:-off}
       # Nível de conta LEAD (Etapa 4): off (padrão) = não concede nada | legacy = como antes. Reverter = legacy. Ver docs/membership-api.md.
       APP_MEMBERSHIP_LEAD_LEVEL: ${APP_MEMBERSHIP_LEAD_LEVEL:-off}
-      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # Padrão prod: sem a variável o backend sobe COM a trava de segredos (ProductionSecretsValidator), sem Swagger e
+      # sem mensagens de erro detalhadas. Desenvolvimento local usa SPRING_PROFILES_ACTIVE=dev no .env (ver .env.example).
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
       # OpenTelemetry: agente sempre presente na imagem (ver Dockerfile), inerte até
       # OTEL_JAVAAGENT_ENABLED=true. Vendor-neutro (OTLP) — funciona com SigNoz ou qualquer
       # outro backend compatível, só trocando OTEL_EXPORTER_OTLP_ENDPOINT.
@@ -81,7 +86,7 @@ services:
       OTEL_SERVICE_NAME: agile-space-backend
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-grpc}
-      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=${SPRING_PROFILES_ACTIVE:-dev}
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=${SPRING_PROFILES_ACTIVE:-prod}
     volumes:
       # Anexos dos cards da Review (PNG/JPEG/PDF). Entra no backup junto com o banco.
       - agile-space-uploads:/data/uploads

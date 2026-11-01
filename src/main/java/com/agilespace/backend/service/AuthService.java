@@ -265,7 +265,13 @@ public class AuthService {
         // Busca se a pessoa já possui papéis atribuídos no Profields
         List<ProjectMemberRole> roles = projectMemberRoleRepository.findByEmailIgnoreCase(cleanEmail);
         List<SquadMember> squadMembers = squadMemberRepository.findByUserIdentifier(cleanEmail);
-        String defaultProject = request.getDefaultProjectId();
+        // O projeto padrão NUNCA vem do corpo do cadastro. Em authz=legacy, default_project_id vale como "é da squad":
+        // quem digitasse a chave de outra squad leria e gravaria nela sem vínculo nenhum. Só o roster (por e-mail) e o
+        // vínculo/convite definem a squad inicial.
+        if (request.getDefaultProjectId() != null && !request.getDefaultProjectId().isBlank()) {
+            log.warn("Cadastro de {} ignorou defaultProjectId enviado pelo cliente", cleanEmail);
+        }
+        String defaultProject = null;
         String segment = request.getSegmentName();
         String tribe = request.getTribeName();
 

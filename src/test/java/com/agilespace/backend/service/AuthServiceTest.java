@@ -448,7 +448,7 @@ public class AuthServiceTest {
     }
 
     @Test
-    public void testRegisterKeepsExplicitProjectContextOverProfields() {
+    public void testRegisterIgnoresClientDefaultProjectAndUsesRoster() {
         ProjectMemberRole role = new ProjectMemberRole();
         role.setId("r1");
         role.setProjectId("DDWMISSI");
@@ -465,8 +465,26 @@ public class AuthServiceTest {
 
         ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
         verify(userRepository).save(captor.capture());
-        assertEquals("ESCOLHIDO", captor.getValue().getDefaultProjectId());
+        // A squad inicial vem do roster pelo e-mail, nunca do que o cliente mandou.
+        assertEquals("DDWMISSI", captor.getValue().getDefaultProjectId());
         assertEquals("Seg", captor.getValue().getSegmentName());
+    }
+
+    @Test
+    public void testRegisterWithoutRosterNeverStoresClientDefaultProject() {
+        when(userRepository.findByEmail(anyString())).thenReturn(Optional.empty());
+        when(projectMemberRoleRepository.findByEmailIgnoreCase(anyString())).thenReturn(List.of());
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(userProjectResolverService.resolveUserAccess(any(User.class))).thenReturn(accessWith());
+
+        service.register(RegisterRequestDto.builder()
+                .email("estranho@empresa.com.br").name("Estranho").password(RAW_PASSWORD)
+                .defaultProjectId("SQUAD-ALHEIA").build());
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(captor.capture());
+        // Sem isto, em authz=legacy a conta leria e gravaria na squad alheia sem nenhum vínculo.
+        assertNull(captor.getValue().getDefaultProjectId());
     }
 
     // ---------- getMe ----------

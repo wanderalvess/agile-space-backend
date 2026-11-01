@@ -130,6 +130,15 @@ docker run -d \
 SPRING_PROFILES_ACTIVE=prod docker-compose up -d
 ```
 
+Padrões do `docker-compose.yml` (mudaram em 2026-11-01, após a revisão de prontidão para produção):
+- `SPRING_PROFILES_ACTIVE` é `prod` quando a variável não existe. Em prod o backend só sobe com `APP_JWT_SECRET` e
+  `APP_ENCRYPTION_SECRET` próprios, `ALLOWED_EMAIL_DOMAIN` preenchido e `ALLOWED_ORIGINS` real. Desenvolvimento local
+  usa `SPRING_PROFILES_ACTIVE=dev` no `.env` (copie o `.env.example`).
+- `APP_MEMBERSHIP_MODE` e `APP_MEMBERSHIP_AUTHZ` são `new`: só vale o vínculo (`project_member_roles`). Em `legacy`,
+  `users.default_project_id` bastava para ser tratado como membro da squad. Quem vem de uma instalação em `legacy`
+  chama antes `GET /api/admin/membership/authz-diff` e confere quem perderia acesso.
+- O cadastro (`POST /api/auth/register`) ignora o `defaultProjectId` enviado pelo cliente.
+
 ### Reverse Proxy / TLS
 
 `docker-compose.yml` inclui um serviço `reverse-proxy` (Caddy) opcional, atrás do profile `proxy`,
