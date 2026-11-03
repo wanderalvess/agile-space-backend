@@ -194,12 +194,50 @@ public class JiraServiceTest {
     @Test
     public void testSearchIssuesPropagatesJiraStatusAndBodyOnError() {
         server.expect(requestTo(containsString("/rest/api/2/search")))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN).body("{\"errorMessages\":[\"Sem permissao\"]}"));
+
+        ResponseEntity<String> response = service.searchIssues(searchRequest("project = DDW"));
+
+        assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
+        assertThat(response.getBody(), containsString("Sem permissao"));
+    }
+
+    @Test
+    public void testSearchIssuesTokenRecusadoNaoVira401ParaOCliente() {
+        // 401 do Jira não pode chegar como 401: o frontend o lê como sessão do portal expirada e desloga.
+        server.expect(requestTo(containsString("/rest/api/2/search")))
                 .andRespond(withUnauthorizedRequest().body("{\"errorMessages\":[\"Token invalido\"]}"));
 
         ResponseEntity<String> response = service.searchIssues(searchRequest("project = DDW"));
 
-        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
-        assertThat(response.getBody(), containsString("Token invalido"));
+        assertEquals(HttpStatus.FAILED_DEPENDENCY, response.getStatusCode());
+        assertThat(response.getBody(), containsString("não reconheceu o token"));
+    }
+
+    @Test
+    public void testSearchIssuesChamadaAnonimaDoJiraViraTokenRecusado() {
+        // Jira com navegação anônima: token inexistente não dá 401, dá 400 listando campos "de anônimo".
+        String anonimo = "{\"errorMessages\":[\"Field 'sprint' does not exist or this field cannot be viewed by anonymous users.\"],\"errors\":{}}";
+        server.expect(requestTo(containsString("/rest/api/2/search")))
+                .andRespond(withBadRequest().body(anonimo));
+
+        ResponseEntity<String> response = service.searchIssues(searchRequest("sprint = 1"));
+
+        assertEquals(HttpStatus.FAILED_DEPENDENCY, response.getStatusCode());
+        assertThat(response.getBody(), containsString("não reconheceu o token"));
+        assertThat(response.getBody(), not(containsString("anonymous")));
+    }
+
+    @Test
+    public void testSearchIssuesJqlInvalidaContinuaComoBadRequest() {
+        String jqlRuim = "{\"errorMessages\":[\"Error in the JQL Query: ';' not expected\"],\"errors\":{}}";
+        server.expect(requestTo(containsString("/rest/api/2/search")))
+                .andRespond(withBadRequest().body(jqlRuim));
+
+        ResponseEntity<String> response = service.searchIssues(searchRequest("project = ;"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertThat(response.getBody(), containsString("Error in the JQL Query"));
     }
 
     @Test
@@ -231,13 +269,14 @@ public class JiraServiceTest {
     }
 
     @Test
-    public void testGetMyselfPropagatesUnauthorized() {
+    public void testGetMyselfTokenInvalidoNaoVira401ParaOCliente() {
         server.expect(requestTo(containsString("/myself")))
                 .andRespond(withUnauthorizedRequest().body("{\"errorMessages\":[\"nao autenticado\"]}"));
 
         ResponseEntity<String> response = service.getMyself("jira.empresa.com.br", "token-invalido");
 
-        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+        assertEquals(HttpStatus.FAILED_DEPENDENCY, response.getStatusCode());
+        assertThat(response.getBody(), containsString("não reconheceu o token"));
     }
 
     // ---------- getGreenhopperWorkData ----------

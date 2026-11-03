@@ -105,7 +105,10 @@ public class SquadSubtaskTemplateService {
             }
             return out;
         } catch (JiraService.JiraWriteException e) {
-            throw new ResponseStatusException(e.getStatus() >= 400 && e.getStatus() < 600 ? HttpStatus.valueOf(e.getStatus()) : HttpStatus.BAD_GATEWAY, e.getMessage());
+            // 401 do Jira é token do usuário recusado, não sessão do portal: 401 aqui derrubaria a sessão no frontend.
+            HttpStatus status = e.getStatus() == 401 ? HttpStatus.FAILED_DEPENDENCY
+                    : e.getStatus() >= 400 && e.getStatus() < 600 ? HttpStatus.valueOf(e.getStatus()) : HttpStatus.BAD_GATEWAY;
+            throw new ResponseStatusException(status, e.getMessage());
         }
     }
 

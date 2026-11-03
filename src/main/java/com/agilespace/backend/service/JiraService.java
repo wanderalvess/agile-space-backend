@@ -180,6 +180,31 @@ public class JiraService {
         }
     }
 
+    static final String MSG_TOKEN_RECUSADO = "O Jira não reconheceu o token. Confira se o PAT existe e não foi revogado, "
+            + "gere um novo no Jira e salve de novo.";
+
+    /**
+     * O Jira recusou o token do usuário. Alguns Jira (Server/DC com navegação anônima liberada) não respondem 401:
+     * tratam o token inexistente como chamada anônima e devolvem 400 com "cannot be viewed by anonymous users".
+     */
+    static boolean tokenRecusado(org.springframework.web.client.HttpStatusCodeException e) {
+        int status = e.getStatusCode().value();
+        if (status == 401) return true;
+        String body = e.getResponseBodyAsString();
+        return status == 400 && body != null && body.toLowerCase(java.util.Locale.ROOT).contains("anonymous users");
+    }
+
+    /**
+     * Repasse de erro do Jira ao cliente. Token recusado vira 424 (e não 401): o 401 do Jira atravessava o proxy e o
+     * frontend o lê como "sessão do portal expirada", limpando a sessão e mandando o usuário para o login.
+     */
+    static ResponseEntity<String> upstreamError(org.springframework.web.client.HttpStatusCodeException e) {
+        if (tokenRecusado(e)) {
+            return ResponseEntity.status(HttpStatus.FAILED_DEPENDENCY).body(jsonError(MSG_TOKEN_RECUSADO));
+        }
+        return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+    }
+
     /**
      * Status HTTP de uma falha no proxy: domínio recusado pela política de hosts é erro do pedido (400); Jira
      * inalcançável (timeout, DNS, conexão recusada, TLS) é falha do upstream (502); o resto segue 500.
@@ -448,7 +473,7 @@ public class JiraService {
             return ResponseEntity.ok(body);
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.error("Jira search failed with status: {}, body: {}", e.getStatusCode(), e.getResponseBodyAsString());
-            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+            return upstreamError(e);
         } catch (Exception e) {
             log.error("Jira search failed", e);
             return ResponseEntity.status(statusFor(e))
@@ -487,7 +512,7 @@ public class JiraService {
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.error("Jira field metadata failed with status: {}, body: {}", e.getStatusCode(), e.getResponseBodyAsString());
-            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+            return upstreamError(e);
         } catch (Exception e) {
             log.error("Jira field metadata failed", e);
             return ResponseEntity.status(statusFor(e))
@@ -524,7 +549,7 @@ public class JiraService {
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.warn("Jira testcase {} failed with status {}", key, e.getStatusCode());
-            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+            return upstreamError(e);
         } catch (Exception e) {
             log.warn("Jira testcase {} failed: {}", key, e.getMessage());
             return ResponseEntity.status(statusFor(e))
@@ -556,7 +581,7 @@ public class JiraService {
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.warn("Jira boards failed with status {}", e.getStatusCode());
-            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+            return upstreamError(e);
         } catch (Exception e) {
             log.warn("Jira boards failed: {}", e.getMessage());
             return ResponseEntity.status(statusFor(e))
@@ -589,7 +614,7 @@ public class JiraService {
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.warn("Jira board sprints failed with status {}", e.getStatusCode());
-            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+            return upstreamError(e);
         } catch (Exception e) {
             log.warn("Jira board sprints failed: {}", e.getMessage());
             return ResponseEntity.status(statusFor(e))
@@ -629,7 +654,7 @@ public class JiraService {
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.error("Jira sprint metadata failed with status: {}, body: {}", e.getStatusCode(), e.getResponseBodyAsString());
-            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+            return upstreamError(e);
         } catch (Exception e) {
             log.error("Jira sprint metadata failed", e);
             return ResponseEntity.status(statusFor(e))
@@ -682,6 +707,7 @@ public class JiraService {
             return new ResponseEntity<>(response.getBody(), responseHeaders, HttpStatus.OK);
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.error("Jira attachment fetch failed with status: {}", e.getStatusCode());
+            if (tokenRecusado(e)) return upstreamError(e);
             return ResponseEntity.status(e.getStatusCode()).body("{\"error\": \"Erro do Jira: " + e.getStatusCode().value() + "\"}");
         } catch (Exception e) {
             log.error("Jira attachment fetch failed", e);
@@ -714,7 +740,7 @@ public class JiraService {
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.error("Jira myself failed with status: {}, body: {}", e.getStatusCode(), e.getResponseBodyAsString());
-            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+            return upstreamError(e);
         } catch (Exception e) {
             log.error("Jira myself failed", e);
             return ResponseEntity.status(statusFor(e))
@@ -755,7 +781,7 @@ public class JiraService {
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.error("Greenhopper work data failed with status: {}, body: {}", e.getStatusCode(), e.getResponseBodyAsString());
-            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+            return upstreamError(e);
         } catch (Exception e) {
             log.error("Greenhopper work data failed", e);
             return ResponseEntity.status(statusFor(e))
