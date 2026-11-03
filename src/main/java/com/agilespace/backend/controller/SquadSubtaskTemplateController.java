@@ -4,6 +4,7 @@ import com.agilespace.backend.domain.SquadSubtaskTemplate;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.SquadAccessService;
 import com.agilespace.backend.service.SquadSubtaskTemplateService;
+import com.agilespace.backend.service.SubtaskTypeMappingService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -27,6 +28,7 @@ public class SquadSubtaskTemplateController {
 
     private final SquadSubtaskTemplateService service;
     private final SquadAccessService squadAccessService;
+    private final SubtaskTypeMappingService subtaskTypeMappingService;
 
     @GetMapping
     public ResponseEntity<List<SquadSubtaskTemplate>> list(@PathVariable String squadId, HttpServletRequest request) {
@@ -48,6 +50,16 @@ public class SquadSubtaskTemplateController {
         squadAccessService.requireSquadReadAccess(squadId, request);
         String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
         return ResponseEntity.ok(service.listJiraIssueTypes(squadId, callerId));
+    }
+
+    /**
+     * Papel que o Sprint Planner dá a cada tipo de sub-tarefa (mapeamento mais recente da squad). A tela usa como padrão
+     * ao adicionar uma linha e para avisar quando o papel configurado aqui diverge.
+     */
+    @GetMapping("/suggested-roles")
+    public ResponseEntity<List<SubtaskTypeMappingService.SuggestedRole>> suggestedRoles(@PathVariable String squadId, HttpServletRequest request) {
+        squadAccessService.requireSquadReadAccess(squadId, request);
+        return ResponseEntity.ok(subtaskTypeMappingService.suggestedRoles(squadId));
     }
 
     private void requireManage(String squadId, HttpServletRequest request) {

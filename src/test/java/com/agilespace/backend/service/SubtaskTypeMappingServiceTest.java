@@ -155,4 +155,33 @@ class SubtaskTypeMappingServiceTest {
                 List.of(new SubtaskTypeMappingService.UpdateRequest("10 99", null, SubtaskClass.QA, null, null)), "u1"));
         assertThrows(ResponseStatusException.class, () -> service.update("SQ", "501", List.of(), "u1"));
     }
+
+    @Test
+    @DisplayName("papel sugerido sem nada gravado: vem da semente e não cita sprint")
+    void suggestedRolesFromSeed() {
+        when(cacheRepository.findBySquadIdOrderByNameAsc("SQ")).thenReturn(List.of(
+                type("10036", "Codificação", true), type("12300", "Code Review", true), type("10013", "Execução de TI", true),
+                type("10999", "Reunião", true)));
+        Map<String, SubtaskTypeMappingService.SuggestedRole> m = new HashMap<>();
+        service.suggestedRoles("SQ").forEach(s -> m.put(s.typeName(), s));
+        assertEquals("DEV", m.get("Codificação").role());
+        assertEquals("QA", m.get("Execução de TI").role());
+        assertNull(m.get("Reunião").role(), "sem classificação não há o que sugerir");
+        assertTrue(m.get("Code Review").varyByTitle());
+        assertNull(m.get("Codificação").sprintKey());
+    }
+
+    @Test
+    @DisplayName("papel sugerido usa a sprint gravada por último; Fora da conta vira NONE")
+    void suggestedRolesUseLatestSprint() {
+        SquadSubtaskTypeMapping newest = row("502", "10999", "Reunião", SubtaskClass.FORA_DA_CONTA, "2026-10-20T00:00:00Z");
+        SquadSubtaskTypeMapping older = row("501", "10999", "Reunião", SubtaskClass.QA, "2026-10-02T00:00:00Z");
+        when(mappingRepository.findBySquadIdOrderByUpdatedAtDesc("SQ")).thenReturn(List.of(newest, older));
+        when(mappingRepository.findBySquadIdAndSprintKey("SQ", "502")).thenReturn(List.of(newest));
+        List<SubtaskTypeMappingService.SuggestedRole> out = service.suggestedRoles("SQ");
+        assertEquals(1, out.size());
+        assertEquals("NONE", out.get(0).role());
+        assertEquals("502", out.get(0).sprintKey());
+        assertEquals(SubtaskMappingOrigin.MANUAL, out.get(0).origin());
+    }
 }

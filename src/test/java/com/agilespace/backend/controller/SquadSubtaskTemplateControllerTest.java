@@ -4,6 +4,7 @@ import com.agilespace.backend.domain.SquadSubtaskTemplate;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.SquadAccessService;
 import com.agilespace.backend.service.SquadSubtaskTemplateService;
+import com.agilespace.backend.service.SubtaskTypeMappingService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -24,7 +25,17 @@ class SquadSubtaskTemplateControllerTest {
 
     @Mock SquadSubtaskTemplateService service;
     @Mock SquadAccessService squadAccessService;
+    @Mock SubtaskTypeMappingService subtaskTypeMappingService;
     @InjectMocks SquadSubtaskTemplateController controller;
+
+    @Test
+    void papelSugeridoExigeLeituraNaSquad() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(subtaskTypeMappingService.suggestedRoles("DDW")).thenReturn(List.of());
+
+        assertEquals(HttpStatus.OK, controller.suggestedRoles("DDW", request).getStatusCode());
+        verify(squadAccessService).requireSquadReadAccess("DDW", request);
+    }
 
     @Test
     void leituraExigeAcessoDeLeituraNaSquad() {

@@ -237,6 +237,45 @@ public class SubtaskTypeMappingService {
         return n.length() > 255 ? n.substring(0, 255) : n;
     }
 
+    // ===================== Papel sugerido para o Poker =====================
+
+    /**
+     * Papel que o Sprint Planner dá a um tipo de sub-tarefa, na forma que as sub-tarefas do time usam (DEV, QA, NONE).
+     * {@code role} nulo = o Planner não classificou o tipo, então não há o que sugerir.
+     * {@code varyByTitle}: o tipo é DEV mas vira QA quando o título cita QA (Code Review), então o papel depende do título.
+     */
+    public record SuggestedRole(String typeId, String typeName, SubtaskClass subtaskClass, String role,
+                                SubtaskMappingOrigin origin, String sprintKey, boolean varyByTitle) {}
+
+    /**
+     * Mapeamento mais recente da squad (a sprint gravada por último; sem nenhuma gravada, a semente), traduzido para o papel
+     * das sub-tarefas do time. O Poker não tem sprint, por isso usa a mais recente.
+     */
+    @Transactional(readOnly = true)
+    public List<SuggestedRole> suggestedRoles(String squadId) {
+        String latest = null;
+        List<SquadSubtaskTypeMapping> byRecency = mappingRepository.findBySquadIdOrderByUpdatedAtDesc(squadId);
+        if (!byRecency.isEmpty()) latest = byRecency.get(0).getSprintKey();
+        String key = normalizeSprintKey(latest);
+        boolean hasRows = !byRecency.isEmpty();
+        List<SuggestedRole> out = new ArrayList<>();
+        for (ResolvedType t : resolve(squadId, key, List.of())) {
+            out.add(new SuggestedRole(t.typeId(), t.typeName(), t.subtaskClass(), roleOf(t.subtaskClass()), t.origin(),
+                    hasRows ? key : null, t.qaByTitleException()));
+        }
+        return out;
+    }
+
+    static String roleOf(SubtaskClass c) {
+        if (c == null) return null;
+        return switch (c) {
+            case DEV -> "DEV";
+            case QA -> "QA";
+            case FORA_DA_CONTA -> "NONE";
+            case SEM_CLASSIFICACAO -> null;
+        };
+    }
+
     /** Tipos conhecidos da instância (cache), para a tela de mapeamento. */
     @Transactional(readOnly = true)
     public List<JiraIssueTypeCache> knownTypes(String squadId) {
