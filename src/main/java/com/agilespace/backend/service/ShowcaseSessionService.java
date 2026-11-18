@@ -42,6 +42,7 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -222,6 +223,32 @@ public class ShowcaseSessionService {
         });
 
         return result;
+    }
+
+    /**
+     * Encerra uma Review que ficou aberta de um dia para o outro: se ainda estiver ativa e sem escrita desde
+     * {@code before}, vira "finished" (mesma transição do encerramento manual: guarda quem estava online e solta o
+     * apresentador). Devolve a Review encerrada, ou vazio se mudou no meio do caminho.
+     */
+    @Transactional
+    public Optional<ShowcaseSession> closeAbandoned(String sessionId, LocalDateTime before) {
+        Optional<ShowcaseSession> locked = repository.findByIdForUpdate(sessionId);
+        if (locked.isEmpty()) return Optional.empty();
+        ShowcaseSession session = locked.get();
+        if (!"active".equalsIgnoreCase(session.getStatus() == null ? "" : session.getStatus().trim())) return Optional.empty();
+        if (session.getUpdatedAt() != null && !session.getUpdatedAt().isBefore(before)) return Optional.empty();
+        session.setStatus("finished");
+        ShowcaseSession saved = repository.save(session);
+        storeParticipants(saved.getId(), null);
+        boolean presenterCleared = presenterRegistry != null && presenterRegistry.clear(saved.getId());
+        ShowcaseSession result = attachChildren(saved);
+        runAfterCommit(() -> {
+            webSocketHandler.broadcastEvent(result.getId(), "SESSION_UPDATED", result);
+            if (presenterCleared) {
+                webSocketHandler.broadcastToOptIn(result.getId(), "PRESENTER_UPDATED", presenterPayload(null));
+            }
+        });
+        return Optional.of(result);
     }
 
     private static void runAfterCommit(Runnable action) {

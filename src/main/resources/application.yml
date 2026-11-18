@@ -163,6 +163,12 @@ app:
     #   off = as rotas por squad respondem 404; só ADMIN aprova (/api/admin/link-requests) e só ADMIN é notificado.
     # Valor desconhecido cai em off. Reverter = APP_LINK_REQUESTS_SQUAD_APPROVAL=off e reiniciar; sem migração de banco.
     squad-approval: ${APP_LINK_REQUESTS_SQUAD_APPROVAL:on}
+  sessions:
+    # Encerra sozinha a sessão ao vivo (Scrum Poker síncrono e Review) que ficou aberta de um dia para o outro:
+    # sem nenhuma atividade desde o começo do dia de hoje, no fuso abaixo. Poker assíncrono não entra.
+    auto-close:
+      enabled: ${SESSIONS_AUTO_CLOSE_ENABLED:true}
+      zone: ${SESSIONS_AUTO_CLOSE_ZONE:America/Sao_Paulo}
   squad:
     scheduled-sync:
       # Desligado por padrão: ligar isso é uma mudança de comportamento real (um processo

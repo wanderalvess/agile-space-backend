@@ -13,4 +13,8 @@ public interface PokerVoteRepository extends JpaRepository<PokerVote, String> {
     Optional<PokerVote> findByRoomIdAndParticipantId(String roomId, String participantId);
     void deleteByRoomIdAndParticipantId(String roomId, String participantId);
     void deleteByRoomId(String roomId);
+
+    /** Voto mais recente da sala (ISO em texto, então o maior texto é o mais novo); null sem votos. */
+    @org.springframework.data.jpa.repository.Query("SELECT MAX(v.timestamp) FROM PokerVote v WHERE v.roomId = :roomId")
+    String latestTimestamp(@org.springframework.data.repository.query.Param("roomId") String roomId);
 }

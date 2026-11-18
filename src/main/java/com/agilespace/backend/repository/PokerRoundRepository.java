@@ -16,6 +16,10 @@ import java.util.List;
 public interface PokerRoundRepository extends JpaRepository<PokerRound, String> {
     List<PokerRound> findByRoomId(String roomId);
 
+    /** Rodada mais recente da sala (ISO em texto); null sem rodadas. */
+    @Query("SELECT MAX(r.timestamp) FROM PokerRound r WHERE r.roomId = :roomId")
+    String latestTimestamp(@Param("roomId") String roomId);
+
     @Query("SELECT r FROM PokerRound r WHERE r.roomId = :roomId ORDER BY r.timestamp DESC")
     List<PokerRound> findRecentRounds(@Param("roomId") String roomId, Pageable pageable);
 

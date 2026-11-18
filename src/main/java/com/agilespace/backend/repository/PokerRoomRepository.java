@@ -25,6 +25,12 @@ public interface PokerRoomRepository extends JpaRepository<PokerRoom, String> {
     @Query("select r from PokerRoom r where r.id = :id")
     Optional<PokerRoom> findByIdForUpdate(@Param("id") String id);
 
+    /** Salas síncronas iniciadas e ainda não encerradas, das mais antigas para as mais novas (candidatas ao encerramento na virada do dia). */
+    @Query("SELECT r FROM PokerRoom r WHERE r.sessionStartedAt IS NOT NULL AND r.sessionStartedAt <> '' "
+            + "AND (r.sessionEndedAt IS NULL OR r.sessionEndedAt = '') AND (r.mode IS NULL OR LOWER(r.mode) <> 'async') "
+            + "ORDER BY r.sessionStartedAt ASC")
+    List<PokerRoom> findStartedAndOpen(Pageable pageable);
+
     /** Home: salas não encerradas das squads (ids em MAIÚSCULAS) criadas desde {@code since} (ISO). */
     @Query("SELECT r FROM PokerRoom r WHERE UPPER(r.team) IN :teams AND (r.sessionEndedAt IS NULL OR r.sessionEndedAt = '') "
             + "AND (r.createdAt >= :since OR r.sessionStartedAt >= :since) ORDER BY r.createdAt DESC")

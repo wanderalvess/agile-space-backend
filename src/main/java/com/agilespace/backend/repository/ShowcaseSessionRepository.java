@@ -29,6 +29,10 @@ public interface ShowcaseSessionRepository extends JpaRepository<ShowcaseSession
     @Query("SELECT s FROM ShowcaseSession s WHERE LOWER(s.squadName) = LOWER(:squadId) ORDER BY s.createdAt DESC")
     List<ShowcaseSession> findLatestSessionsBySquad(@Param("squadId") String squadId, Pageable pageable);
 
+    /** Reviews ativas (em andamento) com a última escrita antes de {@code before}: candidatas ao encerramento na virada do dia. */
+    @Query("SELECT s FROM ShowcaseSession s WHERE LOWER(s.status) = 'active' AND s.updatedAt < :before ORDER BY s.updatedAt ASC")
+    List<ShowcaseSession> findActiveIdleBefore(@Param("before") LocalDateTime before, Pageable pageable);
+
     /** Home: Reviews não encerradas das squads (squadName guarda o id da squad, em MAIÚSCULAS aqui) desde {@code since}. */
     @Query("SELECT s FROM ShowcaseSession s WHERE UPPER(s.squadName) IN :squadIds AND LOWER(s.status) <> 'finished' "
             + "AND s.createdAt >= :since ORDER BY s.createdAt DESC")
