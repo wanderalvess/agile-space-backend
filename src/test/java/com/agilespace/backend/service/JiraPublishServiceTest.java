@@ -15,6 +15,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -297,6 +298,26 @@ class JiraPublishServiceTest {
             ResponseStatusException ex = assertThrows(ResponseStatusException.class,
                     () -> service.submit("room-1", req, "user-1", "USER"));
             assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
+        }
+
+        @Test
+        void envioSimultaneoQuePerdeAGravacaoDa409SemChamarOJira() {
+            when(roomRepository.findById("room-1")).thenReturn(Optional.of(room));
+            creds();
+            configuredTemplates();
+            when(jobRepository.findByRoomIdAndIssueIdOrderByCreatedAtDesc("room-1", "iss-1")).thenReturn(List.of());
+            // O outro pedido gravou primeiro: o índice único (sala, tarefa) recusa esta gravação.
+            when(jobRepository.saveAndFlush(any(JiraPublishJob.class)))
+                    .thenThrow(new DataIntegrityViolationException("uq_jira_publish_jobs_room_issue"));
+
+            JiraPublishDtos.Step rename = JiraPublishDtos.Step.builder().kind(JiraPublishStep.RENAME_PARENT).summary("Novo título").build();
+            JiraPublishDtos.SubmitRequest req = new JiraPublishDtos.SubmitRequest("iss-1", List.of(rename));
+
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                    () -> service.submit("room-1", req, "user-1", "USER"));
+
+            assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
+            verifyNoInteractions(stepRepository, jiraService);
         }
 
         @Test

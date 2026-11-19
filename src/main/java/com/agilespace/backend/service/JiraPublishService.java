@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -180,7 +181,13 @@ public class JiraPublishService {
                 .parentKey(parentKey).parentSummary(text(issue, "title"))
                 .requestedBy(callerId).status(JiraPublishJob.PENDING)
                 .build();
-        job = jobRepository.save(job);
+        try {
+            // saveAndFlush: o índice único (sala, tarefa) responde aqui, não no commit lá na frente.
+            job = jobRepository.saveAndFlush(job);
+        } catch (DataIntegrityViolationException e) {
+            // Outra requisição passou pela checagem acima ao mesmo tempo e gravou primeiro.
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe um envio para esta tarefa.");
+        }
         for (JiraPublishStep s : steps) s.setJobId(job.getId());
         steps = stepRepository.saveAll(steps);
         logEvent(job.getId(), null, null, JiraPublishEvent.SUBMITTED, null,
