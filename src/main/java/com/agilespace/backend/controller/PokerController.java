@@ -9,6 +9,7 @@ import com.agilespace.backend.service.PokerService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -38,6 +39,14 @@ public class PokerController {
         if (callerId == null || !callerId.equals(userId)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso restrito ao próprio usuário.");
         }
+    }
+
+    private static String callerId(HttpServletRequest request) {
+        return (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+    }
+
+    private static String callerRole(HttpServletRequest request) {
+        return (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
     }
 
     // --- Room Endpoints ---
@@ -107,15 +116,14 @@ public class PokerController {
             @PathVariable("roomId") String roomId,
             @PathVariable("userId") String userId,
             HttpServletRequest request) {
-        requireSelfOrAdmin(userId, request);
-        pokerService.leaveRoom(roomId, userId);
+        pokerService.leaveRoom(roomId, userId, callerId(request), callerRole(request));
         return ResponseEntity.noContent().build();
     }
 
     // --- Votes Endpoints ---
     @GetMapping("/{roomId}/votes")
-    public ResponseEntity<List<PokerVote>> getVotes(@PathVariable("roomId") String roomId) {
-        return ResponseEntity.ok(pokerService.getVotes(roomId));
+    public ResponseEntity<List<PokerVote>> getVotes(@PathVariable("roomId") String roomId, HttpServletRequest request) {
+        return ResponseEntity.ok(pokerService.getVotes(roomId, callerId(request), callerRole(request)));
     }
 
     @PostMapping("/{roomId}/votes")
@@ -132,9 +140,9 @@ public class PokerController {
     public ResponseEntity<Void> removeVote(
             @PathVariable("roomId") String roomId,
             @PathVariable("userId") String userId,
+            @RequestParam(value = "issueId", required = false) String issueId,
             HttpServletRequest request) {
-        requireSelfOrAdmin(userId, request);
-        pokerService.removeVote(roomId, userId);
+        pokerService.removeVote(roomId, userId, issueId, callerId(request), callerRole(request));
         return ResponseEntity.noContent().build();
     }
 
@@ -143,6 +151,13 @@ public class PokerController {
         String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
         String callerRole = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
         pokerService.clearVotes(roomId, callerId, callerRole);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Exclui a sala e tudo dela. Só quem criou a sala ou ADMIN (LEAD só em lead-level=legacy). */
+    @DeleteMapping("/{roomId}")
+    public ResponseEntity<Void> deleteRoom(@PathVariable("roomId") String roomId, HttpServletRequest request) {
+        pokerService.deleteRoom(roomId, callerId(request), callerRole(request));
         return ResponseEntity.noContent().build();
     }
 
@@ -157,9 +172,10 @@ public class PokerController {
     @PostMapping("/{roomId}/rounds")
     public ResponseEntity<PokerRound> saveRound(
             @PathVariable("roomId") String roomId,
-            @RequestBody PokerRound round) {
+            @RequestBody PokerRound round,
+            HttpServletRequest request) {
         round.setRoomId(roomId);
-        return ResponseEntity.status(HttpStatus.CREATED).body(pokerService.saveRound(round));
+        return ResponseEntity.status(HttpStatus.CREATED).body(pokerService.saveRound(round, callerId(request), callerRole(request)));
     }
 
     @DeleteMapping("/{roomId}/rounds")
@@ -174,8 +190,9 @@ public class PokerController {
     @PostMapping("/{roomId}/reactions")
     public ResponseEntity<Void> sendReaction(
             @PathVariable("roomId") String roomId,
-            @RequestBody String reactionPayload) {
-        pokerService.sendReaction(roomId, reactionPayload);
+            @RequestBody String reactionPayload,
+            HttpServletRequest request) {
+        pokerService.sendReaction(roomId, reactionPayload, callerId(request), callerRole(request));
         return ResponseEntity.ok().build();
     }
 
@@ -207,5 +224,18 @@ public class PokerController {
         String callerRole = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
         pokerService.deleteChatMessage(roomId, messageId, callerId, callerRole);
         return ResponseEntity.noContent().build();
+    }
+
+    // --- Conflito de gravação ---
+    // O frontend lê, altera e grava a sala inteira a partir de várias ações concorrentes. O
+    // @Version em PokerRoom detecta quando duas gravações partem da mesma versão; devolvemos 409
+    // para o cliente recarregar a sala e avisar o usuário, em vez de um 500 genérico ou de
+    // perder uma das ações sem aviso.
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<Map<String, String>> handleOptimisticLock(OptimisticLockingFailureException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                "error", "CONFLICT",
+                "message", "A sala foi atualizada por outra pessoa antes que essa ação fosse salva. Recarregue os dados e tente novamente."
+        ));
     }
 }

@@ -4,6 +4,7 @@ import com.agilespace.backend.domain.ApiKey;
 import com.agilespace.backend.domain.ApiKeyScope;
 import com.agilespace.backend.repository.ApiKeyRepository;
 import com.agilespace.backend.security.ApiKeyHashing;
+import com.agilespace.backend.security.ApiKeyLifecycle;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -19,7 +20,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * CRUD de API keys pra ADMIN/LEAD — /api/admin/** já exige esse papel via
+ * CRUD de API keys pra ADMIN — /api/admin/** já exige esse papel via
  * JwtAuthenticationFilter, nenhum gate extra necessário aqui. Visão global:
  * lista/revoga as chaves de todo mundo, não só as próprias (diferente de
  * ApiKeyController, o self-service em /api/api-keys). A chave crua só existe
@@ -39,6 +40,7 @@ import java.util.stream.Collectors;
 public class ApiKeyAdminController {
 
     private final ApiKeyRepository apiKeyRepository;
+    private final ApiKeyLifecycle apiKeyLifecycle;
 
     @GetMapping
     public ResponseEntity<List<ApiKey>> listKeys() {
@@ -48,6 +50,8 @@ public class ApiKeyAdminController {
     @PostMapping
     public ResponseEntity<Map<String, Object>> createKey(@RequestBody Map<String, String> body, HttpServletRequest request) {
         String name = body.get("name");
+        java.time.LocalDateTime expiresAt = ApiKeyLifecycle.resolveExpiry(
+                "true".equalsIgnoreCase(body.get("neverExpires")) ? "never" : body.get("expiresInDays"), true, java.time.LocalDateTime.now());
         if (name == null || name.isBlank()) {
             return ResponseEntity.badRequest().build();
         }
@@ -60,6 +64,7 @@ public class ApiKeyAdminController {
                 .ownerUserId((String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID))
                 .ownerRole((String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE))
                 .scopes(Arrays.stream(ApiKeyScope.values()).map(Enum::name).collect(Collectors.toSet()))
+                .expiresAt(expiresAt)
                 .build());
 
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
@@ -67,7 +72,8 @@ public class ApiKeyAdminController {
                 "name", saved.getName(),
                 "rawKey", rawKey,
                 "scopes", saved.getScopes(),
-                "createdAt", saved.getCreatedAt()
+                "createdAt", saved.getCreatedAt(),
+                "expiresAt", saved.getExpiresAt() != null ? saved.getExpiresAt().toString() : ""
         ));
     }
 
@@ -78,5 +84,16 @@ public class ApiKeyAdminController {
             apiKeyRepository.save(key);
             return ResponseEntity.ok().<Void>build();
         }).orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    /** Renova qualquer chave (padrão 90 dias), reavaliando dono, papel e escopos com o papel atual do dono. */
+    @PostMapping("/{id}/renew")
+    public ResponseEntity<ApiKey> renewKey(@PathVariable("id") UUID id, @RequestBody(required = false) Map<String, Object> body) {
+        ApiKey key = apiKeyRepository.findById(id).orElse(null);
+        if (key == null) {
+            return ResponseEntity.notFound().build();
+        }
+        Object days = body != null && Boolean.TRUE.equals(body.get("neverExpires")) ? "never" : body != null ? body.get("expiresInDays") : null;
+        return ResponseEntity.ok(apiKeyLifecycle.renew(key, days, true));
     }
 }

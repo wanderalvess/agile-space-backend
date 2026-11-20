@@ -1,7 +1,8 @@
 package com.agilespace.backend.controller;
 
-import com.agilespace.backend.domain.GlobalAnnouncement;
+import com.agilespace.backend.dto.AnnouncementDto;
 import com.agilespace.backend.service.AdminService;
+import com.agilespace.backend.service.AnnouncementService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -22,6 +23,12 @@ public class PublicControllerTest {
     @Mock
     private AdminService adminService;
 
+    @Mock
+    private AnnouncementService announcementService;
+
+    @Mock
+    private com.agilespace.backend.service.InviteService inviteService;
+
     @InjectMocks
     private PublicController controller;
 
@@ -38,8 +45,12 @@ public class PublicControllerTest {
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals(
-                java.util.Set.of("companyName", "primaryColor", "logoUrl", "allowAnonymous", "maintenanceMode"),
+                java.util.Set.of("companyName", "primaryColor"),
                 response.getBody().keySet());
+        // Chaves aposentadas não vazam mesmo que ainda existam gravadas no banco.
+        verify(adminService, never()).getConfig("logoUrl");
+        verify(adminService, never()).getConfig("allowAnonymous");
+        verify(adminService, never()).getConfig("maintenanceMode");
         // Nenhuma chave sensivel pode ser lida pelo endpoint pre-login.
         verify(adminService, never()).getConfig("jiraApiToken");
         verify(adminService, never()).getConfig("openAiApiKey");
@@ -62,25 +73,30 @@ public class PublicControllerTest {
 
         controller.getSystemConfig();
 
-        verify(adminService, times(5)).getConfig(anyString());
+        verify(adminService, times(2)).getConfig(anyString());
         verifyNoMoreInteractions(adminService);
     }
 
     @Test
-    public void testGetAnnouncementsDelegates() {
-        GlobalAnnouncement announcement = new GlobalAnnouncement();
-        when(adminService.getAnnouncements()).thenReturn(List.of(announcement));
+    public void testGetAnnouncementsUsesPublicFilter() {
+        AnnouncementDto dto = new AnnouncementDto("a1", "t", "c", "INFO", "ALL", List.of(), List.of(),
+                java.time.Instant.now(), null, null, "adm@x.com", "Adm", java.time.Instant.now(), false);
+        when(announcementService.publicActive()).thenReturn(List.of(dto));
 
-        ResponseEntity<List<GlobalAnnouncement>> response = controller.getAnnouncements();
+        ResponseEntity<List<AnnouncementDto>> response = controller.getAnnouncements();
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals(1, response.getBody().size());
+        verifyNoInteractions(adminService);
     }
 
     @Test
-    public void testGetAnnouncementsEmpty() {
-        when(adminService.getAnnouncements()).thenReturn(List.of());
+    public void testInvitePreviewDelegatesToServiceWithoutSession() {
+        when(inviteService.getPublicPreview("tok")).thenReturn(Map.of("squadName", "Squad Alfa", "status", "PENDING"));
 
-        assertTrue(controller.getAnnouncements().getBody().isEmpty());
+        ResponseEntity<Map<String, Object>> response = controller.getInvitePreview("tok");
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals("Squad Alfa", response.getBody().get("squadName"));
     }
 }

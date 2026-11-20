@@ -38,7 +38,7 @@ public class KnowledgeApiV1Controller {
             @PageableDefault(size = 20) Pageable pageable,
             HttpServletRequest request) {
         ApiKeyAccess.requireScope(request, ApiKeyScope.KNOWLEDGE_READ);
-        // status=null: listDocuments já exclui "deleted" por padrão nesse caso (ver KnowledgeService).
+        // status=null e sem usuário: só publicado/indexado (rascunho, arquivado e lixeira ficam de fora; ver KnowledgeService).
         return ResponseEntity.ok(knowledgeService.listDocuments(query, null, null, pageable));
     }
 
@@ -46,7 +46,9 @@ public class KnowledgeApiV1Controller {
     public ResponseEntity<KnowledgeDocument> getDocumentById(@PathVariable("id") UUID id, HttpServletRequest request) {
         ApiKeyAccess.requireScope(request, ApiKeyScope.KNOWLEDGE_READ);
         try {
-            return ResponseEntity.ok(knowledgeService.getDocumentById(id));
+            KnowledgeDocument doc = knowledgeService.getDocumentById(id);
+            // Lixeira, rascunho e arquivado não são servidos pela API pública (nem pelo MCP).
+            return KnowledgeService.isPubliclyReadable(doc) ? ResponseEntity.ok(doc) : ResponseEntity.notFound().build();
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }
@@ -55,13 +57,19 @@ public class KnowledgeApiV1Controller {
     @PostMapping
     public ResponseEntity<KnowledgeDocument> createDocument(@RequestBody Map<String, Object> payload, HttpServletRequest request) {
         ApiKeyAccess.requireScope(request, ApiKeyScope.KNOWLEDGE_WRITE);
-        String title = (String) payload.get("title");
-        if (title == null || title.isBlank()) {
+        Object titleRaw = payload.get("title");
+        if (!(titleRaw instanceof String title) || title.isBlank()) {
             return ResponseEntity.badRequest().build();
         }
 
-        String content = payload.get("content") != null ? (String) payload.get("content") : "";
-        String category = payload.get("category") != null ? (String) payload.get("category") : "Geral";
+        // Campos que não são texto davam ClassCastException (500); agora são 400.
+        Object contentRaw = payload.get("content");
+        Object categoryRaw = payload.get("category");
+        if ((contentRaw != null && !(contentRaw instanceof String)) || (categoryRaw != null && !(categoryRaw instanceof String))) {
+            return ResponseEntity.badRequest().build();
+        }
+        String content = contentRaw != null ? (String) contentRaw : "";
+        String category = categoryRaw != null ? (String) categoryRaw : "Geral";
 
         Set<String> tagSet = new HashSet<>();
         Object tagsObj = payload.get("tags");

@@ -1,0 +1,94 @@
+{
+  "items": [
+    {
+      "cstIcms": "40",
+      "unidadeMedida": "UN",
+      "codigoProduto": 217,
+      "descricao": "AP CELULAR GALAXY ACE PLUS S7500 SAMSUNG",
+      "codigoAlternativo": "217000",
+      "IdRetaguardaSecao": 4,
+      "IdRetaguardaMarca": 0,
+      "IdRetaguardaCategoria": 0,
+      "IdRetaguardaSubCategoria": 0,
+      "IdRetaguardaFornecedor": 10,
+      "controlaLote": false,
+      "IdRetaguardaDepartamento": 4,
+      "IdRetaguardaProdutoPrincipal": "2000-2",
+      "tipoProduto": "0",
+      "quantidadeValorAtacado": 8000,
+      "fracionado": "true",
+      "quantidadeMovimentacao": 0.5,
+      "origemProduto": "7",
+      "cnpjFornecedor": "22003149000248",
+      "produtoEmbalagens": [
+        {
+          "unidadeMedida": "UN",
+          "codigoBarras": "7895446522569",
+          "quantidadeValorAtacado": 8000,
+          "quantidade": 1,
+          "situacao": 1,
+          "idRetaguarda": "7895446522569-217",
+          "IdProdutoRetaguarda": "217000-217",
+          "descricao": "AP CELULAR GALAXY ACE PLUS S7500 SAMSUNG - UN"
+        },
+        {
+          "unidadeMedida": "UN",
+          "codigoBarras": "217000",
+          "quantidadeValorAtacado": 0,
+          "quantidade": 1,
+          "situacao": 1,
+          "idRetaguarda": "217000-217",
+          "IdProdutoRetaguarda": "217000-217",
+          "descricao": "AP CELULAR GALAXY ACE PLUS S7500 SAMSUNG - UN"
+        }
+      ],
+      "idProprietario": "1",
+      "idRetaguarda": "217000-217",
+      "pisCofins": [
+        {
+          "idProprietario": "1",
+          "idRetaguarda": 1
+        }
+      ],
+      "impostos": [
+        {
+          "idRetaguarda": "3-ST",
+          "idProprietario": "1"
+        }
+      ],
+      "fcps": [
+        {
+          "idProprietario": "1",
+          "percentualFcp": "0",
+          "valorBaseFcp": "0",
+          "motivoDesoneracaoIcms": 0,
+          "idRetaguarda": 3,
+          "descontaDesoneracaoNf": false
+        }
+      ],
+      "ncms": [
+        {
+          "idRetaguarda": "34031110-34031110",
+          "idProprietario": "1"
+        }
+      ],
+      "idInquilino": "{{ID_INQUILINO}}",
+      "loteOrigem": "{{LOTE_ORIGEM}}",
+      "indiceTributoImpressora": "",
+      "tipo": 0,
+      "situacao": 1,
+      "escalaRelevante": true,
+      "tipoArredondaTrunca": "0",
+      "percentualReducaoIcms": 0,
+      "aliquotaIcms": 0,
+      "vlicmsret": 0,
+      "cest": "",
+      "arredondaTrunca": "0",
+      "descontoMaximo": 99
+    }
+  ],
+  "idExterno": "pdvsync-produto-217000-217-1-2026-10-08T11:15:53",
+  "idInterno": "217000-217",
+  "tipoIdInterno": "PDVSYNC-PRODUTO-PDV",
+  "_attr_access": "items"
+}

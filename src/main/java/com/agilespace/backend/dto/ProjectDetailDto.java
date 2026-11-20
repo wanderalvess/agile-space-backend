@@ -43,6 +43,9 @@ public class ProjectDetailDto {
     private Boolean engineeringOnlyExpedition;  // Expedição Exclusiva Engenharia
     private Boolean optionalWorklog;            // Apontamento Opcional
 
+    /** Só na prévia da importação: quem está importando pode gravar esta equipe (AM/PL/admin ou listado como tal no Jira). */
+    private Boolean canImport;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

@@ -133,13 +133,44 @@ class SprintPlanningServiceTest {
         @Test
         @DisplayName("Deve listar planejamentos prontos pro poker respeitando o limite")
         void shouldListReadyForPoker() {
-            when(repository.findReadyForPoker(PageRequest.of(0, 5))).thenReturn(List.of(samplePlan));
+            when(repository.findReadyForPokerByCreator("user-sm", PageRequest.of(0, 5))).thenReturn(List.of(samplePlan));
             when(taskRepository.findByPlanningIdOrderByOrderAsc("plan-123")).thenReturn(List.of());
             when(memberRepository.findByPlanningIdOrderByOrderAsc("plan-123")).thenReturn(List.of());
 
-            List<SprintPlanning> result = service.listReadyForPoker(5);
+            List<SprintPlanning> result = service.listReadyForPoker(5, "user-sm", false);
 
             assertEquals(1, result.size());
+            verify(repository, never()).findReadyForPoker(any());
+        }
+
+        @Test
+        @DisplayName("Admin lista todos; o limite tem teto de 100")
+        void shouldListAllForAdminWithCappedLimit() {
+            when(repository.findReadyForPoker(PageRequest.of(0, 100))).thenReturn(List.of());
+
+            assertTrue(service.listReadyForPoker(1_000_000, "admin", true).isEmpty());
+
+            verify(repository).findReadyForPoker(PageRequest.of(0, 100));
+        }
+
+        @Test
+        @DisplayName("Id de tarefa que já pertence a outro planejamento ganha id novo (não sobrescreve o alheio)")
+        void shouldRegenerateTaskIdOwnedByAnotherPlanning() {
+            SprintPlanning incoming = SprintPlanning.builder().id("plan-123").title("Meu").build();
+            SprintPlanningTask hijack = SprintPlanningTask.builder().id("task-do-outro").name("Tarefa").build();
+            incoming.setTasks(new ArrayList<>(List.of(hijack)));
+            when(repository.findById("plan-123")).thenReturn(Optional.empty());
+            when(repository.save(any(SprintPlanning.class))).thenAnswer(i -> i.getArgument(0));
+            when(taskRepository.findByIdIn(any())).thenReturn(List.of(SprintPlanningTask.builder().id("task-do-outro").planningId("plan-outro").build()));
+            when(taskRepository.findByPlanningIdOrderByOrderAsc(any())).thenReturn(List.of());
+            when(memberRepository.findByPlanningIdOrderByOrderAsc(any())).thenReturn(List.of());
+
+            service.saveOrUpdatePlanner(incoming, "user-sm", false);
+
+            org.mockito.ArgumentCaptor<SprintPlanningTask> saved = org.mockito.ArgumentCaptor.forClass(SprintPlanningTask.class);
+            verify(taskRepository).save(saved.capture());
+            assertNotEquals("task-do-outro", saved.getValue().getId());
+            assertEquals("plan-123", saved.getValue().getPlanningId());
         }
     }
 
@@ -255,6 +286,52 @@ class SprintPlanningServiceTest {
 
             assertThrows(ResponseStatusException.class, () -> service.saveOrUpdatePlanner(planning, "user-sm", false));
             verify(repository, never()).save(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Validação de conteúdo (400 em vez de 500)")
+    class ContentValidationTests {
+
+        private void assert400(SprintPlanning plan) {
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                    () -> service.saveOrUpdatePlanner(plan, "u1", false));
+            assertEquals(400, ex.getStatusCode().value());
+            verify(repository, never()).save(any());
+        }
+
+        private SprintPlanning planWith(SprintPlanningTask task) {
+            return SprintPlanning.builder().title("Plano").tasks(new ArrayList<>(List.of(task))).build();
+        }
+
+        @Test
+        @DisplayName("Task sem name vira 400")
+        void taskWithoutName() {
+            assert400(planWith(SprintPlanningTask.builder().build()));
+        }
+
+        @Test
+        @DisplayName("Title e name acima de 255 viram 400")
+        void longTitleAndName() {
+            assert400(SprintPlanning.builder().title("x".repeat(256)).build());
+            assert400(planWith(SprintPlanningTask.builder().name("x".repeat(256)).build()));
+        }
+
+        @Test
+        @DisplayName("Description acima de 20k vira 400")
+        void hugeDescription() {
+            assert400(planWith(SprintPlanningTask.builder().name("ok").description("x".repeat(20_001)).build()));
+        }
+
+        @Test
+        @DisplayName("Subtask sem name e member sem name viram 400")
+        void subtaskAndMemberWithoutName() {
+            SprintPlanningTask task = SprintPlanningTask.builder().name("ok")
+                    .subtasks(new ArrayList<>(List.of(SprintPlanningSubtask.builder().build()))).build();
+            assert400(planWith(task));
+            SprintPlanning plan = SprintPlanning.builder().title("Plano")
+                    .members(new ArrayList<>(List.of(SprintPlanningMember.builder().build()))).build();
+            assert400(plan);
         }
     }
 }

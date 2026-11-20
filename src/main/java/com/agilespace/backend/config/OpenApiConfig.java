@@ -14,11 +14,11 @@ public class OpenApiConfig {
     public OpenAPI customOpenAPI() {
         return new OpenAPI()
                 .info(new Info()
-                        .title("Agile Space API")
+                        .title("Portal Tech V&D API")
                         .version("v1.0")
-                        .description("Documentação dos endpoints REST da plataforma Agile Space.")
+                        .description("Documentação dos endpoints REST da plataforma Portal Tech V&D.")
                         .contact(new Contact()
-                                .name("Agile Space Team"))
+                                .name("Time do Portal Tech V&D"))
                         .license(new License()
                                 .name("Apache 2.0")
                                 .url("https://springdoc.org")));

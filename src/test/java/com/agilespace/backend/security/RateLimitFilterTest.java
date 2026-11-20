@@ -80,6 +80,32 @@ class RateLimitFilterTest {
     }
 
     @Test
+    @DisplayName("/api/auth/me NÃO usa a faixa apertada: 15 chamadas seguidas passam")
+    void authMeUsesGeneralLimit() throws Exception {
+        when(request.getRequestURI()).thenReturn("/api/auth/me");
+        when(request.getRemoteAddr()).thenReturn("10.0.0.9");
+        when(request.getHeader("X-Forwarded-For")).thenReturn(null);
+
+        for (int i = 0; i < 15; i++) {
+            filter.doFilterInternal(request, response, filterChain);
+        }
+
+        verify(filterChain, times(15)).doFilter(request, response);
+        verify(response, never()).setStatus(429);
+    }
+
+    @Test
+    @DisplayName("Rotas de entrada sem sessão continuam na faixa apertada")
+    void strictPathsAreLoginRegisterAndForgotPassword() {
+        assertEquals(true, RateLimitFilter.isStrictAuthPath("/api/auth/login"));
+        assertEquals(true, RateLimitFilter.isStrictAuthPath("/api/auth/register"));
+        assertEquals(true, RateLimitFilter.isStrictAuthPath("/api/auth/forgot-password/"));
+        assertEquals(false, RateLimitFilter.isStrictAuthPath("/api/auth/me"));
+        assertEquals(false, RateLimitFilter.isStrictAuthPath("/api/auth/switch-project"));
+        assertEquals(false, RateLimitFilter.isStrictAuthPath("/api/squads/X"));
+    }
+
+    @Test
     @DisplayName("IPs diferentes têm buckets independentes")
     void shouldTrackSeparateBucketsPerIp() throws Exception {
         when(request.getRequestURI()).thenReturn("/api/auth/login");
@@ -99,15 +125,16 @@ class RateLimitFilterTest {
     }
 
     @Test
-    @DisplayName("Usa o primeiro IP de X-Forwarded-For quando presente")
-    void shouldUseForwardedForHeaderWhenPresent() throws Exception {
+    @DisplayName("Sem proxy confiável configurado, X-Forwarded-For não escolhe o balde (vale o endereço da conexão)")
+    void shouldIgnoreForwardedForHeaderByDefault() throws Exception {
         when(request.getRequestURI()).thenReturn("/api/auth/login");
+        when(request.getRemoteAddr()).thenReturn("10.0.0.8");
         when(request.getHeader("X-Forwarded-For")).thenReturn("203.0.113.5, 10.0.0.1");
 
         filter.doFilterInternal(request, response, filterChain);
 
         verify(filterChain, times(1)).doFilter(request, response);
-        verify(request, never()).getRemoteAddr();
+        verify(request, atLeastOnce()).getRemoteAddr();
     }
 
     private boolean invokeShouldNotFilter(HttpServletRequest req) throws Exception {

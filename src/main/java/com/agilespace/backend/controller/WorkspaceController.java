@@ -13,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Espaço pessoal (kanban, notas, links, snippets): cada usuário só enxerga e altera o próprio.
@@ -40,6 +41,12 @@ public class WorkspaceController {
         return ResponseEntity.ok(service.saveKanbanCard(card));
     }
 
+    /** Escrita parcial (arrastar entre colunas, editar título...): só os campos enviados mudam. */
+    @PatchMapping("/kanban/{id}")
+    public ResponseEntity<UserKanbanCard> patchKanbanCard(@PathVariable String id, @RequestBody Map<String, Object> changes, HttpServletRequest request) {
+        return ResponseEntity.ok(service.patchKanbanCard(id, callerId(request), changes));
+    }
+
     @DeleteMapping("/kanban/{id}")
     public ResponseEntity<Void> deleteKanbanCard(@PathVariable String id, HttpServletRequest request) {
         service.deleteKanbanCard(id, callerId(request));
@@ -58,6 +65,12 @@ public class WorkspaceController {
         requireSelf(userId, request);
         note.setUserId(userId);
         return ResponseEntity.ok(service.saveStickyNote(note));
+    }
+
+    /** Escrita parcial da nota: texto, cor ou fixada, sem exigir o objeto inteiro. */
+    @PatchMapping("/notes/{id}")
+    public ResponseEntity<UserStickyNote> patchStickyNote(@PathVariable String id, @RequestBody Map<String, Object> changes, HttpServletRequest request) {
+        return ResponseEntity.ok(service.patchStickyNote(id, callerId(request), changes));
     }
 
     @DeleteMapping("/notes/{id}")

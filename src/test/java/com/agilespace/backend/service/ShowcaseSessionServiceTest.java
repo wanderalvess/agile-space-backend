@@ -3,6 +3,7 @@ package com.agilespace.backend.service;
 import com.agilespace.backend.domain.ShowcaseMember;
 import com.agilespace.backend.domain.ShowcaseSession;
 import com.agilespace.backend.domain.ShowcaseTask;
+import com.agilespace.backend.dto.ShowcaseFieldOriginDto;
 import com.agilespace.backend.repository.ShowcaseMemberRepository;
 import com.agilespace.backend.repository.ShowcaseSessionRepository;
 import com.agilespace.backend.repository.ShowcaseTaskRepository;
@@ -44,6 +45,12 @@ class ShowcaseSessionServiceTest {
 
     @Mock
     private ShowcaseWebSocketHandler webSocketHandler;
+
+    @Mock
+    private ShowcaseTaskFileService fileService;
+
+    @Mock
+    private ShowcaseTaskOriginService originService;
 
     @InjectMocks
     private ShowcaseSessionService service;
@@ -152,6 +159,40 @@ class ShowcaseSessionServiceTest {
         }
 
         @Test
+        @DisplayName("Deve gravar fundo e tema da apresentação junto com a sessão")
+        void shouldPersistPresentationSettings() {
+            ShowcaseSession newSession = ShowcaseSession.builder()
+                    .name("Review com fundo TOTVS")
+                    .status("planning")
+                    .presentationBackground("/showcase/fundo-totvs.webp")
+                    .presentationTheme("glass")
+                    .build();
+            when(repository.save(any(ShowcaseSession.class))).thenAnswer(i -> i.getArgument(0));
+
+            ShowcaseSession saved = service.saveSession(newSession, "user-author");
+
+            assertEquals("/showcase/fundo-totvs.webp", saved.getPresentationBackground());
+            assertEquals("glass", saved.getPresentationTheme());
+            verify(repository).save(argThat(s -> "/showcase/fundo-totvs.webp".equals(s.getPresentationBackground())));
+        }
+
+        @Test
+        @DisplayName("Deve gravar o checklist de prontidão junto com a sessão")
+        void shouldPersistReadinessChecklist() {
+            ShowcaseSession newSession = ShowcaseSession.builder()
+                    .name("Review com checklist")
+                    .status("planning")
+                    .readinessChecklist(List.of(true, false, true))
+                    .build();
+            when(repository.save(any(ShowcaseSession.class))).thenAnswer(i -> i.getArgument(0));
+
+            ShowcaseSession saved = service.saveSession(newSession, "user-author");
+
+            assertEquals(List.of(true, false, true), saved.getReadinessChecklist());
+            verify(repository).save(argThat(s -> List.of(true, false, true).equals(s.getReadinessChecklist())));
+        }
+
+        @Test
         @DisplayName("Deve preservar criador e data de criação originais ao atualizar sessão existente")
         void shouldPreserveOriginalMetadataWhenUpdatingExistingSession() {
             LocalDateTime originalCreatedAt = LocalDateTime.of(2026, 8, 20, 10, 0);
@@ -162,7 +203,7 @@ class ShowcaseSessionServiceTest {
                     .createdAt(originalCreatedAt)
                     .build();
 
-            when(repository.findById("session-456")).thenReturn(Optional.of(existing));
+            when(repository.findByIdForUpdate("session-456")).thenReturn(Optional.of(existing));
             when(repository.save(any(ShowcaseSession.class))).thenAnswer(i -> i.getArgument(0));
 
             ShowcaseSession updatePayload = ShowcaseSession.builder()
@@ -210,6 +251,67 @@ class ShowcaseSessionServiceTest {
     }
 
     @Nested
+    @DisplayName("Integridade e autoria")
+    class IntegrityTests {
+
+        @Test
+        @DisplayName("Deve recusar card cujo id já pertence a outra Review")
+        void shouldRejectTaskOfAnotherSession() {
+            ShowcaseTask foreign = ShowcaseTask.builder().id("t-alheio").sessionId("outra-review").title("X").build();
+            ShowcaseTask incoming = ShowcaseTask.builder().id("t-alheio").title("Sequestro").build();
+            sampleSession.setTasks(new ArrayList<>(List.of(incoming)));
+            when(repository.save(any(ShowcaseSession.class))).thenAnswer(i -> i.getArgument(0));
+            when(taskRepository.findAllById(any())).thenReturn(List.of(foreign));
+
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> service.saveSession(sampleSession, "user-sm"));
+
+            assertEquals(409, ex.getStatusCode().value());
+            verify(taskRepository, never()).saveAll(any());
+        }
+
+        @Test
+        @DisplayName("Decisão nova leva o autor do token, não o que o cliente escreveu; decisão mantida preserva o autor original")
+        void shouldStampDecisionAuthorFromCaller() {
+            ShowcaseTask stored = ShowcaseTask.builder().id("t1").sessionId("session-456").decision("approved")
+                    .decidedBy("po-original").decidedByName("PO Original").decidedAt("2026-01-01T10:00").build();
+            ShowcaseTask kept = ShowcaseTask.builder().id("t1").decision("approved").decidedBy("forjado").decidedByName("Forjado").build();
+            ShowcaseTask fresh = ShowcaseTask.builder().id("t2").decision("rejected").decidedBy("forjado").decidedByName("Forjado").build();
+            ShowcaseTask open = ShowcaseTask.builder().id("t3").decision("open").decidedBy("forjado").build();
+            sampleSession.setTasks(new ArrayList<>(List.of(kept, fresh, open)));
+            when(repository.save(any(ShowcaseSession.class))).thenAnswer(i -> i.getArgument(0));
+            when(taskRepository.findBySessionIdOrderByOrderAsc("session-456")).thenReturn(List.of(stored));
+
+            service.saveSession(sampleSession, "caller-1");
+
+            assertEquals("po-original", kept.getDecidedBy());
+            assertEquals("PO Original", kept.getDecidedByName());
+            assertEquals("caller-1", fresh.getDecidedBy());
+            assertNotNull(fresh.getDecidedAt());
+            // Instante com fuso (termina em Z): sem ele o navegador lê a hora do servidor como hora local e mostra adiantada.
+            assertTrue(fresh.getDecidedAt().endsWith("Z"), fresh.getDecidedAt());
+            assertDoesNotThrow(() -> java.time.Instant.parse(fresh.getDecidedAt()));
+            assertNull(open.getDecidedBy());
+        }
+
+        @Test
+        @DisplayName("Deve descartar links com esquema executável")
+        void shouldDropScriptSchemes() {
+            ShowcaseTask task = ShowcaseTask.builder().id("t1").url("javascript:alert(1)")
+                    .evidence(com.agilespace.backend.domain.ShowcaseEvidence.builder()
+                            .video(" JaVa\tScript:alert(1)").screenshot("https://ok.example/a.png").build())
+                    .build();
+            sampleSession.setTasks(new ArrayList<>(List.of(task)));
+            when(repository.save(any(ShowcaseSession.class))).thenAnswer(i -> i.getArgument(0));
+
+            service.saveSession(sampleSession, "user-sm");
+
+            assertNull(task.getUrl());
+            assertNull(task.getEvidence().getVideo());
+            assertEquals("https://ok.example/a.png", task.getEvidence().getScreenshot());
+        }
+    }
+
+    @Nested
     @DisplayName("Validação de Entrada")
     class ValidationTests {
 
@@ -221,6 +323,70 @@ class ShowcaseSessionServiceTest {
             assertThrows(ResponseStatusException.class, () -> service.saveSession(blank, "user-author"));
             verify(repository, never()).save(any());
             verify(webSocketHandler, never()).broadcastEvent(any(), any(), any());
+        }
+    }
+    @Nested
+    @DisplayName("Origem dos textos importados do Jira")
+    class OriginTests {
+
+        private ShowcaseFieldOriginDto origin() {
+            return new ShowcaseFieldOriginDto("problem", "descricao", "Descrição, início do texto", "Texto do Jira", null, null);
+        }
+
+        @Test
+        @DisplayName("Card que chega com origins valida antes de regravar e guarda depois, com o autor do token")
+        void shouldValidateThenStoreOrigins() {
+            ShowcaseTask task = ShowcaseTask.builder().id("t1").title("Importada").origins(List.of(origin())).build();
+            sampleSession.setTasks(new ArrayList<>(List.of(task)));
+            when(repository.save(any(ShowcaseSession.class))).thenAnswer(i -> i.getArgument(0));
+
+            service.saveSession(sampleSession, "user-sm");
+
+            var order = inOrder(originService, taskRepository);
+            order.verify(originService).validateOnly(eq("session-456"), eq("t1"), any());
+            order.verify(taskRepository).saveAll(any());
+            order.verify(originService).replace(eq("session-456"), eq("t1"), any(), eq("user-sm"));
+            verify(originService).removeOrphans(eq("session-456"), eq(java.util.Set.of("t1")));
+        }
+
+        @Test
+        @DisplayName("Cliente que não manda origins não mexe nas origens gravadas")
+        void shouldLeaveOriginsAloneWhenClientDoesNotSendThem() {
+            ShowcaseTask task = ShowcaseTask.builder().id("t1").title("Sem origins").build();
+            sampleSession.setTasks(new ArrayList<>(List.of(task)));
+            when(repository.save(any(ShowcaseSession.class))).thenAnswer(i -> i.getArgument(0));
+
+            service.saveSession(sampleSession, "user-sm");
+
+            verify(originService, never()).replace(any(), any(), any(), any());
+            verify(originService, never()).validateOnly(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Origem inválida (400) para antes de a Review ser regravada")
+        void shouldRejectInvalidOriginBeforeRewriting() {
+            ShowcaseTask task = ShowcaseTask.builder().id("t1").title("Ruim").origins(List.of(origin())).build();
+            sampleSession.setTasks(new ArrayList<>(List.of(task)));
+            when(repository.save(any(ShowcaseSession.class))).thenAnswer(i -> i.getArgument(0));
+            doThrow(new ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "origins.field inválido"))
+                    .when(originService).validateOnly(any(), any(), any());
+
+            assertThrows(ResponseStatusException.class, () -> service.saveSession(sampleSession, "user-sm"));
+
+            verify(taskRepository, never()).deleteBySessionId(any());
+            verify(taskRepository, never()).saveAll(any());
+        }
+
+        @Test
+        @DisplayName("Ler a Review monta as origens de cada card")
+        void shouldAttachOriginsOnRead() {
+            ShowcaseTask task = ShowcaseTask.builder().id("t1").sessionId("session-456").title("T").order(0).build();
+            when(repository.findById("session-456")).thenReturn(Optional.of(sampleSession));
+            when(taskRepository.findBySessionIdOrderByOrderAsc("session-456")).thenReturn(List.of(task));
+
+            service.getSession("session-456");
+
+            verify(originService).attach(eq("session-456"), eq(List.of(task)));
         }
     }
 }

@@ -2,6 +2,8 @@ package com.agilespace.backend.domain;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 
@@ -26,6 +28,8 @@ public class PromptComment {
     @JsonIgnore
     private Prompt prompt;
 
+    @NotBlank(message = "O comentário não pode ser vazio")
+    @Size(max = 4000, message = "O comentário aceita até 4.000 caracteres")
     @Column(columnDefinition = "TEXT", nullable = false)
     private String content;
 

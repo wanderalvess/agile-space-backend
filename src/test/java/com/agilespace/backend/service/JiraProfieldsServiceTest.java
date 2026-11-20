@@ -135,7 +135,7 @@ class JiraProfieldsServiceTest {
         void createManualProjectRejectsDuplicateKey() {
             when(projectConfigRepository.existsById("MEUTIME")).thenReturn(true);
             CreateProjectRequestDto request = CreateProjectRequestDto.builder().id("meutime").name("Meu Time").build();
-            User creator = User.builder().id("u1").name("Criador").email("criador@empresa.com").build();
+            User creator = User.builder().id("u1").name("Criador").email("criador@empresa.com").role("ADMIN").build();
 
             ResponseStatusException ex = assertThrows(ResponseStatusException.class,
                     () -> service.createManualProject(request, creator));
@@ -143,14 +143,16 @@ class JiraProfieldsServiceTest {
         }
 
         @Test
-        @DisplayName("Deve atribuir papel Agile Master com liderança ao criador do projeto")
+        @DisplayName("Criador que já é Agile Master no roster entra como Agile Master, com liderança")
         void createManualProjectMakesCreatorAgileMaster() {
+            when(projectMemberRoleRepository.findByUserId("u1")).thenReturn(List.of(
+                    ProjectMemberRole.builder().projectId("OUTRA").roleName("Agile Master").roleKey("AGILE_MASTER").userId("u1").isLeadership(true).build()));
             when(projectConfigRepository.existsById("MEUTIME")).thenReturn(false);
             when(projectConfigRepository.save(any(ProjectConfig.class))).thenAnswer(i -> i.getArgument(0));
             when(projectMemberRoleRepository.save(any(ProjectMemberRole.class))).thenAnswer(i -> i.getArgument(0));
 
             CreateProjectRequestDto request = CreateProjectRequestDto.builder().id("meutime").name("Meu Time").build();
-            User creator = User.builder().id("u1").name("Criador").email("criador@empresa.com").build();
+            User creator = User.builder().id("u1").name("Criador").email("criador@empresa.com").role("ADMIN").build();
 
             ProjectDetailDto result = service.createManualProject(request, creator);
 
@@ -158,6 +160,68 @@ class JiraProfieldsServiceTest {
             assertEquals(1, result.getMembers().size());
             assertEquals("AGILE_MASTER", result.getMembers().get(0).getRoleKey());
             assertTrue(result.getMembers().get(0).isLeadership());
+            ArgumentCaptor<ProjectMemberRole> founder = ArgumentCaptor.forClass(ProjectMemberRole.class);
+            verify(projectMemberRoleRepository).save(founder.capture());
+            assertEquals("MANUAL", founder.getValue().getSource(), "o fundador não vem do Jira: a reimportação não o apaga");
+        }
+
+        @Test
+        @DisplayName("Admin sem papel de AM/PL cria a equipe e entra como Agile Master com liderança (a squad nasce com liderança)")
+        void createManualProjectMakesAdminTheAgileMaster() {
+            when(projectConfigRepository.existsById("MEUTIME")).thenReturn(false);
+            when(projectConfigRepository.save(any(ProjectConfig.class))).thenAnswer(i -> i.getArgument(0));
+            when(projectMemberRoleRepository.save(any(ProjectMemberRole.class))).thenAnswer(i -> i.getArgument(0));
+            User admin = User.builder().id("u9").name("Adm").email("adm@empresa.com").role("ADMIN").build();
+
+            ProjectDetailDto result = service.createManualProject(
+                    CreateProjectRequestDto.builder().id("meutime").name("Meu Time").build(), admin);
+
+            assertEquals("AGILE_MASTER", result.getMembers().get(0).getRoleKey());
+            assertTrue(result.getMembers().get(0).isLeadership());
+        }
+
+        @Test
+        @DisplayName("Quem não é AM, PL nem admin não cria equipe (403)")
+        void createManualProjectRejectsNonManager() {
+            CreateProjectRequestDto request = CreateProjectRequestDto.builder().id("meutime").name("Meu Time").build();
+            User dev = User.builder().id("u2").name("Dev").email("dev@empresa.com").build();
+
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                    () -> service.createManualProject(request, dev));
+            assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+            verify(projectConfigRepository, never()).save(any(ProjectConfig.class));
+        }
+
+        @Test
+        @DisplayName("People Lead (por roster de outra equipe) pode criar equipe")
+        void createManualProjectAllowsPeopleLeadFromRoster() {
+            User pl = User.builder().id("u3").name("Paula").email("paula@empresa.com").build();
+            when(projectMemberRoleRepository.findByUserId("u3")).thenReturn(List.of(
+                    ProjectMemberRole.builder().projectId("OUTRA").roleName("People Lead").roleKey("PEOPLE_LEAD").userId("u3").isLeadership(true).build()));
+            when(projectConfigRepository.existsById("MEUTIME")).thenReturn(false);
+            when(projectConfigRepository.save(any(ProjectConfig.class))).thenAnswer(i -> i.getArgument(0));
+            when(projectMemberRoleRepository.save(any(ProjectMemberRole.class))).thenAnswer(i -> i.getArgument(0));
+
+            ProjectDetailDto result = service.createManualProject(
+                    CreateProjectRequestDto.builder().id("meutime").name("Meu Time").build(), pl);
+
+            assertEquals("MEUTIME", result.getId());
+            assertEquals("PEOPLE_LEAD", result.getMembers().get(0).getRoleKey());
+            assertTrue(result.getMembers().get(0).isLeadership());
+        }
+
+        @Test
+        @DisplayName("Linha do roster casa com a pessoa por e-mail ou conta do Jira; nome igual (homônimo) NÃO casa")
+        void rowMatchesUserByEmailOrAccountButNeverByName() {
+            User u = User.builder().id("u4").name("Ana Paula Nogueira").email("ana@x.com").jiraAccountId("ana.n").build();
+            assertTrue(JiraProfieldsService.rowMatchesUser(
+                    ProjectMemberRole.builder().email("ANA@x.com").displayName("Outro").build(), u));
+            assertTrue(JiraProfieldsService.rowMatchesUser(
+                    ProjectMemberRole.builder().jiraAccountId("ana.n").displayName("Outro").build(), u));
+            assertFalse(JiraProfieldsService.rowMatchesUser(
+                    ProjectMemberRole.builder().displayName("ana paula nogueira").build(), u));
+            assertFalse(JiraProfieldsService.rowMatchesUser(
+                    ProjectMemberRole.builder().email("outra@x.com").displayName("Ana Nogueira").build(), u));
         }
 
         @Test
@@ -175,10 +239,66 @@ class JiraProfieldsServiceTest {
         }
 
         @Test
+        @DisplayName("Join sem estar no roster (nem admin) é recusado com 403 e não grava nada")
+        void joinProjectRejectsUnlistedUser() {
+            when(projectConfigRepository.existsById("PROJ1")).thenReturn(true);
+            when(projectMemberRoleRepository.findByProjectId("PROJ1")).thenReturn(List.of(
+                    ProjectMemberRole.builder().projectId("PROJ1").email("outra@empresa.com").jiraAccountId("outra.acc").build()));
+            User user = User.builder().id("u1").name("User").email("user@empresa.com").jiraAccountId("user.acc").build();
+
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                    () -> service.joinProject("proj1", "Developer", user));
+            assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+            verify(projectMemberRoleRepository, never()).save(any(ProjectMemberRole.class));
+        }
+
+        @Test
+        @DisplayName("Join com linha do roster já vinculada a outra conta é recusado")
+        void joinProjectRejectsRowClaimedByAnotherAccount() {
+            when(projectConfigRepository.existsById("PROJ1")).thenReturn(true);
+            when(projectMemberRoleRepository.findByProjectId("PROJ1")).thenReturn(List.of(
+                    ProjectMemberRole.builder().projectId("PROJ1").email("user@empresa.com").userId("outro-uid").build()));
+            User user = User.builder().id("u1").name("User").email("user@empresa.com").build();
+
+            assertThrows(ResponseStatusException.class, () -> service.joinProject("proj1", "Developer", user));
+            verify(projectMemberRoleRepository, never()).save(any(ProjectMemberRole.class));
+        }
+
+        @Test
+        @DisplayName("ADMIN entra em qualquer projeto; quem já é membro é no-op idempotente")
+        void joinProjectAllowsAdminAndIsIdempotentForMembers() {
+            when(projectConfigRepository.existsById("PROJ1")).thenReturn(true);
+            when(projectMemberRoleRepository.findByProjectId("PROJ1")).thenReturn(Collections.emptyList());
+            when(projectMemberRoleRepository.save(any(ProjectMemberRole.class))).thenAnswer(i -> i.getArgument(0));
+            service.joinProject("proj1", "Developer", User.builder().id("a1").name("Adm").role("ADMIN").build());
+            verify(projectMemberRoleRepository, times(1)).save(any(ProjectMemberRole.class));
+
+            when(projectMemberRoleRepository.findByProjectId("PROJ1")).thenReturn(List.of(
+                    ProjectMemberRole.builder().projectId("PROJ1").userId("m1").build()));
+            service.joinProject("proj1", "Developer", User.builder().id("m1").name("Membro").build());
+            verify(projectMemberRoleRepository, times(1)).save(any(ProjectMemberRole.class));
+        }
+
+        @Test
+        @DisplayName("canManageTeams exige linha de liderança: roleKey AGILE_MASTER sem isLeadership (vinda de convite) não vale")
+        void canManageTeamsRequiresLeadershipFlag() {
+            User user = User.builder().id("u1").email("user@empresa.com").build();
+            when(projectMemberRoleRepository.findByUserId("u1")).thenReturn(List.of(
+                    ProjectMemberRole.builder().roleKey("AGILE_MASTER").roleName("Agile Master").isLeadership(false).build()));
+            when(projectMemberRoleRepository.findByEmailIgnoreCase("user@empresa.com")).thenReturn(List.of());
+            assertFalse(service.canManageTeams(user));
+
+            when(projectMemberRoleRepository.findByUserId("u1")).thenReturn(List.of(
+                    ProjectMemberRole.builder().roleKey("AGILE_MASTER").roleName("Agile Master").isLeadership(true).build()));
+            assertTrue(service.canManageTeams(user));
+        }
+
+        @Test
         @DisplayName("Deve aceitar papel de desenvolvedor sem flag de liderança")
         void joinProjectAcceptsContributorRoleWithoutLeadership() {
             when(projectConfigRepository.existsById("PROJ1")).thenReturn(true);
-            when(projectMemberRoleRepository.findByProjectId("PROJ1")).thenReturn(Collections.emptyList());
+            when(projectMemberRoleRepository.findByProjectId("PROJ1")).thenReturn(List.of(
+                    ProjectMemberRole.builder().projectId("PROJ1").email("USER@empresa.com").displayName("User").roleName("Developer").build()));
             when(projectMemberRoleRepository.save(any(ProjectMemberRole.class))).thenAnswer(i -> i.getArgument(0));
 
             User user = User.builder().id("u1").name("User").email("user@empresa.com").jiraAccountId("user.acc").build();
@@ -188,6 +308,7 @@ class JiraProfieldsServiceTest {
             verify(projectMemberRoleRepository).save(captor.capture());
             assertFalse(captor.getValue().isLeadership());
             assertEquals("DEVELOPER", captor.getValue().getRoleKey());
+            assertEquals("CLAIM", captor.getValue().getSource());
         }
     }
 
@@ -375,6 +496,20 @@ class JiraProfieldsServiceTest {
             assertEquals("Developer", beto.getRoleName());       // pedido de Agile Master ignorado
             assertFalse(beto.isLeadership());
             assertEquals("u-me", beto.getUserId());              // "sou eu" vincula a conta
+        }
+
+        @Test
+        @DisplayName("'Sou eu' numa linha de liderança só vale se e-mail, conta ou nome batem com a pessoa")
+        void linkToMeOnLeadershipRowNeedsMatch() {
+            User me = User.builder().id("u-me").name("Eu").email("eu@x.com").build();
+            var request = com.agilespace.backend.dto.ProjectImportConfirmRequest.builder()
+                    .members(List.of(req("po1", "Product Owner", true)))
+                    .build();
+
+            var applied = service.applyConfirmation(snapshot(), request, me);
+
+            ProjectMemberRole ana = applied.members().stream().filter(m -> "po1".equals(m.getJiraAccountId())).findFirst().orElseThrow();
+            assertNull(ana.getUserId());                          // não é ela: vínculo ignorado
         }
 
         @Test

@@ -41,6 +41,21 @@ public class PasswordResetRequest {
     @Column(name = "approved_by")
     private String approvedBy;
 
+    /** SHA-256 (hex) do token do link de redefinição; o token em si nunca é guardado. */
+    @Column(name = "token_hash", length = 64)
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private String tokenHash;
+
+    @Column(name = "token_expires_at")
+    private LocalDateTime tokenExpiresAt;
+
+    @Column(name = "used_at")
+    private LocalDateTime usedAt;
+
+    /** Token em claro: só existe na resposta que gera o link (não é persistido). */
+    @Transient
+    private String resetToken;
+
     @PrePersist
     public void onPrePersist() {
         if (requestedAt == null) {

@@ -7,5 +7,6 @@ import java.util.List;
 
 @Repository
 public interface UserStickyNoteRepository extends JpaRepository<UserStickyNote, String> {
+    long countByUserId(String userId);
     List<UserStickyNote> findByUserIdOrderByUpdatedAtDesc(String userId);
 }

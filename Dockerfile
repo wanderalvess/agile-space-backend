@@ -27,9 +27,21 @@ ADD https://github.com/open-telemetry/opentelemetry-java-instrumentation/release
 RUN echo "${OTEL_AGENT_SHA256}  /app/otel-agent.jar" | sha256sum -c - \
     && chown spring:spring /app/otel-agent.jar
 
+# Anexos dos cards da Review: pasta pertencente ao usuário da aplicação. O volume nomeado do
+# compose herda este dono na primeira criação.
+RUN mkdir -p /data/uploads && chown -R spring:spring /data
+ENV UPLOADS_DIR=/data/uploads
+
+# Fuso fixo em UTC: createdAt/updatedAt/lastLoginAt são LocalDateTime gravados com now() e a API os envia com "Z"
+# (JacksonUtcConfig). Se a JVM rodasse em outro fuso, o navegador mostraria a hora errada. Fixar aqui (variável do
+# sistema e propriedade da JVM) tira a dependência do fuso padrão da máquina.
+ENV TZ=UTC
+
 USER spring
 
 COPY --from=build /app/target/*.jar app.jar
 
 EXPOSE 8002
-ENTRYPOINT ["java", "-javaagent:/app/otel-agent.jar", "-jar", "app.jar"]
+# MaxRAMPercentage: sem isso o heap padrão é 25% do limite do container (cerca de 256 MB com 1 GB). 60% deixa o resto
+# para metaspace, threads, agente OpenTelemetry e buffers nativos sem estourar o limite (OOM kill).
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=60", "-Duser.timezone=UTC", "-javaagent:/app/otel-agent.jar", "-jar", "app.jar"]

@@ -32,6 +32,7 @@ public class McpPromptHubTools {
 
     private final PromptService promptService;
     private final UserRepository userRepository;
+    private final com.agilespace.backend.service.SquadAccessService squadAccessService;
     private final ObjectMapper objectMapper;
 
     @Tool(description = "Lista prompts/iniciativas do Prompt Hub (público), com busca textual opcional ou filtro por autor")
@@ -181,7 +182,8 @@ public class McpPromptHubTools {
                 var u = userOpt.get();
                 if (u.getName() != null && !u.getName().isBlank()) authorName = u.getName();
                 if (u.getRole() != null && !u.getRole().isBlank()) authorRole = u.getRole();
-                if (authorSquad == null && u.getSquadId() != null) authorSquad = u.getSquadId();
+                String activeSquad = squadAccessService.activeSquadFor("prompthub", u);
+                if (authorSquad == null && activeSquad != null) authorSquad = activeSquad;
                 authorAvatar = u.getAvatarSeed();
             }
         }

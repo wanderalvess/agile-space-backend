@@ -46,6 +46,8 @@ class PokerServiceTest {
     private PokerRoundRepository roundRepository;
     @Mock
     private PokerWebSocketHandler webSocketHandler;
+    @Mock
+    private com.agilespace.backend.repository.PokerChatMessageRepository chatMessageRepository;
 
     @InjectMocks
     private PokerService service;
@@ -93,7 +95,7 @@ class PokerServiceTest {
         @DisplayName("Deve criar nova sala associando o callerId como criador e disparando broadcast")
         void shouldCreateNewRoomAndBroadcastEvent() {
             PokerRoom newRoom = PokerRoom.builder().title("Nova Sala").build();
-            when(roomRepository.save(any(PokerRoom.class))).thenAnswer(i -> {
+            when(roomRepository.saveAndFlush(any(PokerRoom.class))).thenAnswer(i -> {
                 PokerRoom r = i.getArgument(0);
                 r.setId("room-nova");
                 return r;
@@ -103,15 +105,28 @@ class PokerServiceTest {
 
             assertEquals("room-nova", saved.getId());
             assertEquals("user-creator", saved.getCreatorId());
-            verify(roomRepository).save(newRoom);
+            verify(roomRepository).saveAndFlush(newRoom);
             verify(webSocketHandler).broadcastEvent(eq("room-nova"), eq("ROOM_UPDATED"), any(PokerRoom.class));
+        }
+
+        @Test
+        @DisplayName("Sala nova sem createdAt ganha a data do servidor; a enviada pelo cliente é mantida")
+        void shouldFillCreatedAtOnlyWhenMissing() {
+            when(roomRepository.saveAndFlush(any(PokerRoom.class))).thenAnswer(i -> i.getArgument(0));
+
+            PokerRoom semData = service.saveOrUpdateRoom(PokerRoom.builder().id("r1").title("A").build(), "u", "MEMBER");
+            PokerRoom comData = service.saveOrUpdateRoom(
+                    PokerRoom.builder().id("r2").title("B").createdAt("2026-01-02T03:04:05.000Z").build(), "u", "MEMBER");
+
+            org.junit.jupiter.api.Assertions.assertTrue(semData.getCreatedAt().matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z"));
+            assertEquals("2026-01-02T03:04:05.000Z", comData.getCreatedAt());
         }
 
         @Test
         @DisplayName("Deve permitir ao criador atualizar dados da sala existente")
         void shouldAllowCreatorToUpdateExistingRoom() {
             when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
-            when(roomRepository.save(sampleRoom)).thenReturn(sampleRoom);
+            when(roomRepository.saveAndFlush(sampleRoom)).thenReturn(sampleRoom);
 
             sampleRoom.setTitle("Planning Poker Sprint 45 - Revisado");
             PokerRoom updated = service.saveOrUpdateRoom(sampleRoom, "user-creator", "MEMBER");
@@ -124,12 +139,50 @@ class PokerServiceTest {
         @DisplayName("Deve permitir a um usuário com papel ADMIN atualizar qualquer sala existente")
         void shouldAllowAdminToUpdateRoomEvenIfNotParticipant() {
             when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
-            when(roomRepository.save(sampleRoom)).thenReturn(sampleRoom);
+            when(roomRepository.saveAndFlush(sampleRoom)).thenReturn(sampleRoom);
 
             PokerRoom updated = service.saveOrUpdateRoom(sampleRoom, "admin-user", "ADMIN");
 
             assertNotNull(updated);
-            verify(roomRepository).save(sampleRoom);
+            verify(roomRepository).saveAndFlush(sampleRoom);
+        }
+
+        @Test
+        @DisplayName("Gravação concorrente: o conflito de versão chega ao controller (não é engolido) e nada é transmitido")
+        void shouldPropagateOptimisticLockWithoutBroadcast() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+            when(roomRepository.saveAndFlush(sampleRoom))
+                    .thenThrow(new org.springframework.orm.ObjectOptimisticLockingFailureException(PokerRoom.class, "room-123"));
+
+            assertThrows(org.springframework.dao.OptimisticLockingFailureException.class,
+                    () -> service.saveOrUpdateRoom(sampleRoom, "user-creator", "MEMBER"));
+            verify(webSocketHandler, never()).broadcastEvent(anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("Cliente sem versão (antigo/MCP) em sala existente herda a versão atual em vez de virar INSERT")
+        void shouldKeepWorkingForClientsThatDoNotSendVersion() {
+            PokerRoom stored = PokerRoom.builder().id("room-123").creatorId("user-creator").version(7L).build();
+            PokerRoom incoming = PokerRoom.builder().id("room-123").title("Sem versão").build();
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(stored));
+            when(roomRepository.saveAndFlush(incoming)).thenReturn(incoming);
+
+            service.saveOrUpdateRoom(incoming, "user-creator", "MEMBER");
+
+            assertEquals(7L, incoming.getVersion());
+        }
+
+        @Test
+        @DisplayName("Cliente com versão antiga mantém a versão enviada: o banco decide o conflito")
+        void shouldNotOverrideVersionSentByClient() {
+            PokerRoom stored = PokerRoom.builder().id("room-123").creatorId("user-creator").version(7L).build();
+            PokerRoom incoming = PokerRoom.builder().id("room-123").version(5L).build();
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(stored));
+            when(roomRepository.saveAndFlush(incoming)).thenReturn(incoming);
+
+            service.saveOrUpdateRoom(incoming, "user-creator", "MEMBER");
+
+            assertEquals(5L, incoming.getVersion());
         }
 
         @Test
@@ -263,21 +316,20 @@ class PokerServiceTest {
                     .dbId("room-123_user-1")
                     .build();
 
-            when(participantRepository.findById("room-123_user-1")).thenReturn(Optional.of(participant));
-            when(participantRepository.save(any(PokerParticipant.class))).thenAnswer(i -> i.getArgument(0));
-
             service.updateHeartbeat("room-123", "user-1");
 
-            assertNotNull(participant.getLastSeen());
-            long driftMs = Math.abs(java.time.Instant.parse(participant.getLastSeen()).toEpochMilli() - System.currentTimeMillis());
+            // só a coluna last_seen é gravada (não a entidade inteira)
+            org.mockito.ArgumentCaptor<String> ts = org.mockito.ArgumentCaptor.forClass(String.class);
+            verify(participantRepository).updateLastSeen(eq("room-123_user-1"), ts.capture());
+            long driftMs = Math.abs(java.time.Instant.parse(ts.getValue()).toEpochMilli() - System.currentTimeMillis());
             assertTrue(driftMs < 5000, "heartbeat fora do instante atual: " + driftMs + "ms");
-            verify(participantRepository).save(participant);
+            verify(participantRepository, never()).save(any());
         }
 
         @Test
         @DisplayName("Deve remover participante e notificar desconexão na sala")
         void shouldLeaveRoomAndBroadcastEvent() {
-            service.leaveRoom("room-123", "user-1");
+            service.leaveRoom("room-123", "user-1", "user-1", "MEMBER");
 
             verify(participantRepository).deleteByRoomIdAndId("room-123", "user-1");
             verify(webSocketHandler).broadcastEvent(eq("room-123"), eq("PARTICIPANT_LEFT"), any());
@@ -297,6 +349,8 @@ class PokerServiceTest {
                     .value("8")
                     .build();
 
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+            when(participantRepository.existsById("room-123_user-dev1")).thenReturn(true);
             when(voteRepository.save(any(PokerVote.class))).thenAnswer(i -> i.getArgument(0));
 
             PokerVote saved = service.saveVote(vote, "user-dev1");
@@ -305,6 +359,133 @@ class PokerServiceTest {
             assertEquals("8", saved.getValue());
             verify(voteRepository).save(vote);
             verify(webSocketHandler).broadcastEvent(eq("room-123"), eq("VOTE_SAVED"), eq(saved));
+        }
+
+        private PokerVote vote(String participant, String value, String issueId) {
+            return PokerVote.builder().roomId("room-123").participantId(participant).value(value).issueId(issueId).build();
+        }
+
+        @Test
+        @DisplayName("Deve rejeitar voto depois da revelação")
+        void shouldRejectVoteAfterReveal() {
+            sampleRoom.setVotesRevealed(true);
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+            when(participantRepository.existsById("room-123_u1")).thenReturn(true);
+
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                    () -> service.saveVote(vote("u1", "5", null), "u1"));
+            assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
+            verify(voteRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Deve rejeitar carta que não existe no baralho e voto de quem não está na sala")
+        void shouldRejectInvalidCardAndOutsider() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+            when(participantRepository.existsById("room-123_u1")).thenReturn(true);
+            when(participantRepository.existsById("room-123_u2")).thenReturn(false);
+
+            assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+                    () -> service.saveVote(vote("u1", "4", null), "u1")).getStatusCode());
+            assertEquals(HttpStatus.FORBIDDEN, assertThrows(ResponseStatusException.class,
+                    () -> service.saveVote(vote("u2", "5", null), "u2")).getStatusCode());
+        }
+
+        @Test
+        @DisplayName("Baralho de horas aceita a carta do limite escolhido (24, 60, 100) e rejeita o que passa de 100 ou não é inteiro")
+        void shouldAcceptCustomHoursCard() {
+            PokerRoom hours = PokerRoom.builder().id("room-123").creatorId("user-creator").title("t").deckType("hours")
+                    .votesRevealed(false).build();
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(hours));
+            when(participantRepository.existsById("room-123_u1")).thenReturn(true);
+            when(voteRepository.save(any(PokerVote.class))).thenAnswer(i -> i.getArgument(0));
+
+            for (String card : new String[]{"24", "60", "100", "40", "?"}) {
+                assertEquals(card, service.saveVote(vote("u1", card, null), "u1").getValue());
+            }
+            for (String card : new String[]{"101", "007", "-1", "2.5", "abc", "1000"}) {
+                assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+                        () -> service.saveVote(vote("u1", card, null), "u1")).getStatusCode(), card);
+            }
+        }
+
+        @Test
+        @DisplayName("Fibonacci continua só com as cartas do baralho (24 é rejeitado)")
+        void shouldKeepFibonacciStrict() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+            when(participantRepository.existsById("room-123_u1")).thenReturn(true);
+            assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+                    () -> service.saveVote(vote("u1", "24", null), "u1")).getStatusCode());
+        }
+
+        @Test
+        @DisplayName("Sala assíncrona guarda um voto por tarefa e exige a tarefa")
+        void shouldKeepOneVotePerIssueInAsyncRoom() {
+            sampleRoom.setMode("async");
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+            when(participantRepository.existsById("room-123_u1")).thenReturn(true);
+            when(voteRepository.save(any(PokerVote.class))).thenAnswer(i -> i.getArgument(0));
+
+            PokerVote a = service.saveVote(vote("u1", "5", "issue-a"), "u1");
+            PokerVote b = service.saveVote(vote("u1", "8", "issue-b"), "u1");
+
+            assertEquals("room-123_u1_issue-a", a.getId());
+            assertEquals("room-123_u1_issue-b", b.getId());
+            assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+                    () -> service.saveVote(vote("u1", "5", null), "u1")).getStatusCode());
+        }
+
+        @Test
+        @DisplayName("Atualizar só a confiança preserva apelido, papel e tarefa do voto")
+        void shouldKeepVoteMetadataWhenUpdatingConfidence() {
+            sampleRoom.setActiveIssueId("issue-1");
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+            when(participantRepository.existsById("room-123_u1")).thenReturn(true);
+            when(voteRepository.findById("room-123_u1")).thenReturn(Optional.of(PokerVote.builder()
+                    .id("room-123_u1").roomId("room-123").participantId("u1").value("5")
+                    .participantNickname("Ana").participantRole("dev").participantGlobalRole("Developer").issueId("issue-1").build()));
+            when(voteRepository.save(any(PokerVote.class))).thenAnswer(i -> i.getArgument(0));
+
+            PokerVote update = vote("u1", "5", null);
+            update.setConfidence("high");
+            PokerVote saved = service.saveVote(update, "u1");
+
+            assertEquals("Ana", saved.getParticipantNickname());
+            assertEquals("dev", saved.getParticipantRole());
+            assertEquals("issue-1", saved.getIssueId());
+            assertEquals("high", saved.getConfidence());
+        }
+
+        @Test
+        @DisplayName("Facilitador remove voto de outro; participante comum não")
+        void shouldLetOnlyFacilitatorRemoveOthersVote() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+            when(participantRepository.findById("room-123_u2")).thenReturn(Optional.of(
+                    PokerParticipant.builder().id("u2").roomId("room-123").role("dev").isFacilitator(false).build()));
+
+            assertEquals(HttpStatus.FORBIDDEN, assertThrows(ResponseStatusException.class,
+                    () -> service.removeVote("room-123", "u1", null, "u2", "MEMBER")).getStatusCode());
+
+            service.removeVote("room-123", "u1", null, "user-creator", "MEMBER");
+            verify(voteRepository).deleteByRoomIdAndParticipantId("room-123", "u1");
+        }
+
+        @Test
+        @DisplayName("Votos às cegas: terceiros veem '*' até a revelação; o próprio e o facilitador veem o valor")
+        void shouldMaskVotesInBlindRooms() throws Exception {
+            sampleRoom.setSettings(new com.fasterxml.jackson.databind.ObjectMapper().readTree("{\"blindVotes\":true}"));
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+            when(voteRepository.findByRoomId("room-123")).thenReturn(List.of(
+                    PokerVote.builder().id("room-123_u1").roomId("room-123").participantId("u1").value("5").build(),
+                    PokerVote.builder().id("room-123_u2").roomId("room-123").participantId("u2").value("8").build()));
+
+            List<PokerVote> seenByU1 = service.getVotes("room-123", "u1", "MEMBER");
+            assertEquals("5", seenByU1.get(0).getValue());
+            assertEquals("*", seenByU1.get(1).getValue());
+            assertEquals("8", service.getVotes("room-123", "user-creator", "MEMBER").get(1).getValue());
+
+            sampleRoom.setVotesRevealed(true);
+            assertEquals("8", service.getVotes("room-123", "u3", "MEMBER").get(1).getValue());
         }
 
         @Test
@@ -339,7 +520,9 @@ class PokerServiceTest {
         @Test
         @DisplayName("Deve remover voto individual e notificar clientes")
         void shouldRemoveIndividualVote() {
-            service.removeVote("room-123", "user-1");
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+
+            service.removeVote("room-123", "user-1", null, "user-1", "MEMBER");
 
             verify(voteRepository).deleteByRoomIdAndParticipantId("room-123", "user-1");
             verify(webSocketHandler).broadcastEvent(eq("room-123"), eq("VOTE_REMOVED"), any());
@@ -359,9 +542,10 @@ class PokerServiceTest {
                     .devPoints("5")
                     .build();
 
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
             when(roundRepository.save(any(PokerRound.class))).thenAnswer(i -> i.getArgument(0));
 
-            PokerRound saved = service.saveRound(round);
+            PokerRound saved = service.saveRound(round, "user-creator", "MEMBER");
 
             assertNotNull(saved.getId());
             assertEquals("room-123", saved.getRoomId());
@@ -394,12 +578,154 @@ class PokerServiceTest {
         }
 
         @Test
+        @DisplayName("Quem criou a sala a exclui com tudo dela e avisa quem está dentro")
+        void creatorDeletesRoom() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+
+            service.deleteRoom("room-123", "user-creator", "MEMBER");
+
+            verify(voteRepository).deleteByRoomId("room-123");
+            verify(roundRepository).deleteByRoomId("room-123");
+            verify(chatMessageRepository).deleteByRoomId("room-123");
+            verify(participantRepository).deleteByRoomId("room-123");
+            verify(roomRepository).delete(sampleRoom);
+            verify(webSocketHandler).broadcastEvent(eq("room-123"), eq("ROOM_DELETED"), any());
+        }
+
+        @Test
+        @DisplayName("Facilitador que não criou a sala não a exclui; ADMIN exclui")
+        void onlyCreatorOrAdminDeletesRoom() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
+
+            assertThrows(ResponseStatusException.class, () -> service.deleteRoom("room-123", "user-dev", "MEMBER"));
+            verify(roomRepository, never()).delete(any(PokerRoom.class));
+
+            service.deleteRoom("room-123", "adm", "ADMIN");
+            verify(roomRepository).delete(sampleRoom);
+        }
+
+        @Test
         @DisplayName("Deve enviar reação imediata via WebSocket sem tocar no banco")
         void shouldBroadcastReaction() {
-            service.sendReaction("room-123", "🎉");
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(sampleRoom));
 
-            verify(webSocketHandler).broadcastReaction("room-123", "🎉");
+            service.sendReaction("room-123", "{\"emoji\":\"🎉\",\"uid\":\"forjado\"}", "user-creator", "MEMBER");
+
+            // remetente é o do JWT, nunca o do corpo
+            verify(webSocketHandler).broadcastReaction(eq("room-123"), org.mockito.ArgumentMatchers.argThat(json ->
+                    json.contains("\"uid\":\"user-creator\"") && json.contains("🎉") && !json.contains("forjado")));
             verifyNoInteractions(roundRepository, voteRepository);
+        }
+    }
+
+    @Nested
+    @DisplayName("Revelar e limpar votos são do facilitador")
+    class FacilitatorOnlyTests {
+
+        private PokerRoom revealedState(boolean revealed) {
+            return PokerRoom.builder().id("room-123").creatorId("user-creator").title("t").deckType("fibonacci")
+                    .votesRevealed(revealed).build();
+        }
+
+        private PokerRoom incoming(boolean revealed) {
+            return PokerRoom.builder().id("room-123").creatorId("user-creator").title("t").deckType("fibonacci")
+                    .votesRevealed(revealed).build();
+        }
+
+        private void participantIn(String userId) {
+            lenient().when(participantRepository.existsById("room-123_" + userId)).thenReturn(true);
+            lenient().when(participantRepository.findById("room-123_" + userId)).thenReturn(Optional.of(
+                    PokerParticipant.builder().id(userId).roomId("room-123").role("dev").isFacilitator(false).build()));
+        }
+
+        @Test
+        @DisplayName("Participante comum NÃO revela os votos pela sala (403)")
+        void participantCannotReveal() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(revealedState(false)));
+            participantIn("user-dev");
+
+            ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                    () -> service.saveOrUpdateRoom(incoming(true), "user-dev", "MEMBER"));
+
+            assertEquals(HttpStatus.FORBIDDEN, e.getStatusCode());
+            verify(roomRepository, never()).saveAndFlush(any());
+        }
+
+        @Test
+        @DisplayName("Participante comum NÃO desfaz a revelação: o estado do servidor vale")
+        void participantCannotUnreveal() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(revealedState(true)));
+            participantIn("user-dev");
+            when(roomRepository.saveAndFlush(any())).thenAnswer(i -> i.getArgument(0));
+
+            PokerRoom saved = service.saveOrUpdateRoom(incoming(false), "user-dev", "MEMBER");
+
+            assertTrue(Boolean.TRUE.equals(saved.getVotesRevealed()));
+        }
+
+        @Test
+        @DisplayName("Facilitador (criador) revela normalmente")
+        void creatorReveals() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(revealedState(false)));
+            when(roomRepository.saveAndFlush(any())).thenAnswer(i -> i.getArgument(0));
+
+            PokerRoom saved = service.saveOrUpdateRoom(incoming(true), "user-creator", "MEMBER");
+
+            assertTrue(Boolean.TRUE.equals(saved.getVotesRevealed()));
+        }
+
+        @Test
+        @DisplayName("Participante NÃO revela uma tarefa nova na sala assíncrona (403)")
+        void participantCannotRevealIssue() {
+            PokerRoom current = revealedState(false);
+            current.setRevealedIssues(new com.fasterxml.jackson.databind.ObjectMapper().createArrayNode().add("a"));
+            PokerRoom next = incoming(false);
+            next.setRevealedIssues(new com.fasterxml.jackson.databind.ObjectMapper().createArrayNode().add("a").add("b"));
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(current));
+            participantIn("user-dev");
+
+            ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                    () -> service.saveOrUpdateRoom(next, "user-dev", "MEMBER"));
+
+            assertEquals(HttpStatus.FORBIDDEN, e.getStatusCode());
+        }
+
+        @Test
+        @DisplayName("Participante NÃO limpa os votos (403); facilitador limpa")
+        void clearVotesIsFacilitatorOnly() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(revealedState(true)));
+            participantIn("user-dev");
+
+            ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                    () -> service.clearVotes("room-123", "user-dev", "MEMBER"));
+            assertEquals(HttpStatus.FORBIDDEN, e.getStatusCode());
+            verify(voteRepository, never()).deleteByRoomId(anyString());
+
+            service.clearVotes("room-123", "user-creator", "MEMBER");
+            verify(voteRepository).deleteByRoomId("room-123");
+        }
+
+        @Test
+        @DisplayName("Participante NÃO apaga o histórico de rodadas (403)")
+        void clearRoundsIsFacilitatorOnly() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(revealedState(true)));
+            participantIn("user-dev");
+
+            assertThrows(ResponseStatusException.class, () -> service.clearRounds("room-123", "user-dev", "MEMBER"));
+            verify(roundRepository, never()).deleteByRoomId(anyString());
+        }
+
+        @Test
+        @DisplayName("Participante NÃO vira facilitador mandando role=organizador na entrada")
+        void participantCannotPromoteViaRole() {
+            when(roomRepository.findById("room-123")).thenReturn(Optional.of(revealedState(false)));
+            when(participantRepository.findById("room-123_user-b")).thenReturn(Optional.empty());
+            PokerParticipant p = PokerParticipant.builder().id("user-b").roomId("room-123").nickname("B").role("organizador").isFacilitator(false).build();
+
+            service.joinRoom(p, "user-b", "MEMBER");
+
+            verify(participantRepository).upsertParticipant(
+                    eq("room-123_user-b"), eq("user-b"), eq("room-123"), any(), any(), eq("dev"), eq(false), any(), anyString());
         }
     }
 }

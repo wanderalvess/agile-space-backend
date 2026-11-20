@@ -1,0 +1,37 @@
+const WebSocket = require(process.env.WS_MODULE || 'ws');
+const fs = require('fs'), path = require('path');
+const tokens = JSON.parse(fs.readFileSync(path.join(__dirname, 'tokens.json'), 'utf8'));
+const BASE = process.env.API_BASE || 'http://localhost:8002/api';
+const T = e => tokens[e + '@totvs.com.br'].token, ID = e => tokens[e + '@totvs.com.br'].id;
+const api = async (m, p, who, body) => { const r = await fetch(BASE + p, { method: m, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + T(who) }, body: body ? JSON.stringify(body) : undefined }); let j = null; try { j = await r.json(); } catch (e) {} return [r.status, j]; };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+(async () => {
+  const bid = require('crypto').randomUUID();
+  await api('POST', '/retros', 'ana.master', { id: bid, creatorId: ID('ana.master'), isCardsRevealed: false, votingStatus: 'disabled', maxVotesPerParticipant: 2, timer: { status: 'stopped', endTime: null, initialDuration: 300, remainingOnPause: 300 }, title: 'Retro WS', team: 'ANATIME', squadId: 'ANATIME', createdAt: '2026-10-09T10:00:00Z', participantIds: [ID('ana.master')], columns: [{ id: 'bom', title: 'Bom', theme: 'success', order: 0 }], templateKey: 'custom' });
+  await api('POST', `/retros/${bid}/participants`, 'ana.master', { id: ID('ana.master'), boardId: bid, nickname: 'Ana', isCreator: true });
+  await api('POST', `/retros/${bid}/participants`, 'bruno.dev', { id: ID('bruno.dev'), boardId: bid, nickname: 'Bruno' });
+  const ws = new WebSocket(`${(process.env.WS_BASE || 'ws://localhost:8002')}/ws/retro/${bid}?token=${encodeURIComponent(T('ana.master'))}`);
+  await new Promise(r => ws.on('open', r));
+  await sleep(500);
+  let [s, j] = await api('POST', `/retros/${bid}/transfer-control`, 'bruno.dev');
+  console.log((s === 409 ? 'PASS' : 'FAIL') + ' facilitadora conectada: participante NÃO assume (409)', s, j && j.message);
+  [s, j] = await api('POST', `/retros/${bid}/transfer-control`, 'adm.root');
+  console.log((s === 200 ? 'PASS' : 'FAIL') + ' ADMIN assume mesmo com facilitadora conectada', s);
+  ws.close();
+  await sleep(1500);
+  // novo quadro: ana desconecta; depois de 45 s de tolerância o participante pode assumir
+  const bid2 = require('crypto').randomUUID();
+  await api('POST', '/retros', 'ana.master', { id: bid2, creatorId: ID('ana.master'), isCardsRevealed: false, votingStatus: 'disabled', maxVotesPerParticipant: 2, timer: { status: 'stopped', endTime: null, initialDuration: 300, remainingOnPause: 300 }, title: 'Retro WS2', team: 'ANATIME', squadId: 'ANATIME', createdAt: '2026-10-09T10:00:00Z', participantIds: [ID('ana.master')], columns: [{ id: 'bom', title: 'Bom', theme: 'success', order: 0 }], templateKey: 'custom' });
+  await api('POST', `/retros/${bid2}/participants`, 'bruno.dev', { id: ID('bruno.dev'), boardId: bid2, nickname: 'Bruno' });
+  const ws2 = new WebSocket(`${(process.env.WS_BASE || 'ws://localhost:8002')}/ws/retro/${bid2}?token=${encodeURIComponent(T('ana.master'))}`);
+  await new Promise(r => ws2.on('open', r));
+  ws2.close();
+  await sleep(1000);
+  [s, j] = await api('POST', `/retros/${bid2}/transfer-control`, 'bruno.dev');
+  console.log((s === 409 ? 'PASS' : 'INFO') + ' logo após desconectar (dentro da tolerância de reconexão):', s);
+  console.log('aguardando 47 s da tolerância...');
+  await sleep(47000);
+  [s, j] = await api('POST', `/retros/${bid2}/transfer-control`, 'bruno.dev');
+  console.log((s === 200 ? 'PASS' : 'FAIL') + ' facilitadora ausente há mais de 45 s: participante assume', s);
+  process.exit(0);
+})();

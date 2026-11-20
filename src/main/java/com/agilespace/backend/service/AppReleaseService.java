@@ -4,7 +4,9 @@ import com.agilespace.backend.domain.AppRelease;
 import com.agilespace.backend.dto.AppReleaseDTO;
 import com.agilespace.backend.repository.AppReleaseRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -230,11 +232,11 @@ public class AppReleaseService {
     @Transactional
     public AppRelease createRelease(AppReleaseDTO dto) {
         if (dto.getTag() == null || dto.getTag().trim().isEmpty()) {
-            throw new IllegalArgumentException("A tag da versão é obrigatória.");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A tag da versão é obrigatória.");
         }
 
         if (repository.existsByTag(dto.getTag().trim())) {
-            throw new IllegalArgumentException("Já existe uma versão cadastrada com a tag " + dto.getTag());
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma versão cadastrada com a tag " + dto.getTag().trim());
         }
 
         AppRelease release = AppRelease.builder()
@@ -259,11 +261,11 @@ public class AppReleaseService {
     @Transactional
     public AppRelease updateRelease(String id, AppReleaseDTO dto) {
         AppRelease existing = repository.findById(id)
-                .orElseThrow(() -> new NoSuchElementException("Versão não encontrada com id: " + id));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Versão não encontrada."));
 
         if (dto.getTag() != null && !dto.getTag().trim().equals(existing.getTag())) {
             if (repository.existsByTag(dto.getTag().trim())) {
-                throw new IllegalArgumentException("Já existe uma versão cadastrada com a tag " + dto.getTag());
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Já existe uma versão cadastrada com a tag " + dto.getTag().trim());
             }
             existing.setTag(dto.getTag().trim());
         }
@@ -284,7 +286,7 @@ public class AppReleaseService {
     @Transactional
     public void deleteRelease(String id) {
         if (!repository.existsById(id)) {
-            throw new NoSuchElementException("Versão não encontrada com id: " + id);
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Versão não encontrada.");
         }
         repository.deleteById(id);
     }

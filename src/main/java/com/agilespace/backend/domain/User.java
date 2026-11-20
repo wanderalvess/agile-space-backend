@@ -1,8 +1,10 @@
 package com.agilespace.backend.domain;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.*;
+import java.time.Instant;
 import java.time.LocalDateTime;
 
 @Entity
@@ -44,7 +46,7 @@ public class User {
      *  Nunca confundir com o cargo de negócio do usuário — isso vive em {@link #jobTitle}. */
     @Column(name = "role")
     @Builder.Default
-    private String role = "MEMBER"; // "ADMIN", "LEAD", "MEMBER" — ver UserRole
+    private String role = "MEMBER"; // "ADMIN" ou "MEMBER" (LEAD legado lido como MEMBER) — ver UserRole
 
     public String getRole() {
         return role != null ? role : "MEMBER";
@@ -64,8 +66,14 @@ public class User {
     @Column(name = "default_project_id")
     private String defaultProjectId; // FK lógica para ProjectConfig
 
-    @Column(name = "squad_id")
-    private String squadId;
+    /**
+     * Squad ativa para EXIBIÇÃO no JSON ({@code squadId}). Nunca persistida: a coluna {@code users.squad_id} foi
+     * aposentada (Etapa 5 do vínculo; o vínculo vive em project_member_roles). Só leitura na API: o valor que um
+     * cliente antigo enviar em {@code squadId} é descartado. Preenchido por UserService a partir do MembershipService.
+     */
+    @Transient
+    @JsonProperty(value = "squadId", access = JsonProperty.Access.READ_ONLY)
+    private String activeSquadId;
 
     @Column(name = "segment_name")
     private String segmentName; // Ex: "Canal Corporativo"
@@ -75,6 +83,16 @@ public class User {
 
     @Column(name = "avatar_seed")
     private String avatarSeed;
+
+    /** Chave da foto de perfil no FileStorage. Interna: o cliente só vê photoUrl (UserPhotoService). */
+    @JsonIgnore
+    @Column(name = "photo_key")
+    private String photoKey;
+
+    /** Quando a foto foi trocada; versiona a URL e o ETag. */
+    @JsonIgnore
+    @Column(name = "photo_updated_at")
+    private Instant photoUpdatedAt;
 
     @Column(name = "daily_hours")
     private Integer dailyHours;
@@ -89,6 +107,41 @@ public class User {
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
+
+    /** Último login por senha (preenchido pelo AuthService.login). Null = nunca entrou desde que o campo existe. */
+    @Column(name = "last_login_at")
+    private LocalDateTime lastLoginAt;
+
+    /**
+     * Sessões (JWT) emitidas antes deste instante (epoch, segundos) deixam de valer. Preenchido no logout e na
+     * redefinição de senha. Null = nenhuma sessão invalidada.
+     */
+    @Column(name = "tokens_valid_after")
+    @JsonIgnore
+    private Long tokensValidAfter;
+
+    /**
+     * Marcam se o corpo da requisição trouxe "role"/"active" de verdade. O getter de role devolve "MEMBER" e
+     * active nasce true quando omitidos; sem este rastro um admin salvando só o nome rebaixaria e reativaria
+     * a conta. Só o Jackson (setters) liga; entidade carregada do banco e builder não ligam.
+     */
+    @Transient
+    @JsonIgnore
+    private boolean roleExplicit;
+
+    @Transient
+    @JsonIgnore
+    private boolean activeExplicit;
+
+    public void setRole(String role) {
+        this.role = role;
+        this.roleExplicit = true;
+    }
+
+    public void setActive(boolean active) {
+        this.active = active;
+        this.activeExplicit = true;
+    }
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;

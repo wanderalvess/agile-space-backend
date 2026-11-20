@@ -6,6 +6,7 @@ import com.agilespace.backend.domain.User;
 import com.agilespace.backend.repository.AuditLogRepository;
 import com.agilespace.backend.repository.PasswordResetRequestRepository;
 import com.agilespace.backend.repository.UserRepository;
+import com.agilespace.backend.security.ApiKeyHashing;
 import com.agilespace.backend.security.PasswordUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,11 +30,10 @@ public class PasswordResetService {
     private final UserRepository userRepository;
     private final AuditLogRepository auditLogRepository;
 
-    private static final String CHAR_LOWER = "abcdefghijklmnopqrstuvwxyz";
-    private static final String CHAR_UPPER = CHAR_LOWER.toUpperCase();
-    private static final String NUMBER = "0123456789";
-    private static final String PASSWORD_ALLOW_BASE = CHAR_LOWER + CHAR_UPPER + NUMBER;
-    private static final int TEMP_PASSWORD_LENGTH = 16;
+    /** Opcional (fora do construtor): limpa o cache de estado da conta quando as sessões são invalidadas. */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.agilespace.backend.security.UserSessionGuard sessionGuard;
+
     private static final SecureRandom random = new SecureRandom();
 
     /**
@@ -47,6 +47,15 @@ public class PasswordResetService {
         Optional<User> userOpt = userRepository.findByEmail(cleanEmail);
 
         String userName = userOpt.map(User::getName).orElse(null);
+
+        // Pedido repetido enquanto há um pendente não cria outra linha: o endpoint é público e
+        // sem isso daria para lotar a fila do admin.
+        Optional<PasswordResetRequest> pending = resetRequestRepository.findByStatusOrderByRequestedAtDesc("PENDING").stream()
+                .filter(r -> cleanEmail.equalsIgnoreCase(r.getUserEmail()))
+                .findFirst();
+        if (pending.isPresent()) {
+            return pending.get();
+        }
 
         PasswordResetRequest resetReq = PasswordResetRequest.builder()
                 .id(UUID.randomUUID().toString())
@@ -73,58 +82,98 @@ public class PasswordResetService {
         return resetReq;
     }
 
-    @Transactional(readOnly = true)
+    /** O link de redefinição vale por 2 horas e só funciona uma vez. */
+    static final long RESET_LINK_MINUTES = 120;
+    private static final int MIN_PASSWORD = 8;
+    private static final int MAX_PASSWORD = 128;
+
+    @Transactional
     public List<PasswordResetRequest> getAllRequests() {
-        return resetRequestRepository.findAllByOrderByRequestedAtDesc();
+        List<PasswordResetRequest> all = resetRequestRepository.findAllByOrderByRequestedAtDesc();
+        for (PasswordResetRequest r : all) {
+            if (r.getTempPassword() != null) { // legado: senha temporária em claro não existe mais
+                r.setTempPassword(null);
+                resetRequestRepository.save(r);
+            }
+        }
+        return all;
     }
 
+    /**
+     * Aprova o pedido e gera o link de redefinição. A senha atual NÃO muda e nenhuma senha em claro é criada:
+     * o token vai só na resposta (campo resetToken, uma vez) e o banco guarda apenas o hash. Gerar de novo
+     * invalida o link anterior.
+     */
     @Transactional
     public PasswordResetRequest approveReset(String requestId, String approvedBy) {
         PasswordResetRequest resetReq = resetRequestRepository.findById(requestId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Solicitação de redefinição não encontrada"));
 
-        if ("APPROVED".equalsIgnoreCase(resetReq.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Esta solicitação já foi aprovada anteriormente");
-        }
-
-        // Gera senha temporária segura ex: Temp#7a9x
-        String tempPassword = generateTempPassword();
-
-        // Atualiza a senha no banco de dados para o usuário correspondente
-        Optional<User> userOpt = userRepository.findByEmail(resetReq.getUserEmail());
-        if (userOpt.isPresent()) {
-            User user = userOpt.get();
-            user.setPasswordHash(PasswordUtil.hashPassword(tempPassword));
-            userRepository.save(user);
-        }
-
+        String rawToken = generateToken();
         resetReq.setStatus("APPROVED");
-        resetReq.setTempPassword(tempPassword);
+        resetReq.setTempPassword(null);
+        resetReq.setTokenHash(ApiKeyHashing.sha256Hex(rawToken));
+        resetReq.setTokenExpiresAt(LocalDateTime.now().plusMinutes(RESET_LINK_MINUTES));
+        resetReq.setUsedAt(null);
         resetReq.setApprovedAt(LocalDateTime.now());
         resetReq.setApprovedBy(approvedBy != null ? approvedBy : "ADMIN");
         resetReq = resetRequestRepository.save(resetReq);
+        resetReq.setResetToken(rawToken);
 
-        // Log de Auditoria
-        AuditLog audit = AuditLog.builder()
+        auditLogRepository.save(AuditLog.builder()
                 .id(UUID.randomUUID().toString())
-                .action("PASSWORD_RESET_APPROVED")
+                .action("PASSWORD_RESET_LINK_ISSUED")
                 .performedBy(resetReq.getApprovedBy())
-                .details("Senha temporária gerada e aprovada para " + resetReq.getUserEmail())
+                .details("Link de redefinição gerado para " + resetReq.getUserEmail())
                 .createdAt(LocalDateTime.now())
-                .build();
-
-        auditLogRepository.save(audit);
-        log.info("Reset de senha aprovado por {} para e-mail: {}", resetReq.getApprovedBy(), resetReq.getUserEmail());
+                .build());
+        log.info("Link de redefinição gerado por {} para e-mail: {}", resetReq.getApprovedBy(), resetReq.getUserEmail());
 
         return resetReq;
     }
 
-    private String generateTempPassword() {
-        StringBuilder sb = new StringBuilder(TEMP_PASSWORD_LENGTH);
-        for (int i = 0; i < TEMP_PASSWORD_LENGTH; i++) {
-            int rndCharAt = random.nextInt(PASSWORD_ALLOW_BASE.length());
-            sb.append(PASSWORD_ALLOW_BASE.charAt(rndCharAt));
+    /**
+     * Conclui a redefinição com o token do link: a pessoa define a própria senha. Qualquer falha (token
+     * desconhecido, vencido ou já usado) responde igual, para o endpoint público não ajudar quem adivinha.
+     */
+    @Transactional
+    public void completeReset(String rawToken, String newPassword) {
+        if (newPassword == null || newPassword.length() < MIN_PASSWORD || newPassword.length() > MAX_PASSWORD) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Senha deve ter entre " + MIN_PASSWORD + " e " + MAX_PASSWORD + " caracteres");
         }
-        return sb.toString();
+        PasswordResetRequest req = (rawToken == null || rawToken.isBlank()) ? null
+                : resetRequestRepository.findByTokenHash(ApiKeyHashing.sha256Hex(rawToken.trim())).orElse(null);
+        if (req == null || req.getUsedAt() != null || !"APPROVED".equalsIgnoreCase(req.getStatus())
+                || req.getTokenExpiresAt() == null || req.getTokenExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Link de redefinição inválido ou expirado");
+        }
+        User user = userRepository.findByEmail(req.getUserEmail())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Link de redefinição inválido ou expirado"));
+        user.setPasswordHash(PasswordUtil.hashPassword(newPassword));
+        // Quem tinha a senha antiga (ou um token roubado) perde as sessões abertas.
+        user.setTokensValidAfter(java.time.Instant.now().getEpochSecond());
+        userRepository.save(user);
+        if (sessionGuard != null) {
+            sessionGuard.evict(user.getId());
+        }
+        req.setUsedAt(LocalDateTime.now());
+        req.setStatus("COMPLETED");
+        req.setTokenHash(null);
+        resetRequestRepository.save(req);
+
+        auditLogRepository.save(AuditLog.builder()
+                .id(UUID.randomUUID().toString())
+                .action("PASSWORD_RESET_COMPLETED")
+                .performedBy(user.getEmail())
+                .details("Senha redefinida pelo link para " + user.getEmail())
+                .createdAt(LocalDateTime.now())
+                .build());
+    }
+
+    private static String generateToken() {
+        byte[] bytes = new byte[32];
+        random.nextBytes(bytes);
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 }

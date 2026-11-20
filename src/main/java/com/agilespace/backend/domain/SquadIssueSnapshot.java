@@ -127,7 +127,7 @@ public class SquadIssueSnapshot {
     // que o sync real do Squad popula (type/status/assignee/estimate vindos do Jira de
     // verdade), então commit/estimativa/decisão de showcase passam a enriquecer o dado real
     // em vez de um casco paralelo nunca sincronizado. Ver plano de unificação Squad Pulse +
-    // jiradash, Fase 1. "ceremonyStatus" é o estágio da cerimônia (backlog/committed/
+    // Fase 1. "ceremonyStatus" é o estágio da cerimônia (backlog/committed/
     // delivered/rejected/carried_over) — nunca confundir com "status", que é o status bruto
     // do Jira (To Do/In Progress/Done).
     @Column(name = "ceremony_status")
@@ -141,4 +141,29 @@ public class SquadIssueSnapshot {
 
     @Column(name = "decided_at")
     private String decidedAt;
+
+    // --- Sprint Planner (V89) ---
+    /** sprint_id das linhas que só existem por causa do backlog do planner (fora de qualquer sprint sincronizada). */
+    public static final String PLANNER_BACKLOG_SPRINT_ID = "PLANNER_BACKLOG";
+
+    @Column(name = "issue_type_id")
+    private String issueTypeId;
+
+    @Column(name = "status_id")
+    private String statusId;
+
+    /** timeoriginalestimate da própria issue (sem aggregate*); estimateSec continua agregado na pai. */
+    @Column(name = "own_original_estimate_sec")
+    private Long ownOriginalEstimateSec;
+
+    /** timeestimate da própria issue (sem aggregate*). */
+    @Column(name = "own_remaining_sec")
+    private Long ownRemainingSec;
+
+    @Builder.Default
+    @Column(name = "in_planner_backlog", nullable = false)
+    private boolean inPlannerBacklog = false;
+
+    @Column(name = "planner_synced_at")
+    private String plannerSyncedAt;
 }

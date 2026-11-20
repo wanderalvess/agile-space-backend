@@ -4,6 +4,8 @@ import com.agilespace.backend.domain.PokerRound;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import java.time.LocalDateTime;
+import java.util.Collection;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -13,6 +15,10 @@ import java.util.List;
 @Repository
 public interface PokerRoundRepository extends JpaRepository<PokerRound, String> {
     List<PokerRound> findByRoomId(String roomId);
+
+    /** Rodada mais recente da sala (ISO em texto); null sem rodadas. */
+    @Query("SELECT MAX(r.timestamp) FROM PokerRound r WHERE r.roomId = :roomId")
+    String latestTimestamp(@Param("roomId") String roomId);
 
     @Query("SELECT r FROM PokerRound r WHERE r.roomId = :roomId ORDER BY r.timestamp DESC")
     List<PokerRound> findRecentRounds(@Param("roomId") String roomId, Pageable pageable);
@@ -28,4 +34,6 @@ public interface PokerRoundRepository extends JpaRepository<PokerRound, String> 
     @Query("SELECT r FROM PokerRound r WHERE LOWER(r.topic) LIKE LOWER(CONCAT('%', :q, '%')) " +
             "OR LOWER(r.note) LIKE LOWER(CONCAT('%', :q, '%')) ORDER BY r.timestamp DESC")
     Page<PokerRound> searchByTopicOrNote(@Param("q") String query, Pageable pageable);
+
+    List<PokerRound> findByRoomIdIn(Collection<String> roomIds);
 }

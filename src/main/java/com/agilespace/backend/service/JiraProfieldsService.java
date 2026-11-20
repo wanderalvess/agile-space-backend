@@ -14,19 +14,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.*;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.RestTemplate;
 
-import javax.net.ssl.HttpsURLConnection;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
-import java.io.IOException;
-import java.net.HttpURLConnection;
-import java.security.SecureRandom;
-import java.security.cert.X509Certificate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -42,34 +32,20 @@ public class JiraProfieldsService {
     private final JiraAdminService jiraAdminService;
     private final JiraService jiraService;
     private final org.springframework.transaction.PlatformTransactionManager transactionManager;
+    private final SquadMemberExclusions squadMemberExclusions;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    private RestTemplate createSslLenientRestTemplate() {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory() {
-            @Override
-            protected void prepareConnection(HttpURLConnection connection, String httpMethod) throws IOException {
-                if (connection instanceof HttpsURLConnection) {
-                    try {
-                        SSLContext sslContext = SSLContext.getInstance("TLS");
-                        sslContext.init(null, new TrustManager[]{
-                            new X509TrustManager() {
-                                public X509Certificate[] getAcceptedIssuers() { return null; }
-                                public void checkClientTrusted(X509Certificate[] certs, String authType) {}
-                                public void checkServerTrusted(X509Certificate[] certs, String authType) {}
-                            }
-                        }, new SecureRandom());
-                        ((HttpsURLConnection) connection).setSSLSocketFactory(sslContext.getSocketFactory());
-                        ((HttpsURLConnection) connection).setHostnameVerifier((hostname, session) -> true);
-                    } catch (Exception e) {
-                        log.error("Erro ao configurar SSL leniente para Profields", e);
-                    }
-                }
-                super.prepareConnection(connection, httpMethod);
-            }
-        };
-        factory.setConnectTimeout(15000);
-        factory.setReadTimeout(45000);
-        return new RestTemplate(factory);
+    /** Fusão de duplicatas do roster após a importação (opcional: ausente em testes unitários). */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private RosterMergeService rosterMerge;
+
+    /** Cargo de quem entra sem um, a partir da role do Jira (opcional: ausente em testes unitários). */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CargoPreenchimento cargoPreenchimento;
+
+    /** GET no Jira pelo JiraService: TLS estrito primeiro, host bloqueado, redirecionamento só no mesmo host, 429 com retry. */
+    private ResponseEntity<String> jiraGet(String url, HttpEntity<Void> entity) {
+        return jiraService.exchangeGet(java.net.URI.create(url), entity);
     }
 
     /**
@@ -89,25 +65,64 @@ public class JiraProfieldsService {
     public ProjectDetailDto syncProjectFromProfields(String domain, String projectKey, String token, User creator) {
         requireCanOverwriteProject(projectKey, creator);
         // Consulta ao Jira (rede, até dezenas de segundos) fora da transação: só a gravação segura conexão do pool.
-        ProfieldsSnapshot snapshot = fetchProfieldsSnapshot(domain, projectKey, token, creator);
-        return persistImport(snapshot.project(), snapshot.members());
+        ProfieldsSnapshot snapshot = fetchProfieldsSnapshot(domain, projectKey, token, creator, false);
+        if (creator != null && !canImportTeam(creator, snapshot.members())) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN, TEAM_MANAGER_ONLY_MESSAGE);
+        }
+        return persistImport(snapshot.project(), snapshot.members(), snapshot.members());
     }
 
-    /** Grava projeto + time numa transação curta (troca o time inteiro). */
-    private ProjectDetailDto persistImport(ProjectConfig project, List<ProjectMemberRole> members) {
+    /**
+     * Grava projeto + time numa transação curta. `jiraMembers` é tudo o que o Jira devolveu (inclusive quem a pessoa
+     * desmarcou na prévia): serve para distinguir "o Jira deixou de listar" de "desmarcado na prévia".
+     *
+     * <p>O time NÃO é mais apagado e recriado: {@link TeamImportPlanner} faz upsert pela chave natural (conta do Jira /
+     * e-mail), mantendo o id das linhas (link_requests.member_id aponta para ele), preservando liderança cadastrada à mão
+     * e toda linha com user_id, e removendo só linha legado/JIRA sem conta que o Jira deixou de listar.
+     */
+    ProjectDetailDto persistImport(ProjectConfig project, List<ProjectMemberRole> members, List<ProjectMemberRole> jiraMembers) {
+        ProjectDetailDto result = persistImportRows(project, members, jiraMembers);
+        // A importação do time (project_member_roles) não cria linhas do roster, mas deixa o roster coerente: pares da mesma
+        // pessoa (JIRAUSER x usuário) viram uma linha só, sem perder e-mail, vínculo nem horas calibradas. Fora da transação
+        // da importação e sem derrubá-la.
+        if (rosterMerge != null) {
+            try {
+                int n = rosterMerge.consolidate(project.getId());
+                if (n > 0) log.info("Reimportação do time {}: {} linha(s) duplicada(s) do roster fundida(s).", project.getId(), n);
+            } catch (Exception e) {
+                log.warn("Reimportação do time {}: não foi possível fundir duplicatas do roster: {}", project.getId(), e.getMessage());
+            }
+        }
+        return result;
+    }
+
+    private ProjectDetailDto persistImportRows(ProjectConfig project, List<ProjectMemberRole> members, List<ProjectMemberRole> jiraMembers) {
         return new org.springframework.transaction.support.TransactionTemplate(transactionManager).execute(status -> {
             String cleanKey = project.getId();
             ProjectConfig saved = projectConfigRepository.save(project);
-            projectMemberRoleRepository.deleteByProjectId(cleanKey);
-            projectMemberRoleRepository.flush(); // Garante que a exclusão ocorreu antes do insert
-            List<ProjectMemberRole> savedMembers = projectMemberRoleRepository.saveAll(members);
+            // E-mail sempre sem espaços e em minúsculas: o casamento e a unicidade não dependem de caixa.
+            for (ProjectMemberRole r : members) r.setEmail(PersonIdentity.normEmail(r.getEmail()));
+            for (ProjectMemberRole r : jiraMembers) r.setEmail(PersonIdentity.normEmail(r.getEmail()));
+            List<ProjectMemberRole> existing = projectMemberRoleRepository.findByProjectId(cleanKey);
+            // Quem a liderança removeu à mão do time não volta só porque o Jira ainda lista a pessoa.
+            SquadMemberExclusions.Removed removedByHand = SquadMemberExclusions.of(squadMemberExclusions, cleanKey);
+            TeamImportPlanner.Plan plan = TeamImportPlanner.plan(existing == null ? List.of() : existing, members, jiraMembers,
+                    removedByHand.isEmpty() ? null : removedByHand::matches);
+            if (!plan.toDelete().isEmpty()) {
+                projectMemberRoleRepository.deleteAll(plan.toDelete());
+            }
+            List<ProjectMemberRole> toWrite = new ArrayList<>(plan.toUpdate());
+            toWrite.addAll(plan.toInsert());
+            projectMemberRoleRepository.saveAll(toWrite);
             projectMemberRoleRepository.flush();
-            return toDetailDto(saved, savedMembers);
+            log.info("Reimportação do time {}: {} linha(s) nova(s), {} atualizada(s) no lugar, {} removida(s) (do Jira, sem conta), {} no total",
+                    cleanKey, plan.toInsert().size(), plan.toUpdate().size(), plan.toDelete().size(), plan.finalRows().size());
+            return toDetailDto(saved, plan.finalRows());
         });
     }
 
     /**
-     * Sync/confirm apagam e recriam o time do projeto. Projeto que já tem time só pode ser reimportado
+     * Sync/confirm reescrevem o time do projeto (upsert, ver TeamImportPlanner). Projeto que já tem time só pode ser reimportado
      * por ADMIN ou por quem já é liderança dele — senão qualquer usuário logado sobrescreveria time e
      * liderança de um projeto alheio apontando o sync para um "Jira" que ele controla.
      */
@@ -123,6 +138,79 @@ public class JiraProfieldsService {
                     "Este projeto já tem time cadastrado. Só a liderança do projeto (ou um admin) pode reimportá-lo.");
         }
     }
+
+    /** Papéis que podem cadastrar equipes: Agile Master (e o Scrum Master, mesmo cargo) e People Lead. */
+    private static final Set<String> TEAM_MANAGER_ROLE_KEYS = Set.of("AGILE_MASTER", "SCRUM_MASTER", "PEOPLE_LEAD");
+
+    /** User.jobTitle só é gravável por ADMIN (ver UserService), então vale como atribuição de cargo. */
+    private static final Set<String> TEAM_MANAGER_JOB_TITLES = Set.of("agile master", "scrum master", "people lead");
+
+    static boolean isTeamManagerRow(ProjectMemberRole row) {
+        return row != null && row.getRoleKey() != null
+                && TEAM_MANAGER_ROLE_KEYS.contains(row.getRoleKey().toUpperCase(java.util.Locale.ROOT));
+    }
+
+    /**
+     * A linha do roster é desta pessoa? Vínculo explícito (userId), e-mail ou conta do Jira. Nome NÃO conta:
+     * User.name é editável, e a regra decide quem gerencia equipe; um homônimo do Agile Master não pode herdar o poder dele.
+     */
+    static boolean rowMatchesUser(ProjectMemberRole row, User user) {
+        if (row == null || user == null) return false;
+        if (user.getId() != null && user.getId().equals(row.getUserId())) return true;
+        if (notBlank(user.getEmail()) && notBlank(row.getEmail()) && user.getEmail().trim().equalsIgnoreCase(row.getEmail().trim())) return true;
+        if (notBlank(user.getJiraAccountId()) && notBlank(row.getJiraAccountId()) && user.getJiraAccountId().trim().equals(row.getJiraAccountId().trim())) return true;
+        return false;
+    }
+
+    private static boolean notBlank(String s) {
+        return s != null && !s.isBlank();
+    }
+
+    /**
+     * Quem pode criar/importar equipes: ADMIN, quem um admin marcou como Agile Master/People Lead (jobTitle)
+     * ou quem já consta no roster como AM/PL de alguma equipe. Autodeclaração não conta.
+     */
+    boolean canManageTeams(User user) {
+        if (user == null) return false;
+        if ("ADMIN".equalsIgnoreCase(user.getRole())) return true;
+        if (notBlank(user.getJobTitle()) && TEAM_MANAGER_JOB_TITLES.contains(user.getJobTitle().trim().toLowerCase(java.util.Locale.ROOT))) return true;
+        List<ProjectMemberRole> rows = new ArrayList<>();
+        if (user.getId() != null) rows.addAll(projectMemberRoleRepository.findByUserId(user.getId()));
+        if (notBlank(user.getEmail())) rows.addAll(projectMemberRoleRepository.findByEmailIgnoreCase(user.getEmail().trim()));
+        return rows.stream().anyMatch(JiraProfieldsService::isTeamManagerLeadershipRow);
+    }
+
+    /**
+     * Mesmo critério de liderança do gating de squad (SquadAccessService/UserProjectResolverService): a linha precisa
+     * ter isLeadership=true, não só uma roleKey de AM/PL. Linhas criadas por convite/join nunca são liderança, então
+     * um nome de papel "Agile Master" digitado num convite não vira poder de gerir equipes.
+     */
+    static boolean isTeamManagerLeadershipRow(ProjectMemberRole row) {
+        return isTeamManagerRow(row) && row.isLeadership();
+    }
+
+    /** Papel {nome, chave} com que o fundador de uma equipe manual entra: o que ele já tem como AM/PL. */
+    private String[] founderRoleFor(User user) {
+        List<ProjectMemberRole> rows = new ArrayList<>();
+        if (user.getId() != null) rows.addAll(projectMemberRoleRepository.findByUserId(user.getId()));
+        if (notBlank(user.getEmail())) rows.addAll(projectMemberRoleRepository.findByEmailIgnoreCase(user.getEmail().trim()));
+        boolean agile = rows.stream().anyMatch(r -> r.isLeadership() && r.getRoleKey() != null
+                && ("AGILE_MASTER".equalsIgnoreCase(r.getRoleKey()) || "SCRUM_MASTER".equalsIgnoreCase(r.getRoleKey())));
+        boolean people = rows.stream().anyMatch(r -> r.isLeadership() && "PEOPLE_LEAD".equalsIgnoreCase(r.getRoleKey()));
+        String title = notBlank(user.getJobTitle()) ? user.getJobTitle().trim().toLowerCase(java.util.Locale.ROOT) : "";
+        if (agile || "agile master".equals(title) || "scrum master".equals(title)) return new String[] {"Agile Master", "AGILE_MASTER"};
+        if (people || "people lead".equals(title)) return new String[] {"People Lead", "PEOPLE_LEAD"};
+        return new String[] {"Developer", "DEVELOPER"};
+    }
+
+    /** Pode importar esta equipe: gerencia equipes em geral, ou o Jira lista a pessoa como AM/PL nela. */
+    private boolean canImportTeam(User user, List<ProjectMemberRole> jiraMembers) {
+        if (canManageTeams(user)) return true;
+        return jiraMembers.stream().anyMatch(m -> isTeamManagerRow(m) && rowMatchesUser(m, user));
+    }
+
+    private static final String TEAM_MANAGER_ONLY_MESSAGE =
+            "Só Agile Master ou People Lead cadastram equipes. Peça a quem lidera o seu time para importá-lo, ou use um link de convite.";
 
     /** Cargos sem governança: qualquer um pode ser escolhido na prévia da importação. */
     private static final Set<String> SELF_ASSIGNABLE_ROLES = Set.of(
@@ -142,8 +230,11 @@ public class JiraProfieldsService {
         }
         requireCanOverwriteProject(projectKey, creator);
         ProfieldsSnapshot base = fetchProfieldsSnapshot(domain, projectKey, token, creator, false);
+        if (creator != null && !canImportTeam(creator, base.members())) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN, TEAM_MANAGER_ONLY_MESSAGE);
+        }
         ProfieldsSnapshot applied = applyConfirmation(base, request, creator);
-        return persistImport(applied.project(), applied.members());
+        return persistImport(applied.project(), applied.members(), base.members());
     }
 
 
@@ -191,7 +282,10 @@ public class JiraProfieldsService {
             }
             String upper = finalRole.toUpperCase(java.util.Locale.ROOT);
             String userId = base.getUserId();
-            if (req.isLinkToMe() && creator != null && (userId == null || userId.equals(creator.getId()))) {
+            String rowSource = com.agilespace.backend.domain.MembershipSource.JIRA;
+            if (req.isLinkToMe() && creator != null && (userId == null || userId.equals(creator.getId()))
+                    && (!base.isLeadership() || rowMatchesUser(base, creator))) {
+                if (userId == null) rowSource = com.agilespace.backend.domain.MembershipSource.CLAIM; // "sou eu" na prévia
                 userId = creator.getId();
             }
             if (creator != null && creator.getId().equals(userId)) creatorLinked = true;
@@ -206,6 +300,7 @@ public class JiraProfieldsService {
                     .avatarUrl(base.getAvatarUrl())
                     .userId(userId)
                     .isLeadership(LEADERSHIP_ROLE_NAMES.contains(upper))
+                    .source(rowSource)
                     .build());
         }
 
@@ -219,6 +314,7 @@ public class JiraProfieldsService {
                     .email(creator.getEmail())
                     .userId(creator.getId())
                     .isLeadership(false)
+                    .source(com.agilespace.backend.domain.MembershipSource.MANUAL)
                     .build());
         }
 
@@ -233,8 +329,10 @@ public class JiraProfieldsService {
      * Usado pelo onboarding pra o usuário conferir o que vai entrar antes de confirmar.
      */
     public ProjectDetailDto previewProjectFromProfields(String domain, String projectKey, String token, User creator) {
-        ProfieldsSnapshot snapshot = fetchProfieldsSnapshot(domain, projectKey, token, creator);
-        return toDetailDto(snapshot.project(), snapshot.members());
+        ProfieldsSnapshot snapshot = fetchProfieldsSnapshot(domain, projectKey, token, creator, false);
+        ProjectDetailDto dto = toDetailDto(snapshot.project(), snapshot.members());
+        dto.setCanImport(creator == null || canImportTeam(creator, snapshot.members()));
+        return dto;
     }
 
     record ProfieldsSnapshot(ProjectConfig project, List<ProjectMemberRole> members) {}
@@ -253,13 +351,12 @@ public class JiraProfieldsService {
         }
 
         String cleanDomain = (domain != null && !domain.isBlank())
-                ? domain.trim().replace("https://", "").replace("http://", "")
+                ? JiraService.cleanDomain(domain)
                 : "jira.empresa.com.br";
-        String cleanKey = projectKey.trim().toUpperCase();
-        // `domain` vem do cliente: precisa ser só um host[:porta] (nada de caminho, credencial ou query) e passar
-        // pelo mesmo bloqueio de alvos sensíveis/allowlist usado nas demais chamadas ao Jira.
-        if (!cleanDomain.matches("[A-Za-z0-9.-]+(:[0-9]{1,5})?")) {
-            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, "Domínio do Jira inválido");
+        String cleanKey = projectKey == null ? "" : projectKey.trim().toUpperCase();
+        // Chave vai para o caminho da URL do Jira: só letras, números e "_" (nada de "/", "?", ".." etc.).
+        if (!cleanKey.matches("[A-Z0-9_]{1,50}")) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, "Chave de projeto inválida");
         }
         try {
             jiraService.assertNotBlockedHost(java.net.URI.create("https://" + cleanDomain));
@@ -272,7 +369,6 @@ public class JiraProfieldsService {
         JsonNode rootNode;
         String jiraProjectName = null;
         try {
-            RestTemplate restTemplate = createSslLenientRestTemplate();
             HttpHeaders headers = new HttpHeaders();
             headers.set("Authorization", "Bearer " + token.trim());
             headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
@@ -280,14 +376,14 @@ public class JiraProfieldsService {
             HttpEntity<Void> entity = new HttpEntity<>(headers);
 
             String url = "https://" + cleanDomain + "/rest/profields/api/2.0/layouts/projects/" + cleanKey + "?expand=predefined";
-            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            ResponseEntity<String> response = jiraGet(url, entity);
             if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
                 throw new org.springframework.web.server.ResponseStatusException(
                         HttpStatus.BAD_GATEWAY, "Jira Profields retornou resposta inválida para o projeto " + cleanKey);
             }
             rootNode = objectMapper.readTree(response.getBody());
-            jiraProjectName = fetchJiraProjectName(restTemplate, entity, cleanDomain, cleanKey);
-            JsonNode valuesNode = fetchProfieldsValues(restTemplate, entity, cleanDomain, cleanKey);
+            jiraProjectName = fetchJiraProjectName(entity, cleanDomain, cleanKey);
+            JsonNode valuesNode = fetchProfieldsValues(entity, cleanDomain, cleanKey);
             if (valuesNode != null) {
                 log.debug("Profields {}: forma da resposta de valores: {}", cleanKey, describeShapeWithTypes(valuesNode));
                 rootNode = toSyntheticFields(rootNode, valuesNode);
@@ -295,9 +391,9 @@ public class JiraProfieldsService {
         } catch (org.springframework.web.server.ResponseStatusException e) {
             throw e;
         } catch (Exception e) {
-            log.warn("Falha ao consultar projeto {} no Profields: {}", cleanKey, e.getMessage());
+            log.warn("Falha ao consultar projeto {} no Profields: {}", cleanKey, e.getClass().getSimpleName());
             throw new org.springframework.web.server.ResponseStatusException(
-                    HttpStatus.BAD_GATEWAY, "Não foi possível obter dados do Profields para o projeto " + cleanKey + ": " + e.getMessage(), e);
+                    HttpStatus.BAD_GATEWAY, "Não foi possível obter dados do Profields para o projeto " + cleanKey + ": " + jiraFailureReason(e), e);
         }
 
         ProjectConfig project = parseProfieldsJson(cleanKey, rootNode);
@@ -323,6 +419,7 @@ public class JiraProfieldsService {
                 project.getLocality() != null, project.getVpArea() != null, project.getStatus() != null,
                 project.getDevTeamSize(), members.size());
 
+        members = dropNonPeople(members, cleanKey, project.getName(), jiraProjectName);
         members = dedupeMembers(members);
         embedAvatars(members, cleanDomain, token);
 
@@ -330,7 +427,13 @@ public class JiraProfieldsService {
             // Tenta vincular com usuário do banco se já existir
             if (m.getEmail() != null && !m.getEmail().isBlank()) {
                 Optional<User> existingUser = userRepository.findByEmail(m.getEmail());
-                existingUser.ifPresent(u -> m.setUserId(u.getId()));
+                existingUser.ifPresent(u -> {
+                    m.setUserId(u.getId());
+                    // Conta que já existia e entra no roster por e-mail: sem cargo, recebe a role do Jira (nunca sobrescreve).
+                    if (cargoPreenchimento != null) {
+                        cargoPreenchimento.preencherSeVazio(u, m.getRoleName(), "importação do Profields " + cleanKey);
+                    }
+                });
             }
         }
 
@@ -346,10 +449,23 @@ public class JiraProfieldsService {
                     .email(creator.getEmail())
                     .userId(creator.getId())
                     .isLeadership(true)
+                    .source(com.agilespace.backend.domain.MembershipSource.MANUAL)
                     .build());
         }
 
         return new ProfieldsSnapshot(project, members);
+    }
+
+    /** Motivo curto para o usuário (sem URL nem detalhe de rede). */
+    static String jiraFailureReason(Exception e) {
+        if (e instanceof org.springframework.web.client.HttpStatusCodeException h) {
+            int code = h.getStatusCode().value();
+            if (code == 401 || code == 403) return "o Jira recusou o token (HTTP " + code + "). Gere um novo token e tente de novo.";
+            if (code == 404) return "projeto não encontrado no Jira (HTTP 404). Confira a chave.";
+            if (code == 429) return "o Jira limitou as requisições (HTTP 429). Aguarde um minuto.";
+            return "o Jira respondeu HTTP " + code + ".";
+        }
+        return JiraService.describe(e);
     }
 
     /**
@@ -370,11 +486,10 @@ public class JiraProfieldsService {
      */
     @Transactional(readOnly = true)
     public List<ProjectDetailDto> getAllProjects() {
+        Map<String, List<ProjectMemberRole>> byProject = projectMemberRoleRepository.findAll().stream()
+                .collect(Collectors.groupingBy(ProjectMemberRole::getProjectId));
         return projectConfigRepository.findAllByOrderBySegmentNameAscNameAsc().stream()
-                .map(project -> {
-                    List<ProjectMemberRole> members = projectMemberRoleRepository.findByProjectId(project.getId());
-                    return toDetailDto(project, members);
-                })
+                .map(project -> toDetailDto(project, byProject.getOrDefault(project.getId(), List.of())))
                 .collect(Collectors.toList());
     }
 
@@ -384,6 +499,9 @@ public class JiraProfieldsService {
     @Transactional(readOnly = true)
     public List<SegmentHierarchyDto> getSegmentHierarchy() {
         List<ProjectConfig> all = projectConfigRepository.findAllByOrderBySegmentNameAscNameAsc();
+        Map<String, Long> leadersByProject = projectMemberRoleRepository.findAll().stream()
+                .filter(ProjectMemberRole::isLeadership)
+                .collect(Collectors.groupingBy(ProjectMemberRole::getProjectId, Collectors.counting()));
 
         // Agrupa por Segmento
         Map<String, List<ProjectConfig>> bySegment = all.stream()
@@ -412,9 +530,7 @@ public class JiraProfieldsService {
                 String tribeName = tribeEntry.getKey();
                 List<SegmentHierarchyDto.ProjectSummaryDto> projectSummaries = tribeEntry.getValue().stream()
                         .map(p -> {
-                            int totalLeaders = (int) projectMemberRoleRepository.findByProjectId(p.getId()).stream()
-                                    .filter(ProjectMemberRole::isLeadership)
-                                    .count();
+                            int totalLeaders = leadersByProject.getOrDefault(p.getId(), 0L).intValue();
                             return SegmentHierarchyDto.ProjectSummaryDto.builder()
                                     .id(p.getId())
                                     .name(p.getName())
@@ -646,9 +762,9 @@ public class JiraProfieldsService {
     }
 
     /** Nome do projeto no Jira (campo "name" de /rest/api/2/project/{key}); null se não for possível ler. */
-    private String fetchJiraProjectName(RestTemplate rt, HttpEntity<Void> entity, String domain, String key) {
+    private String fetchJiraProjectName(HttpEntity<Void> entity, String domain, String key) {
         try {
-            ResponseEntity<String> r = rt.exchange("https://" + domain + "/rest/api/2/project/" + key, HttpMethod.GET, entity, String.class);
+            ResponseEntity<String> r = jiraGet("https://" + domain + "/rest/api/2/project/" + key, entity);
             JsonNode n = objectMapper.readTree(r.getBody());
             return n.hasNonNull("name") ? n.get("name").asText() : null;
         } catch (Exception e) {
@@ -662,6 +778,32 @@ public class JiraProfieldsService {
      * diferente e o mesmo e-mail). Junta por e-mail (sem caixa) ou nome normalizado e fica com o cargo de maior
      * prioridade: liderança > cargo específico > Developer.
      */
+    /**
+     * Tira da lista o que o Jira devolveu mas não é pessoa: (1) entrada sem e-mail cujo nome é o do próprio projeto/squad
+     * ou a chave (o objeto "project" das issues lido como usuário); (2) caixa compartilhada/serviço (engenharia.vd) e conta
+     * de aplicativo, que ficam de fora do acesso até alguém revisar e cadastrar à mão. Pessoa real nunca é barrada: o filtro
+     * olha só a parte local do e-mail e o usuário, e só sem e-mail ou com prefixo de área.
+     */
+    static List<ProjectMemberRole> dropNonPeople(List<ProjectMemberRole> in, String projectKey, String... projectNames) {
+        List<ProjectMemberRole> out = new ArrayList<>();
+        java.util.Set<String> labels = new HashSet<>();
+        if (projectKey != null) labels.add(PersonIdentity.nameKey(projectKey));
+        for (String n : projectNames) if (n != null && !n.isBlank()) labels.add(PersonIdentity.nameKey(n));
+        for (ProjectMemberRole m : in) {
+            boolean noEmail = isBlank(m.getEmail());
+            boolean projectLike = noEmail && (labels.contains(PersonIdentity.nameKey(m.getDisplayName()))
+                    || labels.contains(PersonIdentity.nameKey(m.getJiraAccountId())));
+            boolean shared = JiraAdminService.looksLikeSharedMailbox(m.getEmail(), m.getJiraAccountId()) && !m.isLeadership();
+            if (projectLike || shared) {
+                log.warn("Importação do time {}: '{}' ({}) ignorado(a) por não parecer pessoa ({}); precisa de revisão, cadastre à mão se for pessoa.",
+                        projectKey, m.getDisplayName(), m.getJiraAccountId(), projectLike ? "nome do projeto" : "caixa compartilhada/serviço");
+                continue;
+            }
+            out.add(m);
+        }
+        return out;
+    }
+
     static List<ProjectMemberRole> dedupeMembers(List<ProjectMemberRole> in) {
         List<ProjectMemberRole> out = new ArrayList<>();
         for (ProjectMemberRole m : in) {
@@ -692,6 +834,7 @@ public class JiraProfieldsService {
     }
 
     private static int rank(ProjectMemberRole m) {
+        if (isTeamManagerRow(m)) return 4; // AM/PL não podem sumir porque a pessoa também é PO/Team Lead
         if (m.isLeadership()) return 3;
         return "DEVELOPER".equalsIgnoreCase(m.getRoleKey()) ? 1 : 2;
     }
@@ -701,10 +844,10 @@ public class JiraProfieldsService {
     }
 
     /** Endpoint de valores do Profields: GET /rest/profields/api/2.0/values/projects/{key} (lista de valores por campo). */
-    private JsonNode fetchProfieldsValues(RestTemplate rt, HttpEntity<Void> entity, String domain, String key) {
+    private JsonNode fetchProfieldsValues(HttpEntity<Void> entity, String domain, String key) {
         try {
             String url = "https://" + domain + "/rest/profields/api/2.0/values/projects/" + key;
-            ResponseEntity<String> r = rt.exchange(url, HttpMethod.GET, entity, String.class);
+            ResponseEntity<String> r = jiraGet(url, entity);
             if (!r.getStatusCode().is2xxSuccessful() || r.getBody() == null) return null;
             return objectMapper.readTree(r.getBody());
         } catch (Exception e) {
@@ -1019,10 +1162,13 @@ public class JiraProfieldsService {
 
     /**
      * Cria um projeto do zero, sem depender do Jira — para quem quer começar sem sincronizar nada.
-     * O criador vira automaticamente o Agile Master do projeto recém-criado.
+     * O criador (que já gerencia equipes) entra como liderança: Agile Master ou People Lead se já é, senão Agile Master.
      */
     @Transactional
     public ProjectDetailDto createManualProject(com.agilespace.backend.dto.CreateProjectRequestDto request, User creator) {
+        if (!canManageTeams(creator)) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN, TEAM_MANAGER_ONLY_MESSAGE);
+        }
         String key = request.getId().trim().toUpperCase();
         if (projectConfigRepository.existsById(key)) {
             throw new org.springframework.web.server.ResponseStatusException(
@@ -1039,19 +1185,37 @@ public class JiraProfieldsService {
                 .build();
         project = projectConfigRepository.save(project);
 
-        ProjectMemberRole founder = ProjectMemberRole.builder()
-                .projectId(key)
-                .roleName("Agile Master")
-                .roleKey("AGILE_MASTER")
-                .jiraAccountId(creator.getJiraAccountId())
-                .displayName(creator.getName())
-                .email(creator.getEmail())
-                .userId(creator.getId())
-                .isLeadership(true)
-                .build();
+        // O criador da equipe é a liderança dela: entra com o papel de gestão que já tem (AM ou PL) ou, sem nenhum
+        // (ADMIN puro), como Agile Master, com is_leadership=true. Só chega aqui quem JÁ pode criar equipes
+        // (canManageTeams), então não amplia o privilégio de ninguém; e a squad nova nasce com liderança cadastrada.
+        ProjectMemberRole founder = founderRow(key, creator, true);
         projectMemberRoleRepository.save(founder);
 
         return toDetailDto(project, List.of(founder));
+    }
+
+    /**
+     * Linha de vínculo (pmr) do fundador de uma squad, a mesma que {@link #createManualProject} grava: papel que a pessoa já
+     * tem como AM/PL (ou Developer sem liderança), origem MANUAL. Com {@code ensureLeadership} (criação de equipe e
+     * bootstrap de squad vazia) quem não tem papel de gestão entra como Agile Master com liderança, porque a squad nova
+     * não tem mais ninguém para configurá-la.
+     */
+    ProjectMemberRole founderRow(String projectKey, User creator, boolean ensureLeadership) {
+        String[] founderRole = founderRoleFor(creator);
+        if (ensureLeadership && "DEVELOPER".equals(founderRole[1])) {
+            founderRole = new String[] {"Agile Master", "AGILE_MASTER"};
+        }
+        return ProjectMemberRole.builder()
+                .projectId(projectKey)
+                .roleName(founderRole[0])
+                .roleKey(founderRole[1])
+                .jiraAccountId(creator.getJiraAccountId())
+                .displayName(creator.getName())
+                .email(PersonIdentity.normEmail(creator.getEmail()))
+                .userId(creator.getId())
+                .isLeadership(isTeamManagerRow(ProjectMemberRole.builder().roleKey(founderRole[1]).build()))
+                .source(com.agilespace.backend.domain.MembershipSource.MANUAL)
+                .build();
     }
 
     /**
@@ -1063,7 +1227,7 @@ public class JiraProfieldsService {
      * UserProjectResolverService. Allowlist (não blocklist) de propósito: uma variante de grafia
      * de um papel de liderança que escapasse de um blocklist ainda cai fora daqui.
      */
-    private static final Set<String> SELF_SERVICE_JOIN_ROLE_NAMES = Set.of(
+    static final Set<String> SELF_SERVICE_JOIN_ROLE_NAMES = Set.of(
             "DEVELOPER", "DESENVOLVEDOR(A)",
             "QA", "ANALISTA DE QA",
             "DESIGNER",
@@ -1071,6 +1235,16 @@ public class JiraProfieldsService {
             "SME",
             "STAKEHOLDER / OBSERVADOR"
     );
+
+    /** O nome do papel está na allowlist de contribuidor (sem caixa)? Usada também pelo pedido de vínculo (V76). */
+    static boolean isSelfServiceRoleName(String roleName) {
+        return roleName != null && SELF_SERVICE_JOIN_ROLE_NAMES.contains(roleName.trim().toUpperCase());
+    }
+
+    /** Chave do papel a partir do nome (mesma regra do join/convite): "Analista de QA" -> "ANALISTA_DE_QA". */
+    static String roleKeyOf(String roleName) {
+        return roleName.trim().toUpperCase().replace(" ", "_").replaceAll("[^A-Z_]", "");
+    }
 
     /**
      * Vincula o usuário autenticado a um projeto já existente, com um papel de contribuidor —
@@ -1086,10 +1260,22 @@ public class JiraProfieldsService {
                     org.springframework.http.HttpStatus.NOT_FOUND, "Projeto não encontrado");
         }
 
+        if (SquadMemberExclusions.of(squadMemberExclusions, key).matches(user.getJiraAccountId(), user.getEmail())) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Você foi removido(a) deste time. Peça ao Agile Master ou People Lead para adicionar você de novo.");
+        }
         boolean alreadyMember = projectMemberRoleRepository.findByProjectId(key).stream()
                 .anyMatch(m -> user.getId().equals(m.getUserId()));
         if (alreadyMember) {
             return;
+        }
+
+        // Sem aprovação ninguém entra num time: só ADMIN, ou quem já consta no roster/Jira do projeto (e-mail ou conta
+        // do Jira batendo com uma linha ainda não vinculada a outra conta). Convite aceito já cria o vínculo e cai no
+        // "alreadyMember" acima.
+        if (!"ADMIN".equalsIgnoreCase(user.getRole()) && !isListedInRoster(key, user)) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Você não consta na lista deste time. Peça um link de convite a quem lidera o time ou fale com um administrador.");
         }
 
         String cleanRoleName = roleName.trim();
@@ -1098,7 +1284,7 @@ public class JiraProfieldsService {
                     org.springframework.http.HttpStatus.FORBIDDEN,
                     "Papéis de liderança não podem ser autodeclarados. Sincronize com o Jira ou peça pra um administrador vincular seu papel.");
         }
-        String roleKey = cleanRoleName.toUpperCase().replace(" ", "_").replaceAll("[^A-Z_]", "");
+        String roleKey = roleKeyOf(cleanRoleName);
 
         ProjectMemberRole member = ProjectMemberRole.builder()
                 .projectId(key)
@@ -1109,8 +1295,19 @@ public class JiraProfieldsService {
                 .email(user.getEmail())
                 .userId(user.getId())
                 .isLeadership(false)
+                .source(com.agilespace.backend.domain.MembershipSource.CLAIM)
                 .build();
         projectMemberRoleRepository.save(member);
+    }
+
+    /** O usuário consta no roster do projeto por e-mail ou conta do Jira, numa linha livre (ou já dele)? */
+    private boolean isListedInRoster(String projectKey, User user) {
+        List<ProjectMemberRole> rows = projectMemberRoleRepository.findByProjectId(projectKey);
+        if (rows == null) return false;
+        return rows.stream().anyMatch(r ->
+                (r.getUserId() == null || r.getUserId().isBlank() || r.getUserId().equals(user.getId()))
+                && ((notBlank(user.getEmail()) && notBlank(r.getEmail()) && user.getEmail().trim().equalsIgnoreCase(r.getEmail().trim()))
+                    || (notBlank(user.getJiraAccountId()) && notBlank(r.getJiraAccountId()) && user.getJiraAccountId().trim().equals(r.getJiraAccountId().trim()))));
     }
 
     private String blankToNull(String value) {

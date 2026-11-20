@@ -27,6 +27,9 @@ public class SupportTicketControllerTest {
     @Mock
     private SupportTicketService supportTicketService;
 
+    @Mock
+    private com.agilespace.backend.repository.UserRepository userRepository;
+
     @InjectMocks
     private SupportTicketController controller;
 
@@ -63,8 +66,12 @@ public class SupportTicketControllerTest {
     }
 
     @Test
-    public void testCreateTicketKeepsProvidedRequesterName() {
-        SupportTicket payload = SupportTicket.builder().subject("Erro").requesterName("Joao Silva").build();
+    public void testCreateTicketIgnoresRequesterNameFromBody() {
+        com.agilespace.backend.domain.User u = new com.agilespace.backend.domain.User();
+        u.setId("u1");
+        u.setName("Joao Silva");
+        when(userRepository.findById("u1")).thenReturn(java.util.Optional.of(u));
+        SupportTicket payload = SupportTicket.builder().subject("Erro").requesterName("CEO Falso").build();
         when(supportTicketService.createTicket(anyString(), anyString(), anyString(), any())).thenReturn(ticket());
 
         controller.createTicket(requestAs("u1", "joao@empresa.com.br", "MEMBER"), payload);
@@ -137,10 +144,11 @@ public class SupportTicketControllerTest {
 
         ResponseEntity<SupportTicketReply> response = controller.addReply(
                 requestAs("admin1", "admin@empresa.com.br", "ADMIN"), ticketId,
-                Map.of("message", "Resolvido", "authorName", "Suporte"));
+                Map.of("message", "Resolvido", "authorName", "Falso"));
 
         assertEquals(HttpStatus.CREATED, response.getStatusCode());
-        verify(supportTicketService).addReply(ticketId, "admin1", "Suporte", true, "Resolvido");
+        // nome do corpo é ignorado; sem cadastro, cai no e-mail do token
+        verify(supportTicketService).addReply(ticketId, "admin1", "admin@empresa.com.br", true, "Resolvido");
     }
 
     @Test
@@ -196,6 +204,63 @@ public class SupportTicketControllerTest {
 
         assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
         verifyNoInteractions(supportTicketService);
+    }
+
+    // ---------- fechar / reabrir / ler (solicitante) ----------
+
+    @Test
+    public void testCloseUsesAuthenticatedUserNotRole() {
+        when(supportTicketService.closeTicket(ticketId, "u1")).thenReturn(ticket());
+
+        assertEquals(HttpStatus.OK, controller.closeTicket(requestAs("u1", "joao@empresa.com.br", "MEMBER"), ticketId).getStatusCode());
+        verify(supportTicketService).closeTicket(ticketId, "u1");
+    }
+
+    @Test
+    public void testCloseOfSomeoneElsesTicketReturnsNotFound() {
+        when(supportTicketService.closeTicket(ticketId, "intruso")).thenThrow(new IllegalArgumentException("not found"));
+
+        assertEquals(HttpStatus.NOT_FOUND, controller.closeTicket(
+                requestAs("intruso", "x@empresa.com.br", "MEMBER"), ticketId).getStatusCode());
+    }
+
+    @Test
+    public void testReopenReturnsTicketAndPropagatesConflict() {
+        when(supportTicketService.reopenTicket(ticketId, "u1")).thenReturn(ticket());
+        assertEquals(HttpStatus.OK, controller.reopenTicket(requestAs("u1", "j@e.com", "MEMBER"), ticketId).getStatusCode());
+
+        when(supportTicketService.reopenTicket(ticketId, "u2"))
+                .thenThrow(new ResponseStatusException(HttpStatus.CONFLICT, "Só é possível reabrir um chamado fechado."));
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> controller.reopenTicket(requestAs("u2", "j@e.com", "MEMBER"), ticketId));
+        assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
+    }
+
+    @Test
+    public void testReopenOfSomeoneElsesTicketReturnsNotFound() {
+        when(supportTicketService.reopenTicket(ticketId, "intruso")).thenThrow(new IllegalArgumentException("not found"));
+
+        assertEquals(HttpStatus.NOT_FOUND, controller.reopenTicket(
+                requestAs("intruso", "x@empresa.com.br", "MEMBER"), ticketId).getStatusCode());
+    }
+
+    @Test
+    public void testMarkReadReturnsTicketOrNotFound() {
+        when(supportTicketService.markRead(ticketId, "u1")).thenReturn(ticket());
+        assertEquals(HttpStatus.OK, controller.markRead(requestAs("u1", "j@e.com", "MEMBER"), ticketId).getStatusCode());
+
+        when(supportTicketService.markRead(ticketId, "intruso")).thenThrow(new IllegalArgumentException("not found"));
+        assertEquals(HttpStatus.NOT_FOUND, controller.markRead(requestAs("intruso", "x@e.com", "MEMBER"), ticketId).getStatusCode());
+    }
+
+    @Test
+    public void testAddReplyOnClosedTicketPropagatesConflict() {
+        when(supportTicketService.addReply(eq(ticketId), anyString(), anyString(), anyBoolean(), anyString()))
+                .thenThrow(new ResponseStatusException(HttpStatus.CONFLICT, "fechado"));
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> controller.addReply(
+                requestAs("u1", "j@e.com", "MEMBER"), ticketId, Map.of("message", "oi")));
+        assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
     }
 
     @Test

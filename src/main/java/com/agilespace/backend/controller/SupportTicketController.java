@@ -2,6 +2,7 @@ package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.SupportTicket;
 import com.agilespace.backend.domain.SupportTicketReply;
+import com.agilespace.backend.repository.UserRepository;
 import com.agilespace.backend.security.JwtAuthenticationFilter;
 import com.agilespace.backend.service.SupportTicketService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,10 +19,19 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/support/tickets")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class SupportTicketController {
 
     private final SupportTicketService supportTicketService;
+    private final UserRepository userRepository;
+
+    /** Nome exibido do chamado/resposta: sempre o do usuário autenticado (cadastro), com e-mail de reserva; o corpo não escolhe. */
+    private String displayNameOf(String userId, String email) {
+        if (userId != null && userRepository != null) {
+            String name = userRepository.findById(userId).map(u -> u.getName()).orElse(null);
+            if (name != null && !name.isBlank()) return name;
+        }
+        return email;
+    }
 
     private static boolean isAdmin(HttpServletRequest request) {
         return "ADMIN".equals(request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE));
@@ -41,10 +51,7 @@ public class SupportTicketController {
     public ResponseEntity<SupportTicket> createTicket(HttpServletRequest request, @RequestBody SupportTicket ticket) {
         String requesterId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
         String requesterEmail = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_EMAIL);
-        String requesterName = ticket.getRequesterName();
-        if (requesterName == null || requesterName.isBlank()) {
-            requesterName = requesterEmail;
-        }
+        String requesterName = displayNameOf(requesterId, requesterEmail);
 
         SupportTicket created = supportTicketService.createTicket(requesterId, requesterName, requesterEmail, ticket);
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
@@ -77,6 +84,39 @@ public class SupportTicketController {
         }
     }
 
+    /** O solicitante encerra o próprio chamado (outro usuário, inclusive ADMIN, recebe 404). */
+    @PatchMapping("/{id}/close")
+    public ResponseEntity<SupportTicket> closeTicket(HttpServletRequest request, @PathVariable UUID id) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        try {
+            return ResponseEntity.ok(supportTicketService.closeTicket(id, callerId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /** O solicitante reabre o próprio chamado fechado (aberto = 409; outro usuário = 404). */
+    @PatchMapping("/{id}/reopen")
+    public ResponseEntity<SupportTicket> reopenTicket(HttpServletRequest request, @PathVariable UUID id) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        try {
+            return ResponseEntity.ok(supportTicketService.reopenTicket(id, callerId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /** O solicitante abriu o chamado: marca as respostas do time como lidas. */
+    @PostMapping("/{id}/read")
+    public ResponseEntity<SupportTicket> markRead(HttpServletRequest request, @PathVariable UUID id) {
+        String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
+        try {
+            return ResponseEntity.ok(supportTicketService.markRead(id, callerId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
     @GetMapping("/{id}/replies")
     public ResponseEntity<List<SupportTicketReply>> getReplies(HttpServletRequest request, @PathVariable UUID id) {
         String callerId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
@@ -95,7 +135,7 @@ public class SupportTicketController {
         String authorId = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
         String authorEmail = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_EMAIL);
         boolean callerIsAdmin = isAdmin(request);
-        String authorName = body.getOrDefault("authorName", authorEmail);
+        String authorName = displayNameOf(authorId, authorEmail);
         String message = body.get("message");
 
         try {

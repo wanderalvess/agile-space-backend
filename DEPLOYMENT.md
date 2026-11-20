@@ -130,6 +130,15 @@ docker run -d \
 SPRING_PROFILES_ACTIVE=prod docker-compose up -d
 ```
 
+Padrões do `docker-compose.yml` (mudaram em 2026-11-01, após a revisão de prontidão para produção):
+- `SPRING_PROFILES_ACTIVE` é `prod` quando a variável não existe. Em prod o backend só sobe com `APP_JWT_SECRET` e
+  `APP_ENCRYPTION_SECRET` próprios, `ALLOWED_EMAIL_DOMAIN` preenchido e `ALLOWED_ORIGINS` real. Desenvolvimento local
+  usa `SPRING_PROFILES_ACTIVE=dev` no `.env` (copie o `.env.example`).
+- `APP_MEMBERSHIP_MODE` e `APP_MEMBERSHIP_AUTHZ` são `new`: só vale o vínculo (`project_member_roles`). Em `legacy`,
+  `users.default_project_id` bastava para ser tratado como membro da squad. Quem vem de uma instalação em `legacy`
+  chama antes `GET /api/admin/membership/authz-diff` e confere quem perderia acesso.
+- O cadastro (`POST /api/auth/register`) ignora o `defaultProjectId` enviado pelo cliente.
+
 ### Reverse Proxy / TLS
 
 `docker-compose.yml` inclui um serviço `reverse-proxy` (Caddy) opcional, atrás do profile `proxy`,
@@ -148,6 +157,9 @@ export APP_JWT_SECRET="$(openssl rand -base64 48)"
 export ALLOWED_EMAIL_DOMAIN="totvs.com.br"
 export DB_URL="jdbc:postgresql://db:5432/espacoagil"
 export DB_PASSWORD="secure_password"
+# Rede do Caddy: sem isto o limite de login enxerga todo mundo com o IP do proxy (um balde só). Com isto, vale o IP
+# que o Caddy acrescenta ao X-Forwarded-For; sem proxy, deixe vazio (o cabeçalho é ignorado, pois o cliente o forja).
+export TRUSTED_PROXIES="172.16.0.0/12"
 
 # NEXT_PUBLIC_* do frontend: precisam do domínio público real ANTES do build (ver Dockerfile
 # do frontend) — setar depois via "environment:" não muda o bundle já compilado.
@@ -186,7 +198,9 @@ curl http://localhost:8002/actuator/health
 ### Backup & Disaster Recovery
 
 1. **Database backups:** `scripts/backup-db.sh` wraps `docker exec ... pg_dump` (não precisa do
-   cliente do Postgres no host) e já aplica retenção (apaga backups com mais de 14 dias por
+   cliente do Postgres no host) e também empacota os anexos dos cards da Review
+   (`uploads_*.tar.gz`, volume `agile-space-uploads` montado em `/data/uploads`; desligue com
+   `BACKUP_UPLOADS=0`). Banco e anexos precisam ser restaurados juntos. Aplica retenção (apaga backups com mais de 14 dias por
    padrão — ajustável via `RETENTION_DAYS`). Agende via cron no host de produção:
    ```bash
    # Todo dia às 3h da manhã

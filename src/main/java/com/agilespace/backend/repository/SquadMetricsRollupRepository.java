@@ -4,6 +4,7 @@ import com.agilespace.backend.domain.SquadMetricsRollup;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -11,4 +12,5 @@ import java.util.Optional;
 public interface SquadMetricsRollupRepository extends JpaRepository<SquadMetricsRollup, String> {
     Optional<SquadMetricsRollup> findBySquadIdAndSprintId(String squadId, String sprintId);
     List<SquadMetricsRollup> findBySquadId(String squadId);
+    List<SquadMetricsRollup> findBySquadIdIn(Collection<String> squadIds);
 }

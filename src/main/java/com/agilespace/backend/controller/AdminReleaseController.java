@@ -12,7 +12,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/admin/changelog")
-@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class AdminReleaseController {
 
     @Autowired

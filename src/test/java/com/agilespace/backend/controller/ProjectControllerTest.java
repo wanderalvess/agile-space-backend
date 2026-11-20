@@ -118,11 +118,12 @@ public class ProjectControllerTest {
     @Test
     public void testGetUserProjectsFindsById() {
         User user = User.builder().id("u1").email("u1@empresa.com").build();
+        when(httpServletRequest.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("u1");
         when(userRepository.findById("u1")).thenReturn(Optional.of(user));
         when(userProjectResolverService.resolveUserAccess(user))
                 .thenReturn(UserProjectAccessDto.builder().userId("u1").projects(Collections.emptyList()).build());
 
-        ResponseEntity<UserProjectAccessDto> response = controller.getUserProjects("u1");
+        ResponseEntity<UserProjectAccessDto> response = controller.getUserProjects("u1", httpServletRequest);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals("u1", response.getBody().getUserId());
@@ -130,13 +131,16 @@ public class ProjectControllerTest {
 
     @Test
     public void testGetUserProjectsFallsBackToTempUser() {
+        User admin = User.builder().id("adm").email("adm@empresa.com").role("ADMIN").build();
+        when(httpServletRequest.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID)).thenReturn("adm");
+        when(userRepository.findById("adm")).thenReturn(Optional.of(admin));
         when(userRepository.findById("desconhecido@empresa.com")).thenReturn(Optional.empty());
         when(userRepository.findByEmail("desconhecido@empresa.com")).thenReturn(Optional.empty());
         when(userRepository.findByJiraAccountId("desconhecido@empresa.com")).thenReturn(Optional.empty());
         when(userProjectResolverService.resolveUserAccess(any(User.class)))
                 .thenReturn(UserProjectAccessDto.builder().projects(Collections.emptyList()).build());
 
-        ResponseEntity<UserProjectAccessDto> response = controller.getUserProjects("desconhecido@empresa.com");
+        ResponseEntity<UserProjectAccessDto> response = controller.getUserProjects("desconhecido@empresa.com", httpServletRequest);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         verify(userProjectResolverService).resolveUserAccess(argThat(u -> "desconhecido@empresa.com".equals(u.getEmail())));

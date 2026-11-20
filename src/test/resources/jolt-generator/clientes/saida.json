@@ -1,0 +1,40 @@
+{
+  "idExterno": [
+    "pdvsync-cliente-150-2026-09-18T12:00:03"
+  ],
+  "idInterno": "150",
+  "tipoIdInterno": "PDVSYNC-CLIENTE",
+  "items": [
+    {
+      "idRetaguarda": 150,
+      "nome": "ISAC 2",
+      "situacao": 1,
+      "endereco": "RUA PEDRO LUDOVICO",
+      "complemento": "RUA PEDRO LUDOVICO",
+      "bairro": "VILA SÃO PEDRO",
+      "cidade": "JATAI",
+      "estado": "GO",
+      "cep": "75807380",
+      "telefone": "011988774466",
+      "email": "EMAIL0000@GMAIL.COM",
+      "cpfCnpj": "21535899247",
+      "dataNascimento": "1985-01-01T00:00:00",
+      "rgInscricao": "ISENTO",
+      "pessoaFisica": "1",
+      "dataCadastro": "2026-09-03T11:14:20",
+      "numero": "2000",
+      "IdRetaguardaPraca": 1,
+      "IdRetaguardaRegiao": 1,
+      "IdRetaguardaRamoAtividade": 1,
+      "Bloqueado": false,
+      "UtilizaPrecoAtacado": "False",
+      "vencimentoPercentual": 5.5,
+      "vencimentoDias": 100,
+      "enviarpnet": 0,
+      "loteOrigem": "{{LOTE_ORIGEM}}",
+      "idProprietario": "{{MASTER_ID_PROPRIETARIO}}",
+      "idInquilino": "{{ID_INQUILINO}}"
+    }
+  ],
+  "_attr_access": "items"
+}

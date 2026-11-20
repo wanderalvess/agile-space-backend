@@ -1,4 +1,4 @@
-# Checklist de Go-Live — Agile Space
+# Checklist de Go-Live — Portal Tech V&D
 
 Ambiente de homologação: `https://app.espacoagil.com.br` (Oracle Cloud A1 ARM, 2 OCPU / 12 GB, uma VM com db + backend + frontend + Caddy via `docker compose --profile proxy`).
 
@@ -36,6 +36,29 @@ Observações do smoke:
 
 ---
 
+## 1b. Repetição do smoke test sem login — executado em 2026-10-14
+
+Mesma bateria da seção 1, de fora, contra o código que estava na VM (backend `9077a6b` e frontend `6e6ea54`, de 10/10; 46 migrations aplicadas). Depois do teste a VM foi atualizada para backend `6a89b42` e frontend `c922801` (14/10), com dump prévio em `~/backups/pre-deploy-20261014-162148.sql`; as migrations V56 e V61 entraram (48 no total), os containers ficaram saudáveis, `/actuator/health` 200 e as rotas protegidas seguem em 401. Os itens da tabela abaixo **não** foram repetidos sobre o código novo.
+
+| # | Verificação | Resultado |
+|---|---|---|
+| ✅ | `http://` redireciona para `https://` | 308 |
+| ✅ | Certificado válido, expira 2027-01-04 | ok |
+| ✅ | Headers HSTS, CSP, X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy | presentes (`X-Powered-By` e `Via` continuam aparecendo) |
+| ✅ | `/actuator/health` 200; `info`, `env`, `metrics` 404; Swagger e `/v3/api-docs` 404 | ok |
+| ✅ | `/api/users`, `/api/admin/api-keys`, `/api/squads`, `/api/workspaces`, `/api/auth/me`, `/api/v1/squads` sem token | 401 |
+| ✅ | CORS: origem estranha / origem do app | 403 / passa (401 sem token) |
+| ✅ | WebSocket `/ws/poker/*` sem token | 401 |
+| ✅ | Rate limit de auth com `X-Forwarded-For` diferente a cada tentativa | 429 a partir da 11ª |
+| ✅ | Portas: 5432, 8002 e 9002 só em `127.0.0.1`; públicas só 22/80/443 | ok |
+| ✅ | `ALLOWED_EMAIL_DOMAIN=totvs.com.br,ext.totvs.com.br`, perfil `prod` | ok |
+| ✅ | Containers saudáveis; backend 436 MB de 1 GB, sem erro nos logs de 24 h | ok |
+| ⬜ | Backup agendado | segue sem cron; último dump manual de 10/10 |
+
+Não executado: testes autenticados (a sessão do navegador não estava logada e não se cria conta nem se digita senha); Poker/Retro com dois usuários e os demais itens da seção 3 seguem pendentes. `/api/public/prompt-hub` (leitura anônima) respondeu 404 na raiz; verificar o caminho exato.
+
+---
+
 ## 2. Smoke test autenticado — executado em 2026-10-06
 
 Feito dentro do navegador, com a sessão do usuário ADMIN que já estava logado (nenhuma conta ou senha foi criada por mim).
@@ -64,13 +87,13 @@ Feito no navegador, com a sessão ADMIN, criando só dados de teste ("SMOKE TEST
 | ✅ | **Retro**: criar quadro, escrever card, revelar cards | funcionou |
 | ✅ | Persistência: recarregar a página da retro | card e estado mantidos |
 | ✅ | **Chat da retro**: enviar mensagem | enviada e exibida |
-| ✅ | Carga sem erro de API: `/painel`, `/admin`, `/retro`, `/room`, `/showcase`, `/health-check`, `/brainstorming`, `/action-plan`, `/workspace`, `/prompt-hub`, `/squad`, `/squad/roster`, `/squad/dashboards`, `/jiradash`, `/governance`, `/changelog`, `/sprint-planner` | todas renderizam |
+| ✅ | Carga sem erro de API: `/painel`, `/admin`, `/retro`, `/room`, `/showcase`, `/health-check`, `/brainstorming`, `/action-plan`, `/workspace`, `/prompt-hub`, `/squad`, `/squad/roster`, `/squad/dashboards`, `/governance`, `/changelog`, `/sprint-planner` | todas renderizam |
 
 ### Bugs e pontos encontrados
 
 1. 🟡 **Chamada inútil com 400 no chat de conhecimento** (`/knowledge`). A landing gera um slug local de 10 caracteres (`crypto.randomUUID().slice(0, 10)`, [knowledge/chat/page.tsx:11](../agile-space-frontend/src/app/knowledge/chat/page.tsx)) e a página chama `GET /api/knowledge/conversations/{id}`, que exige UUID, então sempre dá `400`. **Não quebra o chat**: o erro cai num `catch`, a sessão abre vazia e a conversa é criada no backend (com UUID real) no primeiro envio. Corrigido no frontend (commitado): não busca quando o id não é UUID. **Deploy feito na VM em 2026-10-06 (frontend `1cdf8b7`) e verificado no navegador: `/knowledge` abre sem chamar `/conversations/{id}` e sem erro 4xx.** O envio de mensagem com IA segue não testado (sem chave de IA na VM). Não verificado em produção; o chat de IA também não foi exercitado (sem chave de IA na VM).
 2. 🟠 **Jira acessível da VM?** A sincronização exige domínio Jira e token (PAT). Se o Jira da TOTVS for interno ou atrás de VPN, esta VM na internet pública **não alcança**. Não testado (sem credenciais). Confirmar antes de produção.
-3. 🟡 **404 recorrentes no console**: `/api/users/{id}/jira-config` e `/tdn-config` devolvem 404 quando o usuário não configurou. Funciona, mas polui o console e os logs. Melhor devolver 200 vazio ou 204.
+3. 🟡 **404 recorrentes no console**: `/api/users/{id}/jira-config` e `/tdn-config` devolvem 404 quando o usuário não configurou. Funciona, mas polui o console e os logs. Melhor devolver 200 vazio ou 204. **Corrigido em 2026-10-15: responde 204 quando não há configuração (backend `86b81d7`, frontend `94ce316`), em homologação.**
 4. 🟡 **Requisições com id vazio** ao abrir o painel: `GET /api/squads//rollup`, `/issues`, `/members` (404) disparam antes de o squad ser resolvido. Inofensivo, mas indica carga antes da hora.
 5. 🟡 **`GET /api/squads/DDWMISSI` e `/rollup` retornam 404** no squad novo sem Jira conectado. Esperado sem sincronização, mas as telas de squad ficam vazias; confirmar com o Jira conectado.
 6. 🟡 **Poker e Retro não têm endpoint para apagar sala/quadro** (só participantes, votos, cards). Salas de teste só saem com a limpeza do banco. Para produção, avaliar se é intencional.
@@ -115,8 +138,8 @@ Não coberto: Showcase (criação), Brainstorming pela interface, sprint-planner
 - ⬜ Acesso cruzado: usuário de um squad não lê dados de outro squad.
 - ⬜ API Key: criar via admin, usar em `/api/v1/**` com `X-Api-Key`.
 - ⬜ Upload/evidência de Showcase (proxy de anexos do Jira).
-- ⬜ Reiniciar o stack (`docker compose restart`) e confirmar que sessões e dados persistem.
-- ⬜ Teste de carga leve (algumas dezenas de usuários na sala) observando CPU/RAM da VM.
+- ✅ Reiniciar o stack (`docker compose restart`) e confirmar que sessões e dados persistem. **Feito em 2026-10-15:** contagens de usuários, projetos, salas, quadros e migrations iguais antes e depois; os 4 containers voltaram saudáveis em ~50 s; `APP_JWT_SECRET` é fixo no `.env` (64 caracteres, não é o padrão de dev), então as sessões continuam valendo.
+- ✅ Teste de carga leve (algumas dezenas de usuários na sala) observando CPU/RAM da VM. **Feito em 2026-10-15 (`scripts/live-tests/t_carga_poker.js`, 30 contas logadas numa sala do Poker, 5 rodadas de votar/revelar/limpar, 2 min; o teste de 5 min com 14+ rodadas terminou sem erro nos logs):** 30/30 entraram e 30/30 WebSocket abriram, 0 caíram; votar p50 42 ms / p95 59 ms, revelar p50 44 ms; um voto chega às outras 29 pessoas em p50 41 ms / p95 60 ms, a revelação em p50 37 ms; nenhuma resposta 429 nem erro. VM durante o teste: backend ≤ 7% de CPU, ~393 MB de 1 GB, load < 0,5 em 2 núcleos, sem erro nos logs. **Limite conhecido:** a API corta em 300 req/min por IP; 30 pessoas gastam ~72 heartbeats/min, então ~50+ pessoas atrás do mesmo IP (NAT/VPN da empresa) encostam no limite. Confirmar com a infra o IP de saída antes da produção.
 
 ---
 
@@ -124,7 +147,7 @@ Não coberto: Showcase (criação), Brainstorming pela interface, sprint-planner
 
 - ⬜ **Login real.** SSO da TOTVS pendente (protocolo, discovery URL, client id; o secret vai direto no `.env` da VM). Hoje o login é e-mail e senha.
 - ⬜ **Verificação de e-mail no cadastro.** Hoje basta digitar um endereço `@totvs.com.br`: o sistema checa só o texto, não confirma que a pessoa é dona dele. Resolver com SSO, convite ou confirmação por e-mail.
-- ⬜ **Backup com restauração testada.** `scripts/backup-db.sh` no cron, cópia para fora da VM (ex.: Object Storage), e um teste de restore em banco descartável. Backup nunca restaurado não conta.
+- ⬜ **Backup com restauração testada.** `scripts/backup-db.sh` no cron (banco e anexos dos cards, volume `agile-space-uploads`), cópia para fora da VM (ex.: Object Storage), e um teste de restore em banco descartável. Backup nunca restaurado não conta.
 - ⬜ **Banco limpo e segredos novos antes do primeiro dado real.** Os segredos atuais foram usados na homologação. Atenção: `APP_ENCRYPTION_SECRET` cifra os tokens do Jira; trocar depois de existir dado real os deixa ilegíveis. Limpeza completa: `docker compose down -v` (**apaga tudo, irreversível**).
 - ⚠️ **Onde hospedar.** A VM está na conta pessoal Oracle e no domínio pessoal. Para dados da TOTVS, decidir com o time se fica aqui ou em conta/infra da empresa (LGPD, segurança da informação, propriedade).
 - ⚠️ **`ALLOWED_EMAIL_DOMAIN`** em produção deve ser `totvs.com.br` (hoje na homologação também; confirmar no `.env`).

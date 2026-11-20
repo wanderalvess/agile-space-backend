@@ -24,6 +24,7 @@ public class RegisterRequestDto {
     private String password;
 
     private String jiraAccountId;
+    /** Ignorado no cadastro (mantido só por compatibilidade): a squad inicial nunca vem do cliente. */
     private String defaultProjectId;
     private String segmentName;
     private String tribeName;

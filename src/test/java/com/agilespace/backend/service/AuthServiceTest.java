@@ -31,6 +31,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
@@ -69,7 +70,7 @@ public class AuthServiceTest {
     @BeforeEach
     public void setup() {
         MockitoAnnotations.openMocks(this);
-        lenient().when(jwtTokenUtil.generateToken(anyString(), anyString(), anyString(), anyString(), any(), any(), any()))
+        lenient().when(jwtTokenUtil.generateToken(anyString(), anyString(), anyString(), anyString(), any(), any(), any(), anyLong()))
                 .thenReturn("jwt-token");
     }
 
@@ -167,7 +168,7 @@ public class AuthServiceTest {
                 LoginRequestDto.builder().email("joao.silva@empresa.com.br").password("senhaErrada").build()));
 
         assertEquals(HttpStatus.UNAUTHORIZED, ex.getStatusCode());
-        verify(jwtTokenUtil, never()).generateToken(anyString(), anyString(), anyString(), anyString(), any(), any(), any());
+        verify(jwtTokenUtil, never()).generateToken(anyString(), anyString(), anyString(), anyString(), any(), any(), any(), anyLong());
     }
 
     @Test
@@ -205,7 +206,7 @@ public class AuthServiceTest {
 
         assertEquals("DDWMISSI", user.getDefaultProjectId());
         assertEquals("DDWMISSI", response.getActiveProjectId());
-        verify(userRepository).save(user);
+        verify(userRepository, atLeastOnce()).save(user);
     }
 
     @Test
@@ -218,7 +219,8 @@ public class AuthServiceTest {
                 LoginRequestDto.builder().email("joao.silva@empresa.com.br").password(RAW_PASSWORD).build());
 
         assertNull(response.getActiveProjectId());
-        verify(userRepository, never()).save(any());
+        assertNull(user.getDefaultProjectId());
+        assertNotNull(user.getLastLoginAt(), "login registra o último acesso");
     }
 
     // ---------- register ----------
@@ -267,6 +269,28 @@ public class AuthServiceTest {
 
         assertDoesNotThrow(() -> service.register(RegisterRequestDto.builder()
                 .email("novo@totvs.com.br").name("Novo").password(RAW_PASSWORD).build()));
+    }
+
+    @Test
+    public void testRegisterAcceptsBothCorporateDomainsAndRejectsLookalikes() {
+        ReflectionTestUtils.setField(service, "allowedEmailDomain", "totvs.com.br, ext.totvs.com.br");
+        when(userRepository.findByEmail(anyString())).thenReturn(Optional.empty());
+        when(projectMemberRoleRepository.findByEmailIgnoreCase(anyString())).thenReturn(List.of());
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(userProjectResolverService.resolveUserAccess(any(User.class))).thenReturn(accessWith());
+
+        assertDoesNotThrow(() -> service.register(RegisterRequestDto.builder()
+                .email("novo@totvs.com.br").name("Novo").password(RAW_PASSWORD).build()));
+        assertDoesNotThrow(() -> service.register(RegisterRequestDto.builder()
+                .email("Terceiro@EXT.Totvs.com.br").name("Ext").password(RAW_PASSWORD).build()));
+
+        for (String bad : new String[] {"alguem@gmail.com", "a@evil-totvs.com.br", "a@totvs.com.br.evil.com",
+                "a@sub.totvs.com.br", "a.b@x.com@totvs.com.br", "@totvs.com.br", "semarroba", "a@ext.totvs.com"}) {
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> service.register(
+                    RegisterRequestDto.builder().email(bad).name("X").password(RAW_PASSWORD).build()), bad);
+            assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode(), bad);
+            assertTrue(ex.getReason().contains("@totvs.com.br") && ex.getReason().contains("@ext.totvs.com.br"));
+        }
     }
 
     @Test
@@ -319,7 +343,7 @@ public class AuthServiceTest {
         ghost.setEmail("maria.souza@empresa.com.br");
         ghost.setName("Maria Souza");
         ghost.setJiraAccountId("acc-123");
-        ghost.setSquadId("DDWMISSI");
+        ghost.setDefaultProjectId("DDWMISSI");
         ghost.setActive(false);
 
         when(userRepository.findByEmail("maria.souza@empresa.com.br")).thenReturn(Optional.of(ghost));
@@ -340,10 +364,44 @@ public class AuthServiceTest {
 
         assertEquals("acc-123", saved.getId(), "deve reaproveitar o id da conta-fantasma, nao gerar outro");
         assertEquals("Maria Souza", saved.getName(), "nome vindo do Jira nao deve ser sobrescrito");
-        assertEquals("DDWMISSI", saved.getSquadId());
+        assertEquals("DDWMISSI", saved.getDefaultProjectId());
         assertTrue(saved.isActive());
         assertTrue(PasswordUtil.verifyPassword(RAW_PASSWORD, saved.getPasswordHash()));
         assertEquals("jwt-token", response.getToken());
+    }
+
+    @Test
+    public void testRegisterFillsEmptyJobTitleFromJiraRosterRowButNeverOverwrites() {
+        ReflectionTestUtils.setField(service, "cargoPreenchimento",
+                new CargoPreenchimento(userRepository, mock(com.agilespace.backend.repository.AuditLogRepository.class)));
+        ProjectMemberRole row = ProjectMemberRole.builder().id("r1").projectId("DDWMISSI").roleName("Developer")
+                .email("nova@empresa.com.br").build();
+        when(userRepository.findByEmail("nova@empresa.com.br")).thenReturn(Optional.empty());
+        when(projectMemberRoleRepository.findByEmailIgnoreCase(anyString())).thenReturn(List.of(row));
+        when(squadMemberRepository.findByUserIdentifier(anyString())).thenReturn(List.of());
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(userProjectResolverService.resolveUserAccess(any(User.class))).thenReturn(accessWith("DDWMISSI"));
+
+        service.register(RegisterRequestDto.builder().email("nova@empresa.com.br").name("Nova").password(RAW_PASSWORD).build());
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userRepository, atLeastOnce()).save(captor.capture());
+        assertEquals("Desenvolvedor(a)", captor.getValue().getJobTitle());
+        assertEquals("MEMBER", captor.getValue().getRole(), "o cargo do Jira nunca vira nivel de acesso");
+
+        // conta-fantasma que ja tem cargo definido: o do Jira nao sobrescreve
+        User ghost = new User();
+        ghost.setId("acc-9");
+        ghost.setEmail("velha@empresa.com.br");
+        ghost.setName("Velha");
+        ghost.setJobTitle("Tech Lead");
+        ghost.setActive(false);
+        ProjectMemberRole row2 = ProjectMemberRole.builder().id("r2").projectId("DDWMISSI").roleName("QA")
+                .email("velha@empresa.com.br").build();
+        when(userRepository.findByEmail("velha@empresa.com.br")).thenReturn(Optional.of(ghost));
+        when(projectMemberRoleRepository.findByEmailIgnoreCase("velha@empresa.com.br")).thenReturn(List.of(row2));
+        service.register(RegisterRequestDto.builder().email("velha@empresa.com.br").name("Velha").password(RAW_PASSWORD).build());
+        assertEquals("Tech Lead", ghost.getJobTitle());
     }
 
     @Test
@@ -390,7 +448,7 @@ public class AuthServiceTest {
     }
 
     @Test
-    public void testRegisterKeepsExplicitProjectContextOverProfields() {
+    public void testRegisterIgnoresClientDefaultProjectAndUsesRoster() {
         ProjectMemberRole role = new ProjectMemberRole();
         role.setId("r1");
         role.setProjectId("DDWMISSI");
@@ -407,8 +465,26 @@ public class AuthServiceTest {
 
         ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
         verify(userRepository).save(captor.capture());
-        assertEquals("ESCOLHIDO", captor.getValue().getDefaultProjectId());
+        // A squad inicial vem do roster pelo e-mail, nunca do que o cliente mandou.
+        assertEquals("DDWMISSI", captor.getValue().getDefaultProjectId());
         assertEquals("Seg", captor.getValue().getSegmentName());
+    }
+
+    @Test
+    public void testRegisterWithoutRosterNeverStoresClientDefaultProject() {
+        when(userRepository.findByEmail(anyString())).thenReturn(Optional.empty());
+        when(projectMemberRoleRepository.findByEmailIgnoreCase(anyString())).thenReturn(List.of());
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(userProjectResolverService.resolveUserAccess(any(User.class))).thenReturn(accessWith());
+
+        service.register(RegisterRequestDto.builder()
+                .email("estranho@empresa.com.br").name("Estranho").password(RAW_PASSWORD)
+                .defaultProjectId("SQUAD-ALHEIA").build());
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(captor.capture());
+        // Sem isto, em authz=legacy a conta leria e gravaria na squad alheia sem nenhum vínculo.
+        assertNull(captor.getValue().getDefaultProjectId());
     }
 
     // ---------- getMe ----------
@@ -427,12 +503,121 @@ public class AuthServiceTest {
     }
 
     @Test
+    public void testGetMeIncluiPhotoUrlSoQuandoHaFoto() {
+        User user = activeUser();
+        user.setDefaultProjectId("DDWMISSI");
+        when(userRepository.findById("u1")).thenReturn(Optional.of(user));
+        when(userProjectResolverService.resolveUserAccess(user)).thenReturn(accessWith("DDWMISSI"));
+        assertNull(service.getMe("u1").getPhotoUrl());
+
+        user.setPhotoKey("avatar-u1-123.png");
+        user.setPhotoUpdatedAt(java.time.Instant.ofEpochMilli(123));
+        assertEquals("/api/users/u1/photo?v=123", service.getMe("u1").getPhotoUrl());
+    }
+
+    @Test
     public void testGetMeUnknownUserReturnsUnauthorized() {
         when(userRepository.findById("ghost")).thenReturn(Optional.empty());
 
         ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> service.getMe("ghost"));
 
         assertEquals(HttpStatus.UNAUTHORIZED, ex.getStatusCode());
+    }
+
+    // ---------- refresh / logout ----------
+
+    @Test
+    public void testRefreshKeepsOriginalLoginInstantAndIssuesNewToken() {
+        long authAt = java.time.Instant.now().getEpochSecond() - 3600;
+        User user = activeUser();
+        user.setDefaultProjectId("DDWMISSI");
+        when(jwtTokenUtil.getMaxSessionSeconds()).thenReturn(604800L);
+        when(userRepository.findById("u1")).thenReturn(Optional.of(user));
+        when(userProjectResolverService.resolveUserAccess(user)).thenReturn(accessWith("DDWMISSI"));
+
+        AuthResponseDto response = service.refresh("u1", authAt);
+
+        assertEquals("jwt-token", response.getToken());
+        verify(jwtTokenUtil).generateToken(anyString(), anyString(), anyString(), anyString(), any(), any(), any(), eq(authAt));
+    }
+
+    @Test
+    public void testRefreshAfterAbsoluteSessionCapIsUnauthorized() {
+        long tooOld = java.time.Instant.now().getEpochSecond() - 8 * 24 * 3600;
+        when(jwtTokenUtil.getMaxSessionSeconds()).thenReturn(604800L);
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> service.refresh("u1", tooOld));
+
+        assertEquals(HttpStatus.UNAUTHORIZED, ex.getStatusCode());
+        verify(jwtTokenUtil, never()).generateToken(anyString(), anyString(), anyString(), anyString(), any(), any(), any(), anyLong());
+    }
+
+    @Test
+    public void testRefreshInactiveAccountIsUnauthorized() {
+        User user = activeUser();
+        user.setActive(false);
+        when(jwtTokenUtil.getMaxSessionSeconds()).thenReturn(604800L);
+        when(userRepository.findById("u1")).thenReturn(Optional.of(user));
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> service.refresh("u1", java.time.Instant.now().getEpochSecond()));
+
+        assertEquals(HttpStatus.UNAUTHORIZED, ex.getStatusCode());
+    }
+
+    @Test
+    public void testLogoutInvalidatesTokensIssuedBeforeNow() {
+        User user = activeUser();
+        when(userRepository.findById("u1")).thenReturn(Optional.of(user));
+        long before = java.time.Instant.now().getEpochSecond();
+
+        service.logout("u1");
+
+        assertNotNull(user.getTokensValidAfter());
+        assertTrue(user.getTokensValidAfter() >= before);
+        verify(userRepository).save(user);
+    }
+
+    // ---------- changePassword ----------
+
+    @Test
+    public void testChangePasswordSetsNewHashAndInvalidatesOtherSessions() {
+        User user = activeUser();
+        when(userRepository.findById("u1")).thenReturn(Optional.of(user));
+        when(userRepository.save(user)).thenReturn(user);
+        when(userProjectResolverService.resolveUserAccess(user)).thenReturn(accessWith("DDWMISSI"));
+
+        AuthResponseDto response = service.changePassword("u1", RAW_PASSWORD, "OutraSenha-456");
+
+        assertTrue(PasswordUtil.verifyPassword("OutraSenha-456", user.getPasswordHash()));
+        assertFalse(PasswordUtil.verifyPassword(RAW_PASSWORD, user.getPasswordHash()));
+        assertNotNull(user.getTokensValidAfter());
+        assertEquals("jwt-token", response.getToken(), "quem trocou recebe um token novo para continuar logado");
+    }
+
+    @Test
+    public void testChangePasswordWrongCurrentIsForbiddenAndKeepsTheHash() {
+        User user = activeUser();
+        String before = user.getPasswordHash();
+        when(userRepository.findById("u1")).thenReturn(Optional.of(user));
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> service.changePassword("u1", "errada-errada", "OutraSenha-456"));
+
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+        assertEquals(before, user.getPasswordHash());
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    public void testChangePasswordToTheSameOneIsRejected() {
+        User user = activeUser();
+        when(userRepository.findById("u1")).thenReturn(Optional.of(user));
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> service.changePassword("u1", RAW_PASSWORD, RAW_PASSWORD));
+
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatusCode());
     }
 
     // ---------- switchActiveProject ----------

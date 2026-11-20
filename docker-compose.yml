@@ -37,6 +37,8 @@ services:
   backend:
     build: .
     container_name: agile-space-backend
+    # O Spring espera até SHUTDOWN_TIMEOUT (30s) as requisições em andamento; o padrão do Docker (10s) mataria antes.
+    stop_grace_period: 45s
     restart: unless-stopped
     depends_on:
       db:
@@ -57,7 +59,28 @@ services:
       APP_ADMIN_KEY: ${APP_ADMIN_KEY:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:9002}
       ALLOWED_EMAIL_DOMAIN: ${ALLOWED_EMAIL_DOMAIN:-}
-      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      # Rede do proxy reverso (Caddy) cujo X-Forwarded-For o limitador de login pode ler. Vazio = ignora o cabeçalho.
+      # Com o profile "proxy": TRUSTED_PROXIES=172.16.0.0/12 (faixa padrão das redes do Docker; confira com docker network inspect).
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      # Migração do vínculo (docs/membership-api.md): legacy | shadow | new (padrão). Reverter = legacy.
+      APP_MEMBERSHIP_MODE: ${APP_MEMBERSHIP_MODE:-new}
+      # Autorização por squad (Etapa 2): legacy | shadow | new (padrão). Reverter = legacy. Ver docs/membership-api.md.
+      # Em legacy, users.default_project_id vale como "é da squad" (sem vínculo nenhum); em new só vale o vínculo
+      # (project_member_roles). Instalação nova deve ficar em new. Quem vem de legacy roda antes
+      # GET /api/admin/membership/authz-diff e confere WOULD_LOSE_ACCESS.
+      APP_MEMBERSHIP_AUTHZ: ${APP_MEMBERSHIP_AUTHZ:-new}
+      # Review (docs/ceremony-review-api.md): trava de decisão do PO/SME no servidor. enforce (padrão) | off (desliga a trava).
+      APP_SHOWCASE_DECISION_LOCK: ${APP_SHOWCASE_DECISION_LOCK:-enforce}
+      # Pedido de vínculo aprovado pela liderança da squad (Etapa 3): on (padrão) | off (só ADMIN aprova; rotas por squad 404).
+      # Ver docs/link-requests-squad-api.md.
+      APP_LINK_REQUESTS_SQUAD_APPROVAL: ${APP_LINK_REQUESTS_SQUAD_APPROVAL:-on}
+      # Bootstrap de squad vazia em authz=new: off (padrão) | on. on deixa qualquer conta sem vínculo virar Agile Master de uma squad nova.
+      APP_MEMBERSHIP_BOOTSTRAP: ${APP_MEMBERSHIP_BOOTSTRAP:-off}
+      # Nível de conta LEAD (Etapa 4): off (padrão) = não concede nada | legacy = como antes. Reverter = legacy. Ver docs/membership-api.md.
+      APP_MEMBERSHIP_LEAD_LEVEL: ${APP_MEMBERSHIP_LEAD_LEVEL:-off}
+      # Padrão prod: sem a variável o backend sobe COM a trava de segredos (ProductionSecretsValidator), sem Swagger e
+      # sem mensagens de erro detalhadas. Desenvolvimento local usa SPRING_PROFILES_ACTIVE=dev no .env (ver .env.example).
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
       # OpenTelemetry: agente sempre presente na imagem (ver Dockerfile), inerte até
       # OTEL_JAVAAGENT_ENABLED=true. Vendor-neutro (OTLP) — funciona com SigNoz ou qualquer
       # outro backend compatível, só trocando OTEL_EXPORTER_OTLP_ENDPOINT.
@@ -65,7 +88,10 @@ services:
       OTEL_SERVICE_NAME: agile-space-backend
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-grpc}
-      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=${SPRING_PROFILES_ACTIVE:-dev}
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=${SPRING_PROFILES_ACTIVE:-prod}
+    volumes:
+      # Anexos dos cards da Review (PNG/JPEG/PDF). Entra no backup junto com o banco.
+      - agile-space-uploads:/data/uploads
     ports:
       # Loopback por padrão: em produção o acesso externo passa pelo Caddy (profile "proxy").
       # PUBLISH_ADDR=0.0.0.0 expõe direto na rede, se precisar sem proxy.
@@ -95,6 +121,9 @@ services:
         NEXT_PUBLIC_SPRING_API_URL: ${NEXT_PUBLIC_SPRING_API_URL:-http://localhost:8002/api}
         NEXT_PUBLIC_GEMINI_API_KEY: ${NEXT_PUBLIC_GEMINI_API_KEY:-}
         NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
+        # Pré-baixa o modelo de embedding (~470MB) na imagem: a busca semântica funciona sem depender de saída
+        # para huggingface.co no runtime. 0 desliga (a imagem fica menor e o modelo baixa na 1a chamada).
+        PRELOAD_EMBEDDING_MODEL: ${PRELOAD_EMBEDDING_MODEL:-1}
     container_name: agile-space-frontend
     restart: unless-stopped
     depends_on:
@@ -118,7 +147,7 @@ services:
       resources:
         limits:
           cpus: "${FRONTEND_CPU_LIMIT:-1}"
-          memory: ${FRONTEND_MEMORY_LIMIT:-512M}
+          memory: ${FRONTEND_MEMORY_LIMIT:-2048M}
 
   # Reverse proxy + TLS automático (Let's Encrypt) na frente de frontend/backend. Só entra em
   # jogo com o profile "proxy" (docker compose --profile proxy up -d) — em dev local, sem
@@ -157,5 +186,6 @@ services:
 
 volumes:
   agile-space-db-data:
+  agile-space-uploads:
   agile-space-caddy-data:
   agile-space-caddy-config:

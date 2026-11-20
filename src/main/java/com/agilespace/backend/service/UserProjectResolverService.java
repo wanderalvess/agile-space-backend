@@ -23,10 +23,52 @@ public class UserProjectResolverService {
     private final ProjectConfigRepository projectConfigRepository;
 
     /**
-     * Resolve todos os projetos, tribos e cargos associados ao usuário.
+     * Qual linha representa a pessoa numa squad quando ela tem várias. Ordem: (1) liderança vence contribuidor;
+     * (2) entre lideranças, o papel de maior alcance (tribo/coach/people lead, depois PO/AM/SM, depois o resto);
+     * (3) desempate estável por nome do papel e id, para a resposta não depender da ordem do banco.
+     */
+    static final Comparator<ProjectMemberRole> PRIMARY_ROLE_ORDER = Comparator
+            .comparing((ProjectMemberRole r) -> !r.isLeadership())
+            .thenComparingInt(r -> leadershipRank(r.getRoleKey()))
+            .thenComparing(r -> r.getRoleName() == null ? "" : r.getRoleName(), String.CASE_INSENSITIVE_ORDER)
+            .thenComparing(r -> r.getId() == null ? "" : r.getId());
+
+    private static final List<String> LEADERSHIP_RANK = List.of(
+            "TRIBE_LEAD", "AGILE_COACH", "PEOPLE_LEAD", "PRODUCT_OWNER", "AGILE_MASTER", "SCRUM_MASTER");
+
+    private static int leadershipRank(String roleKey) {
+        if (roleKey == null) return LEADERSHIP_RANK.size();
+        int i = LEADERSHIP_RANK.indexOf(roleKey.toUpperCase(Locale.ROOT));
+        return i < 0 ? LEADERSHIP_RANK.size() : i;
+    }
+
+    /**
+     * Linha que expande o acesso para a tribo/segmento inteiros: liderança de verdade (isLeadership=true) com papel
+     * TRIBE_LEAD, AGILE_COACH ou PEOPLE_LEAD.
+     */
+    static boolean isTransversalLeadershipRow(ProjectMemberRole role) {
+        return role.isLeadership() && ("TRIBE_LEAD".equalsIgnoreCase(role.getRoleKey())
+                || "AGILE_COACH".equalsIgnoreCase(role.getRoleKey())
+                || "PEOPLE_LEAD".equalsIgnoreCase(role.getRoleKey()));
+    }
+
+    static int rankOfKey(String roleKey) {
+        return leadershipRank(roleKey);
+    }
+
+    /** True se o projeto já tem alguma pessoa marcada como liderança no cadastro (project_member_roles). */
+    @Transactional(readOnly = true)
+    public boolean hasRegisteredLeadership(String projectId) {
+        if (projectId == null || projectId.isBlank()) return false;
+        return projectMemberRoleRepository.findByProjectId(projectId.trim()).stream().anyMatch(ProjectMemberRole::isLeadership);
+    }
+
+    /**
+     * Linhas de project_member_roles que pertencem à conta: por e-mail, por conta do Jira e por user_id (o vínculo
+     * explícito do "sou eu"), sem repetir a mesma linha. Usada pelo resolvedor legado e pelo {@link MembershipService}.
      */
     @Transactional(readOnly = true)
-    public UserProjectAccessDto resolveUserAccess(User user) {
+    public List<ProjectMemberRole> loadDirectRows(User user) {
         String email = user.getEmail();
         String jiraAccountId = user.getJiraAccountId();
 
@@ -54,6 +96,16 @@ public class UserProjectResolverService {
                 }
             }
         }
+        return directRoles;
+    }
+
+    /**
+     * Resolve todos os projetos, tribos e cargos associados ao usuário (cálculo LEGADO; o modelo novo é o
+     * {@link MembershipService}, que reaproveita {@link #loadDirectRows} e {@link #PRIMARY_ROLE_ORDER}).
+     */
+    @Transactional(readOnly = true)
+    public UserProjectAccessDto resolveUserAccess(User user) {
+        List<ProjectMemberRole> directRoles = loadDirectRows(user);
 
         Map<String, UserProjectAccessDto.ProjectAccessItem> projectMap = new LinkedHashMap<>();
         Set<String> leaderTribes = new HashSet<>();
@@ -61,25 +113,41 @@ public class UserProjectResolverService {
         boolean isTransversalLeader = false;
 
         // 1. Projetos com atribuição direta
+        // A mesma pessoa pode ter mais de uma linha na mesma squad (PO e Developer; linha do Jira + linha cadastrada à mão).
+        // O accessibleProjects tem UM item por squad, então escolhemos qual linha o representa: ver PRECEDÊNCIA abaixo.
+        // A ordem dos projetos continua a de primeira aparição (afeta o projeto primário quando não há default); só a
+        // linha que representa cada squad é escolhida por PRIMARY_ROLE_ORDER (determinístico, não depende do banco).
+        Map<String, ProjectMemberRole> representative = new HashMap<>();
+        for (ProjectMemberRole role : directRoles) {
+            representative.merge(role.getProjectId(), role, (a, b) -> PRIMARY_ROLE_ORDER.compare(b, a) < 0 ? b : a);
+        }
         for (ProjectMemberRole role : directRoles) {
             Optional<ProjectConfig> optProject = projectConfigRepository.findById(role.getProjectId());
             String projectName = optProject.map(ProjectConfig::getName).orElse(role.getProjectId());
             String segmentName = optProject.map(ProjectConfig::getSegmentName).orElse("");
             String tribeName = optProject.map(ProjectConfig::getTribeName).orElse("");
 
-            projectMap.put(role.getProjectId(), UserProjectAccessDto.ProjectAccessItem.builder()
-                    .projectId(role.getProjectId())
-                    .projectName(projectName)
-                    .segmentName(segmentName)
-                    .tribeName(tribeName)
-                    .roleName(role.getRoleName())
-                    .roleKey(role.getRoleKey())
-                    .isDirectAssignment(true)
-                    .isLeadership(role.isLeadership())
-                    .build());
+            // PRECEDÊNCIA: liderança vence contribuidor na mesma squad (antes: a última linha ganhava, e quem era PO e
+            // Developer podia perder isLeadership). A detecção de liderança transversal abaixo olha TODAS as linhas,
+            // independentemente de qual representa a squad.
+            if (representative.get(role.getProjectId()) == role) {
+                projectMap.put(role.getProjectId(), UserProjectAccessDto.ProjectAccessItem.builder()
+                        .projectId(role.getProjectId())
+                        .projectName(projectName)
+                        .segmentName(segmentName)
+                        .tribeName(tribeName)
+                        .roleName(role.getRoleName())
+                        .roleKey(role.getRoleKey())
+                        .isDirectAssignment(true)
+                        .isLeadership(role.isLeadership())
+                        .build());
+            }
 
             // Identifica se é liderança de tribo / segmento (ex: Tribe Lead, Agile Coach, People Lead)
-            if ("TRIBE_LEAD".equalsIgnoreCase(role.getRoleKey()) || "AGILE_COACH".equalsIgnoreCase(role.getRoleKey()) || "PEOPLE_LEAD".equalsIgnoreCase(role.getRoleKey())) {
+            // Só vale para linha de liderança de verdade (isLeadership=true: sync do Jira ou gestão de time). A roleKey
+            // sozinha vem do NOME do papel, que um convite/backfill grava com isLeadership=false: sem esta exigência,
+            // convidar alguém como "Tribe Lead" dava acesso a todos os projetos da tribo.
+            if (isTransversalLeadershipRow(role)) {
                 isTransversalLeader = true;
                 if (!tribeName.isBlank()) leaderTribes.add(tribeName.toLowerCase());
                 if (!segmentName.isBlank()) leaderSegments.add(segmentName.toLowerCase());

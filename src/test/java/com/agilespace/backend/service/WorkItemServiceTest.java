@@ -168,6 +168,7 @@ public class WorkItemServiceTest {
         assertEquals("delivered", saved.getCeremonyStatus());
         assertEquals("Aceito pelo PO", saved.getDecisionFeedback());
         assertNotNull(saved.getDecidedAt());
+        assertTrue(saved.getDecidedAt().endsWith("Z"), saved.getDecidedAt()); // instante com fuso, não hora local do servidor
     }
 
     @Test
@@ -291,6 +292,43 @@ public class WorkItemServiceTest {
         assertEquals(5.0, stats.get("velocityReal"));
         assertEquals(7.0, stats.get("previsto"));
         assertEquals(1, stats.get("carryOvers"));
+    }
+
+    @Test
+    public void testGetSprintStatsExposesJiraNumbersBesideTheCeremonyOnes() {
+        SquadIssueSnapshot done = item("DDW-1", "delivered", 5.0);
+        done.setStatusCategory("done");
+        SquadIssueSnapshot bug = item("DDW-2", "carried_over", 3.0);
+        bug.setStatusCategory("indeterminate");
+        bug.setIsBug(true);
+        SquadIssueSnapshot noCeremony = item("DDW-3", null, null); // sprint sem Poker/Planner: só o Jira conhece o item
+        noCeremony.setStatusCategory("done");
+        when(issueSnapshotRepository.findBySquadIdAndSprintId("SQ1", "SPRINT-42")).thenReturn(List.of(done, bug, noCeremony));
+
+        Map<String, Object> stats = service.getSprintStats("SQ1", "SPRINT-42");
+
+        // os quatro de sempre, intactos
+        assertEquals(5.0, stats.get("velocityReal"));
+        assertEquals(5.0, stats.get("entregue"));
+        assertEquals(8.0, stats.get("previsto"));
+        assertEquals(1, stats.get("carryOvers"));
+        // os novos, do Jira sincronizado
+        assertEquals(3, stats.get("totalItens"));
+        assertEquals(2, stats.get("concluidosJira"));
+        assertEquals(1, stats.get("bugs"));
+        assertEquals(3.0, stats.get("carryOverPontos"));
+    }
+
+    @Test
+    public void testGetSprintStatsEmptySprintHasZeroForNewNumbersToo() {
+        when(issueSnapshotRepository.findBySquadIdAndSprintId("SQ1", "SPRINT-42")).thenReturn(List.of());
+
+        Map<String, Object> stats = service.getSprintStats("SQ1", "SPRINT-42");
+
+        assertEquals(0, stats.get("totalItens"));
+        assertEquals(0, stats.get("concluidosJira"));
+        assertEquals(0, stats.get("bugs"));
+        assertEquals(0.0, stats.get("carryOverPontos"));
     }
 
     // ---------- getAssignedWorkItems ----------

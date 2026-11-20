@@ -52,7 +52,12 @@ public class McpKnowledgeTools {
             @ToolParam(description = "UUID do documento") String id,
             ToolContext toolContext) {
         ApiKeyContext.from(toolContext).requireScope(ApiKeyScope.KNOWLEDGE_READ);
-        return knowledgeService.getDocumentById(UUID.fromString(id));
+        KnowledgeDocument doc = knowledgeService.getDocumentById(UUID.fromString(id));
+        // Rascunho, arquivado e lixeira não saem pelo MCP (o assistente externo só vê o que está publicado).
+        if (!KnowledgeService.isPubliclyReadable(doc)) {
+            throw new IllegalArgumentException("Document not found with id: " + id);
+        }
+        return doc;
     }
 
     @Tool(description = "Importa (cria) um novo documento na base de conhecimento do Espaço Ágil")

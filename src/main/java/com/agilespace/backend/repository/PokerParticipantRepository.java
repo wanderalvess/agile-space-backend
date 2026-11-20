@@ -2,6 +2,9 @@ package com.agilespace.backend.repository;
 
 import com.agilespace.backend.domain.PokerParticipant;
 import org.springframework.data.jpa.repository.JpaRepository;
+import java.time.LocalDateTime;
+import java.util.Collection;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -16,6 +19,16 @@ public interface PokerParticipantRepository extends JpaRepository<PokerParticipa
     Optional<PokerParticipant> findByRoomIdAndId(String roomId, String id);
     void deleteByRoomIdAndId(String roomId, String id);
     void deleteByRoomId(String roomId);
+
+    /** Heartbeat: grava só last_seen, sem reescrever o resto da linha (papel/facilitador). */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("update PokerParticipant p set p.lastSeen = :lastSeen where p.dbId = :dbId")
+    int updateLastSeen(@Param("dbId") String dbId, @Param("lastSeen") String lastSeen);
+
+    /** Define a flag de facilitador explicitamente (o upsert só promove, nunca rebaixa). */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("update PokerParticipant p set p.isFacilitator = :value where p.dbId = :dbId")
+    int setFacilitator(@Param("dbId") String dbId, @Param("value") boolean value);
 
     /**
      * Entrada idempotente na sala. Dois POSTs simultâneos (ex.: join + sincronização de perfil)
@@ -42,4 +55,8 @@ public interface PokerParticipantRepository extends JpaRepository<PokerParticipa
                            @Param("isFacilitator") Boolean isFacilitator,
                            @Param("globalRole") String globalRole,
                            @Param("lastSeen") String lastSeen);
+
+    /** [roomId, participantes, último heartbeat (ISO)] por sala. */
+    @Query("SELECT p.roomId, COUNT(p), MAX(p.lastSeen) FROM PokerParticipant p WHERE p.roomId IN :roomIds GROUP BY p.roomId")
+    List<Object[]> summarizeByRoom(@Param("roomIds") Collection<String> roomIds);
 }

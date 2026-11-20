@@ -67,6 +67,10 @@ public class JoltProject {
     @Column(columnDefinition = "TEXT")
     private String flowEdges;
 
+    /** Lock otimista: duas gravações do mesmo projeto não se sobrescrevem em silêncio (V65). */
+    @Version
+    private Long version;
+
     @OneToMany(mappedBy = "project", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("versionNumber DESC")
     @Builder.Default

@@ -14,10 +14,12 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -111,5 +113,14 @@ public class PokerControllerTest {
         ResponseEntity<Void> response = controller.clearVotes("room-1", request);
 
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
+    }
+
+    @Test
+    public void testHandleOptimisticLockReturnsConflict() {
+        ResponseEntity<Map<String, String>> response =
+                controller.handleOptimisticLock(new ObjectOptimisticLockingFailureException(PokerRoom.class, "room-1"));
+
+        assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
+        assertEquals("CONFLICT", response.getBody().get("error"));
     }
 }

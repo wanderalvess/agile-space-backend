@@ -42,6 +42,16 @@ class ProductionSecretsValidatorTest {
     }
 
     @Test
+    @DisplayName("Aceita lista de domínios e recusa entrada malformada")
+    void validatesDomainList() {
+        assertDoesNotThrow(() -> new ProductionSecretsValidator(STRONG_JWT, STRONG_AES, "totvs.com.br,ext.totvs.com.br").validate());
+        assertThrows(IllegalStateException.class,
+                () -> new ProductionSecretsValidator(STRONG_JWT, STRONG_AES, "@totvs.com.br").validate());
+        assertThrows(IllegalStateException.class,
+                () -> new ProductionSecretsValidator(STRONG_JWT, STRONG_AES, "totvs.com.br,,").validate());
+    }
+
+    @Test
     @DisplayName("Lista todos os problemas de uma vez")
     void reportsAllProblems() {
         IllegalStateException ex = assertThrows(IllegalStateException.class,

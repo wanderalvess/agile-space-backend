@@ -10,7 +10,6 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/changelog")
-@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class ChangelogController {
 
     @Autowired
@@ -30,7 +29,9 @@ public class ChangelogController {
 
     @GetMapping("/{id}")
     public ResponseEntity<AppRelease> getById(@PathVariable String id) {
+        // Rascunho (não publicado) não é público: só o painel admin lê.
         return service.getReleaseById(id)
+                .filter(r -> !Boolean.FALSE.equals(r.getIsPublished()))
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }

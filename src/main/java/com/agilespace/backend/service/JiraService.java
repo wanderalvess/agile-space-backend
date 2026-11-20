@@ -29,7 +29,7 @@ import java.util.List;
 public class JiraService {
 
     private static final int MAX_RATE_LIMIT_RETRIES = 3;
-    // Mesmo valor usado no jiradash (jira-api.js) pra completar worklog
+    // Limite de paralelismo para completar worklog
     // truncado — busca sequencial (1 issue por vez, dentro da mesma request)
     // arriscava estourar o readTimeout (45s) numa página com várias issues de
     // worklog longo, já que cada fetch extra é bloqueante.
@@ -48,7 +48,15 @@ public class JiraService {
     private final ObjectMapper objectMapper;
 
     public JiraService() {
-        SimpleClientHttpRequestFactory strictFactory = new SimpleClientHttpRequestFactory();
+        // Redirecionamento NUNCA é seguido pelo HttpURLConnection: o Bearer iria junto para onde o Location
+        // mandar. followSameHostRedirects segue só redirecionamento https para o MESMO host, revalidando cada salto.
+        SimpleClientHttpRequestFactory strictFactory = new SimpleClientHttpRequestFactory() {
+            @Override
+            protected void prepareConnection(HttpURLConnection connection, String httpMethod) throws IOException {
+                super.prepareConnection(connection, httpMethod);
+                connection.setInstanceFollowRedirects(false);
+            }
+        };
         strictFactory.setConnectTimeout(15000);
         strictFactory.setReadTimeout(45000);
         this.strictRestTemplate = new RestTemplate(strictFactory);
@@ -73,6 +81,7 @@ public class JiraService {
                     }
                 }
                 super.prepareConnection(connection, httpMethod);
+                connection.setInstanceFollowRedirects(false);
             }
         };
         trustAllFactory.setConnectTimeout(15000);
@@ -101,31 +110,138 @@ public class JiraService {
     }
 
     /**
-     * Bloqueia alvos claramente sensíveis (loopback, link-local — inclui
-     * 169.254.169.254, o endpoint de metadata de cloud) antes de proxyar
-     * qualquer request. `domain` é texto livre salvo por usuário (squad pode
-     * apontar pra qualquer instância Jira), então não dá pra travar num host
-     * fixo — mas ninguém tem Jira de verdade rodando em loopback/link-local,
-     * então bloquear só esses reduz a superfície de SSRF sem arriscar quebrar
-     * um Jira corporativo legítimo em rede interna (10.x/172.16.x/192.168.x
-     * continuam permitidos — sem visibilidade de onde o Jira real está
-     * hospedado pra saber se travar essas faixas quebraria produção).
+     * `app.jira.allow-private-hosts`: libera redes privadas (10.x, 172.16-31.x, 192.168.x, 100.64/10, fc00::/7).
+     * Padrão false: o backend roda numa VM na nuvem e o Jira corporativo é alcançado pela internet; liberar redes
+     * privadas deixaria `domain` (texto livre do usuário) apontar para serviços internos (banco, actuator, outros
+     * containers) e ler a resposta. Quem tiver Jira em rede interna liga explicitamente.
+     */
+    @org.springframework.beans.factory.annotation.Value("${app.jira.allow-private-hosts:false}")
+    private boolean allowPrivateHosts = false;
+
+    /**
+     * Normaliza o domínio digitado: remove esquema e barras finais e exige SÓ host[:porta]. Caminho, credencial
+     * (user@host), consulta e fragmento são recusados (400) — `domain` é concatenado em "https://" + domain + path.
+     */
+    static String cleanDomain(String domain) {
+        String d = domain == null ? "" : domain.trim().replaceFirst("(?i)^https?://", "");
+        while (d.endsWith("/")) d = d.substring(0, d.length() - 1);
+        if (!d.matches("[A-Za-z0-9.-]+(:[0-9]{1,5})?")) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Domínio do Jira inválido: informe só o endereço (ex.: jira.empresa.com.br), sem caminho, usuário ou parâmetros.");
+        }
+        return d;
+    }
+
+    /** Sempre bloqueado: loopback, link-local (inclui 169.254.169.254, metadata de nuvem), 0.0.0.0 e multicast. */
+    static boolean isAlwaysBlocked(InetAddress addr) {
+        return addr.isLoopbackAddress() || addr.isLinkLocalAddress() || addr.isAnyLocalAddress() || addr.isMulticastAddress();
+    }
+
+    /** Redes privadas: 10/8, 172.16/12, 192.168/16, CGNAT 100.64/10 e IPv6 ULA fc00::/7. */
+    static boolean isPrivateNetwork(InetAddress addr) {
+        if (addr.isSiteLocalAddress()) return true;
+        byte[] b = addr.getAddress();
+        if (b.length == 4) {
+            int first = b[0] & 0xFF, second = b[1] & 0xFF;
+            return first == 100 && second >= 64 && second <= 127;
+        }
+        return b.length == 16 && (b[0] & 0xFE) == 0xFC;
+    }
+
+    /**
+     * Bloqueia alvos sensíveis antes de proxyar qualquer request: loopback, link-local, 0.0.0.0, multicast e,
+     * por padrão, redes privadas (ver allowPrivateHosts). `domain` é texto livre salvo por usuário, então não dá
+     * pra travar num host fixo. Confere TODOS os endereços que o nome resolve. Limitação conhecida: a checagem é
+     * feita antes da conexão (DNS rebinding — resposta diferente entre a checagem e a conexão — não é coberto).
      */
     public void assertNotBlockedHost(URI uri) {
         String host = uri.getHost();
         if (host == null) throw new IllegalArgumentException("Domain inválido.");
         assertAllowedDomain(host);
         try {
-            InetAddress addr = InetAddress.getByName(host);
-            if (addr.isLoopbackAddress() || addr.isLinkLocalAddress() || addr.isAnyLocalAddress()
-                    || addr.isMulticastAddress()) {
-                throw new IllegalArgumentException("Domain não permitido: " + host);
+            for (InetAddress addr : InetAddress.getAllByName(host)) {
+                if (isAlwaysBlocked(addr) || (!allowPrivateHosts && isPrivateNetwork(addr))) {
+                    throw new IllegalArgumentException("Domain não permitido: " + host);
+                }
             }
         } catch (java.net.UnknownHostException e) {
             // Não resolveu: deixa a própria chamada HTTP falhar adiante com o
             // erro de conexão de sempre, em vez de travar aqui — evita
             // bloquear falso-positivo por falha transitória de DNS.
         }
+    }
+
+    /** Corpo de erro JSON válido (aspas e quebras de linha escapadas). */
+    static String jsonError(String message) {
+        try {
+            return new ObjectMapper().writeValueAsString(java.util.Map.of("error", message));
+        } catch (Exception e) {
+            return "{\"error\": \"Erro ao falar com o Jira.\"}";
+        }
+    }
+
+    static final String MSG_TOKEN_RECUSADO = "O Jira não reconheceu o token. Confira se o PAT existe e não foi revogado, "
+            + "gere um novo no Jira e salve de novo.";
+
+    /**
+     * O Jira recusou o token do usuário. Alguns Jira (Server/DC com navegação anônima liberada) não respondem 401:
+     * tratam o token inexistente como chamada anônima e devolvem 400 com "cannot be viewed by anonymous users".
+     */
+    static boolean tokenRecusado(org.springframework.web.client.HttpStatusCodeException e) {
+        int status = e.getStatusCode().value();
+        if (status == 401) return true;
+        String body = e.getResponseBodyAsString();
+        return status == 400 && body != null && body.toLowerCase(java.util.Locale.ROOT).contains("anonymous users");
+    }
+
+    /**
+     * Repasse de erro do Jira ao cliente. Token recusado vira 424 (e não 401): o 401 do Jira atravessava o proxy e o
+     * frontend o lê como "sessão do portal expirada", limpando a sessão e mandando o usuário para o login.
+     */
+    static ResponseEntity<String> upstreamError(org.springframework.web.client.HttpStatusCodeException e) {
+        if (tokenRecusado(e)) {
+            return ResponseEntity.status(HttpStatus.FAILED_DEPENDENCY).body(jsonError(MSG_TOKEN_RECUSADO));
+        }
+        return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+    }
+
+    /**
+     * Status HTTP de uma falha no proxy: domínio recusado pela política de hosts é erro do pedido (400); Jira
+     * inalcançável (timeout, DNS, conexão recusada, TLS) é falha do upstream (502); o resto segue 500.
+     */
+    static HttpStatus statusFor(Exception e) {
+        if (e instanceof IllegalArgumentException && e.getMessage() != null && e.getMessage().startsWith("Domain")) {
+            return HttpStatus.BAD_REQUEST;
+        }
+        if (e instanceof org.springframework.web.client.ResourceAccessException) {
+            return HttpStatus.BAD_GATEWAY;
+        }
+        Throwable cur = e;
+        while (cur != null) {
+            if (cur instanceof java.net.SocketTimeoutException || cur instanceof java.net.UnknownHostException
+                    || cur instanceof java.net.ConnectException || cur instanceof javax.net.ssl.SSLException) {
+                return HttpStatus.BAD_GATEWAY;
+            }
+            cur = cur.getCause();
+        }
+        return HttpStatus.INTERNAL_SERVER_ERROR;
+    }
+
+    /** Motivo curto e seguro para o cliente: não vaza URL, consulta nem detalhes de rede interna. */
+    static String describe(Exception e) {
+        Throwable cur = e;
+        while (cur != null) {
+            if (cur instanceof java.net.SocketTimeoutException) return "tempo esgotado ao esperar o Jira";
+            if (cur instanceof java.net.UnknownHostException) return "domínio do Jira não encontrado";
+            if (cur instanceof java.net.ConnectException) return "não foi possível conectar ao Jira";
+            if (cur instanceof javax.net.ssl.SSLException) return "falha no certificado TLS do Jira";
+            cur = cur.getCause();
+        }
+        if (e instanceof IllegalArgumentException && e.getMessage() != null && e.getMessage().startsWith("Domain")) {
+            return "domínio do Jira não permitido";
+        }
+        if (e instanceof org.springframework.web.client.RestClientException) return "falha de conexão com o Jira";
+        return "erro inesperado (veja os logs do servidor)";
     }
 
     /**
@@ -135,6 +251,11 @@ public class JiraService {
      * certificado válido, e preserva compatibilidade com o Jira corporativo
      * que motivou o trust-all original.
      */
+    /** GET autenticado com as mesmas proteções do proxy (host bloqueado, TLS estrito primeiro, redirecionamento controlado, 429). */
+    public ResponseEntity<String> exchangeGet(URI uri, HttpEntity<Void> entity) {
+        return exchangeSecure(uri, entity, String.class);
+    }
+
     private <T> ResponseEntity<T> exchangeSecure(URI uri, HttpEntity<Void> entity, Class<T> responseType) {
         assertNotBlockedHost(uri);
         try {
@@ -169,17 +290,42 @@ public class JiraService {
         int attempt = 0;
         while (true) {
             try {
-                return restTemplate.exchange(uri, HttpMethod.GET, entity, responseType);
+                return followSameHostRedirects(restTemplate, uri, entity, responseType);
             } catch (org.springframework.web.client.HttpStatusCodeException e) {
                 if (e.getStatusCode().value() == 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
                     long waitMs = retryAfterMillis(e, attempt);
-                    log.warn("Jira rate limited (429) on {}, retry {}/{} after {}ms", uri, attempt + 1, MAX_RATE_LIMIT_RETRIES, waitMs);
+                    log.warn("Jira rate limited (429) on {}, retry {}/{} after {}ms", uri.getHost(), attempt + 1, MAX_RATE_LIMIT_RETRIES, waitMs);
                     sleepUninterruptibly(waitMs);
                     attempt++;
                     continue;
                 }
                 throw e;
             }
+        }
+    }
+
+    private static final int MAX_REDIRECTS = 3;
+
+    /**
+     * Segue redirecionamento (301/302/303/307/308) só para https no MESMO host e porta — por exemplo barra final
+     * ou login do Jira. Qualquer outro destino é recusado: o Bearer não sai do host configurado.
+     */
+    private <T> ResponseEntity<T> followSameHostRedirects(RestTemplate restTemplate, URI uri, HttpEntity<Void> entity, Class<T> responseType) {
+        URI current = uri;
+        for (int hop = 0; ; hop++) {
+            ResponseEntity<T> response = restTemplate.exchange(current, HttpMethod.GET, entity, responseType);
+            int status = response.getStatusCode().value();
+            URI location = response.getHeaders().getLocation();
+            if (status < 300 || status >= 400 || location == null) return response;
+            URI next = current.resolve(location);
+            boolean sameHost = "https".equalsIgnoreCase(next.getScheme()) && next.getHost() != null
+                    && next.getHost().equalsIgnoreCase(uri.getHost()) && next.getPort() == uri.getPort();
+            if (!sameHost || hop >= MAX_REDIRECTS) {
+                log.warn("Redirecionamento do Jira recusado (host {} -> {}).", uri.getHost(), next.getHost());
+                throw new org.springframework.web.client.RestClientException("Redirecionamento do Jira recusado.");
+            }
+            assertNotBlockedHost(next);
+            current = next;
         }
     }
 
@@ -247,7 +393,7 @@ public class JiraService {
     }
 
     public ResponseEntity<String> searchIssues(JiraSearchRequest request) {
-        String cleanDomain = request.getDomain().trim().replace("https://", "").replace("http://", "");
+        String cleanDomain = cleanDomain(request.getDomain());
         
         int maxResults = request.getMaxResults() != null ? Math.min(100, Math.max(1, request.getMaxResults())) : 50;
         int startAt = request.getStartAt() != null ? Math.max(0, request.getStartAt()) : 0;
@@ -278,8 +424,8 @@ public class JiraService {
             jiraUri = new URI(urlStr);
         } catch (Exception e) {
             log.error("Failed to construct encoded Jira URI", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao construir URL de busca do Jira: " + e.getMessage() + "\"}");
+            return ResponseEntity.status(statusFor(e))
+                    .body(jsonError("Erro ao construir URL de busca do Jira: " + describe(e)));
         }
 
         HttpHeaders headers = new HttpHeaders();
@@ -292,7 +438,7 @@ public class JiraService {
         HttpEntity<Void> entity = new HttpEntity<>(headers);
 
         try {
-            log.info("Proxying JQL search to Jira URI: {}", jiraUri);
+            log.debug("Proxying JQL search to Jira host {}", jiraUri.getHost());
             ResponseEntity<String> response = exchangeSecure(jiraUri, entity, String.class);
             String body = response.getBody();
             
@@ -327,11 +473,11 @@ public class JiraService {
             return ResponseEntity.ok(body);
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.error("Jira search failed with status: {}, body: {}", e.getStatusCode(), e.getResponseBodyAsString());
-            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+            return upstreamError(e);
         } catch (Exception e) {
             log.error("Jira search failed", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao conectar ao Jira: " + e.getMessage() + "\"}");
+            return ResponseEntity.status(statusFor(e))
+                    .body(jsonError("Erro ao conectar ao Jira: " + describe(e)));
         }
     }
 
@@ -342,14 +488,14 @@ public class JiraService {
      * manualmente por squad, que varia entre instâncias/projetos Jira.
      */
     public ResponseEntity<String> getFields(String domain, String token) {
-        String cleanDomain = domain.trim().replace("https://", "").replace("http://", "");
+        String cleanDomain = cleanDomain(domain);
         URI jiraUri;
         try {
             jiraUri = new URI("https://" + cleanDomain + "/rest/api/2/field");
         } catch (Exception e) {
             log.error("Failed to construct Jira field URI", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao construir URL do Jira: " + e.getMessage() + "\"}");
+            return ResponseEntity.status(statusFor(e))
+                    .body(jsonError("Erro ao construir URL do Jira: " + describe(e)));
         }
 
         HttpHeaders headers = new HttpHeaders();
@@ -361,16 +507,16 @@ public class JiraService {
         HttpEntity<Void> entity = new HttpEntity<>(headers);
 
         try {
-            log.info("Fetching Jira field metadata from URI: {}", jiraUri);
+            log.debug("Fetching Jira field metadata from host {}", jiraUri.getHost());
             ResponseEntity<String> response = exchangeSecure(jiraUri, entity, String.class);
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.error("Jira field metadata failed with status: {}, body: {}", e.getStatusCode(), e.getResponseBodyAsString());
-            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+            return upstreamError(e);
         } catch (Exception e) {
             log.error("Jira field metadata failed", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao buscar campos do Jira: " + e.getMessage() + "\"}");
+            return ResponseEntity.status(statusFor(e))
+                    .body(jsonError("Erro ao buscar campos do Jira: " + describe(e)));
         }
     }
 
@@ -380,7 +526,7 @@ public class JiraService {
      * Busca um caso de teste do Zephyr Scale/ATM (/rest/atm/1.0/testcase/{key}). Só leitura, com o token do próprio usuário.
      */
     public ResponseEntity<String> getTestCase(String domain, String token, String testCaseKey) {
-        String cleanDomain = domain.trim().replace("https://", "").replace("http://", "");
+        String cleanDomain = cleanDomain(domain);
         String key = testCaseKey.trim();
         if (!key.matches("[A-Za-z0-9_-]{1,60}")) {
             return ResponseEntity.badRequest().body("{\"error\": \"Código de caso de teste inválido.\"}");
@@ -389,8 +535,8 @@ public class JiraService {
         try {
             jiraUri = new URI("https://" + cleanDomain + "/rest/atm/1.0/testcase/" + key);
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao construir URL do Jira: " + e.getMessage() + "\"}");
+            return ResponseEntity.status(statusFor(e))
+                    .body(jsonError("Erro ao construir URL do Jira: " + describe(e)));
         }
         HttpHeaders headers = new HttpHeaders();
         headers.set("Authorization", "Bearer " + token.trim());
@@ -403,11 +549,11 @@ public class JiraService {
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.warn("Jira testcase {} failed with status {}", key, e.getStatusCode());
-            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+            return upstreamError(e);
         } catch (Exception e) {
             log.warn("Jira testcase {} failed: {}", key, e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao buscar o caso de teste no Jira: " + e.getMessage() + "\"}");
+            return ResponseEntity.status(statusFor(e))
+                    .body(jsonError("Erro ao buscar o caso de teste no Jira: " + describe(e)));
         }
     }
 
@@ -416,14 +562,14 @@ public class JiraService {
      * rapidViewId sem o usuário precisar digitar. Devolve o JSON do Jira ({values:[{id,name,type}]}).
      */
     public ResponseEntity<String> listScrumBoards(String domain, String token, String projectKey) {
-        String cleanDomain = domain.trim().replace("https://", "").replace("http://", "");
+        String cleanDomain = cleanDomain(domain);
         URI jiraUri;
         try {
             jiraUri = new URI("https://" + cleanDomain + "/rest/agile/1.0/board?type=scrum&maxResults=50&projectKeyOrId="
                     + java.net.URLEncoder.encode(projectKey.trim(), java.nio.charset.StandardCharsets.UTF_8));
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao construir URL do Jira: " + e.getMessage() + "\"}");
+            return ResponseEntity.status(statusFor(e))
+                    .body(jsonError("Erro ao construir URL do Jira: " + describe(e)));
         }
         HttpHeaders headers = new HttpHeaders();
         headers.set("Authorization", "Bearer " + token.trim());
@@ -435,11 +581,44 @@ public class JiraService {
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.warn("Jira boards failed with status {}", e.getStatusCode());
-            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+            return upstreamError(e);
         } catch (Exception e) {
             log.warn("Jira boards failed: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao buscar quadros no Jira: " + e.getMessage() + "\"}");
+            return ResponseEntity.status(statusFor(e))
+                    .body(jsonError("Erro ao buscar quadros no Jira: " + describe(e)));
+        }
+    }
+
+    /**
+     * Sprints futuras e ativas de um quadro Scrum (/rest/agile/1.0/board/{id}/sprint?state=future,active). Devolve o
+     * JSON do Jira ({values:[{id,name,state,startDate,endDate,goal}]}).
+     */
+    public ResponseEntity<String> listBoardSprints(String domain, String token, String boardId) {
+        String cleanDomain = cleanDomain(domain);
+        URI jiraUri;
+        try {
+            jiraUri = new URI("https://" + cleanDomain + "/rest/agile/1.0/board/"
+                    + java.net.URLEncoder.encode(boardId.trim(), java.nio.charset.StandardCharsets.UTF_8)
+                    + "/sprint?state=future,active&maxResults=50");
+        } catch (Exception e) {
+            return ResponseEntity.status(statusFor(e))
+                    .body(jsonError("Erro ao construir URL do Jira: " + describe(e)));
+        }
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", "Bearer " + token.trim());
+        headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+        headers.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+        try {
+            ResponseEntity<String> response = exchangeSecure(jiraUri, entity, String.class);
+            return ResponseEntity.ok(response.getBody());
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            log.warn("Jira board sprints failed with status {}", e.getStatusCode());
+            return upstreamError(e);
+        } catch (Exception e) {
+            log.warn("Jira board sprints failed: {}", e.getMessage());
+            return ResponseEntity.status(statusFor(e))
+                    .body(jsonError("Erro ao buscar sprints no Jira: " + describe(e)));
         }
     }
 
@@ -451,14 +630,14 @@ public class JiraService {
      * melhor caso é só uma cópia do que a API oficial já devolve limpo).
      */
     public ResponseEntity<String> getSprint(String domain, String token, String sprintId) {
-        String cleanDomain = domain.trim().replace("https://", "").replace("http://", "");
+        String cleanDomain = cleanDomain(domain);
         URI jiraUri;
         try {
             jiraUri = new URI("https://" + cleanDomain + "/rest/agile/1.0/sprint/" + java.net.URLEncoder.encode(sprintId.trim(), java.nio.charset.StandardCharsets.UTF_8));
         } catch (Exception e) {
             log.error("Failed to construct Jira sprint URI", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao construir URL do Jira: " + e.getMessage() + "\"}");
+            return ResponseEntity.status(statusFor(e))
+                    .body(jsonError("Erro ao construir URL do Jira: " + describe(e)));
         }
 
         HttpHeaders headers = new HttpHeaders();
@@ -470,16 +649,16 @@ public class JiraService {
         HttpEntity<Void> entity = new HttpEntity<>(headers);
 
         try {
-            log.info("Fetching Jira sprint metadata from URI: {}", jiraUri);
+            log.debug("Fetching Jira sprint metadata from host {}", jiraUri.getHost());
             ResponseEntity<String> response = exchangeSecure(jiraUri, entity, String.class);
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.error("Jira sprint metadata failed with status: {}, body: {}", e.getStatusCode(), e.getResponseBodyAsString());
-            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+            return upstreamError(e);
         } catch (Exception e) {
             log.error("Jira sprint metadata failed", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao buscar sprint no Jira: " + e.getMessage() + "\"}");
+            return ResponseEntity.status(statusFor(e))
+                    .body(jsonError("Erro ao buscar sprint no Jira: " + describe(e)));
         }
     }
 
@@ -491,7 +670,7 @@ public class JiraService {
      * sessão/cookie que o navegador não envia num request de terceiro).
      */
     public ResponseEntity<?> getAttachment(String domain, String token, String attachmentUrl) {
-        String cleanDomain = domain.trim().replace("https://", "").replace("http://", "");
+        String cleanDomain = cleanDomain(domain);
 
         URI parsedUrl;
         try {
@@ -513,7 +692,7 @@ public class JiraService {
         HttpEntity<Void> entity = new HttpEntity<>(headers);
 
         try {
-            log.info("Fetching Jira attachment from URI: {}", parsedUrl);
+            log.debug("Fetching Jira attachment from host {}", parsedUrl.getHost());
             ResponseEntity<byte[]> response = exchangeSecure(parsedUrl, entity, byte[].class);
             MediaType contentType = response.getHeaders().getContentType();
             if (contentType == null || !"image".equals(contentType.getType())) {
@@ -528,22 +707,23 @@ public class JiraService {
             return new ResponseEntity<>(response.getBody(), responseHeaders, HttpStatus.OK);
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.error("Jira attachment fetch failed with status: {}", e.getStatusCode());
+            if (tokenRecusado(e)) return upstreamError(e);
             return ResponseEntity.status(e.getStatusCode()).body("{\"error\": \"Erro do Jira: " + e.getStatusCode().value() + "\"}");
         } catch (Exception e) {
             log.error("Jira attachment fetch failed", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("{\"error\": \"Erro ao buscar anexo do Jira: " + e.getMessage() + "\"}");
+            return ResponseEntity.status(statusFor(e)).body(jsonError("Erro ao buscar anexo do Jira: " + describe(e)));
         }
     }
 
     public ResponseEntity<String> getMyself(String domain, String token) {
-        String cleanDomain = domain.trim().replace("https://", "").replace("http://", "");
+        String cleanDomain = cleanDomain(domain);
         URI jiraUri;
         try {
             jiraUri = new URI("https://" + cleanDomain + "/rest/api/2/myself");
         } catch (Exception e) {
             log.error("Failed to construct Jira myself URI", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao construir URL do Jira: " + e.getMessage() + "\"}");
+            return ResponseEntity.status(statusFor(e))
+                    .body(jsonError("Erro ao construir URL do Jira: " + describe(e)));
         }
 
         HttpHeaders headers = new HttpHeaders();
@@ -555,16 +735,16 @@ public class JiraService {
         HttpEntity<Void> entity = new HttpEntity<>(headers);
 
         try {
-            log.info("Fetching authenticated user info from Jira URI: {}", jiraUri);
+            log.debug("Fetching authenticated user info from host {}", jiraUri.getHost());
             ResponseEntity<String> response = exchangeSecure(jiraUri, entity, String.class);
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.error("Jira myself failed with status: {}, body: {}", e.getStatusCode(), e.getResponseBodyAsString());
-            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+            return upstreamError(e);
         } catch (Exception e) {
             log.error("Jira myself failed", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao buscar dados do usuário no Jira: " + e.getMessage() + "\"}");
+            return ResponseEntity.status(statusFor(e))
+                    .body(jsonError("Erro ao buscar dados do usuário no Jira: " + describe(e)));
         }
     }
 
@@ -572,7 +752,7 @@ public class JiraService {
         if (rapidViewId == null) {
             return ResponseEntity.badRequest().body("{\"error\": \"rapidViewId é obrigatório.\"}");
         }
-        String cleanDomain = domain.trim().replace("https://", "").replace("http://", "");
+        String cleanDomain = cleanDomain(domain);
         URI jiraUri;
         try {
             String urlStr = "https://" + cleanDomain + "/rest/greenhopper/1.0/xboard/work/allData.json?rapidViewId=" + rapidViewId;
@@ -582,8 +762,8 @@ public class JiraService {
             jiraUri = new URI(urlStr);
         } catch (Exception e) {
             log.error("Failed to construct Greenhopper URI", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao construir URL do Greenhopper: " + e.getMessage() + "\"}");
+            return ResponseEntity.status(statusFor(e))
+                    .body(jsonError("Erro ao construir URL do Greenhopper: " + describe(e)));
         }
 
         HttpHeaders headers = new HttpHeaders();
@@ -596,16 +776,360 @@ public class JiraService {
         HttpEntity<Void> entity = new HttpEntity<>(headers);
 
         try {
-            log.info("Fetching Greenhopper work data from URI: {}", jiraUri);
+            log.debug("Fetching Greenhopper work data from host {}", jiraUri.getHost());
             ResponseEntity<String> response = exchangeSecure(jiraUri, entity, String.class);
             return ResponseEntity.ok(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             log.error("Greenhopper work data failed with status: {}, body: {}", e.getStatusCode(), e.getResponseBodyAsString());
-            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+            return upstreamError(e);
         } catch (Exception e) {
             log.error("Greenhopper work data failed", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("{\"error\": \"Erro ao buscar dados do quadro Greenhopper: " + e.getMessage() + "\"}");
+            return ResponseEntity.status(statusFor(e))
+                    .body(jsonError("Erro ao buscar dados do quadro Greenhopper: " + describe(e)));
         }
+    }
+
+    // =====================================================================================================
+    // Escrita no Jira — usada pela publicação do Poker (JiraPublishService). Só existem TRÊS operações de
+    // escrita aqui, de propósito: renomear o título de uma issue, criar uma sub-tarefa e comentar. Não há
+    // delete, transição nem edição de outros campos; qualquer nova escrita precisa ser adicionada
+    // explicitamente e revisada. Todas passam pelas mesmas proteções do proxy de leitura (host bloqueado,
+    // TLS estrito antes do trust-all, retry em 429). Escritas NUNCA seguem redirecionamento: o corpo e o
+    // Bearer só vão para a URL montada aqui.
+    // =====================================================================================================
+
+    /** Falha de escrita no Jira com o status HTTP devolvido (0 = sem resposta) e um motivo curto, sem token nem URL. */
+    public static class JiraWriteException extends RuntimeException {
+        private final int status;
+        public JiraWriteException(int status, String message) { super(message); this.status = status; }
+        public int getStatus() { return status; }
+    }
+
+    static String assertIssueKey(String key) {
+        String k = key == null ? "" : key.trim();
+        if (!k.matches("[A-Za-z][A-Za-z0-9_]{0,19}-[0-9]{1,9}")) {
+            throw new JiraWriteException(400, "Chave de issue inválida.");
+        }
+        return k;
+    }
+
+    /** Mesmos cabeçalhos das leituras (importação/sync): o proxy do Jira corporativo responde 403 ao User-Agent padrão do Java. */
+    static final String BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
+    private HttpHeaders bearerHeaders(String token, String cleanDomain) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", "Bearer " + token.trim());
+        headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("User-Agent", BROWSER_USER_AGENT);
+        headers.set("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7");
+        // Com User-Agent de navegador o Jira Data Center aplica a checagem XSRF em POST/PUT; este header a dispensa.
+        headers.set("X-Atlassian-Token", "no-check");
+        // Sondado em 2026-10-31 no Jira TOTVS: com UA de navegador o XSRF só passa com Referer do próprio Jira.
+        headers.set("Referer", "https://" + cleanDomain + "/");
+        return headers;
+    }
+
+    /** Lê uma issue (campos informados). Devolve o JSON da issue ou lança JiraWriteException com o status do Jira. */
+    public JsonNode getIssue(String domain, String token, String issueKey, List<String> fields) {
+        String cleanDomain = cleanDomain(domain);
+        String key = assertIssueKey(issueKey);
+        URI uri;
+        try {
+            String f = (fields == null || fields.isEmpty()) ? "summary,issuetype,project,subtasks" : String.join(",", fields);
+            uri = new URI("https://" + cleanDomain + "/rest/api/2/issue/" + key + "?fields="
+                    + java.net.URLEncoder.encode(f, java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            throw new JiraWriteException(400, "Erro ao construir URL do Jira.");
+        }
+        try {
+            ResponseEntity<String> response = exchangeSecure(uri, new HttpEntity<>(bearerHeaders(token, cleanDomain)), String.class);
+            return objectMapper.readTree(response.getBody());
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            throw new JiraWriteException(e.getStatusCode().value(), jiraErrorReason(e, "ler a issue " + key));
+        } catch (JiraWriteException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new JiraWriteException(0, "Erro ao ler a issue " + key + ": " + describe(e));
+        }
+    }
+
+    /** Sub-tarefas já existentes sob a pai (chave + título + tipo): base da checagem anti-duplicação. */
+    public List<JsonNode> listSubtasks(String domain, String token, String parentKey) {
+        String cleanDomain = cleanDomain(domain);
+        String key = assertIssueKey(parentKey);
+        URI uri;
+        try {
+            String jql = java.net.URLEncoder.encode("parent = " + key, java.nio.charset.StandardCharsets.UTF_8);
+            uri = new URI("https://" + cleanDomain + "/rest/api/2/search?jql=" + jql + "&fields=summary,issuetype&maxResults=100");
+        } catch (Exception e) {
+            throw new JiraWriteException(400, "Erro ao construir URL do Jira.");
+        }
+        try {
+            ResponseEntity<String> response = exchangeSecure(uri, new HttpEntity<>(bearerHeaders(token, cleanDomain)), String.class);
+            JsonNode root = objectMapper.readTree(response.getBody());
+            List<JsonNode> out = new java.util.ArrayList<>();
+            JsonNode issues = root.path("issues");
+            if (issues.isArray()) issues.forEach(out::add);
+            return out;
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            throw new JiraWriteException(e.getStatusCode().value(), jiraErrorReason(e, "listar sub-tarefas de " + key));
+        } catch (JiraWriteException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new JiraWriteException(0, "Erro ao listar sub-tarefas de " + key + ": " + describe(e));
+        }
+    }
+
+    /**
+     * Tipos de issue que o projeto aceita criar, com a flag de sub-tarefa (createmeta). A tela de configuração
+     * usa isso para a pessoa escolher o nome exato em vez de digitar.
+     */
+    public List<JsonNode> listProjectIssueTypes(String domain, String token, String projectKey) {
+        String cleanDomain = cleanDomain(domain);
+        String pk = projectKey == null ? "" : projectKey.trim();
+        if (!pk.matches("[A-Za-z][A-Za-z0-9_]{0,19}")) {
+            throw new JiraWriteException(400, "Chave de projeto inválida.");
+        }
+        URI uri;
+        try {
+            uri = new URI("https://" + cleanDomain + "/rest/api/2/issue/createmeta?projectKeys=" + pk);
+        } catch (Exception e) {
+            throw new JiraWriteException(400, "Erro ao construir URL do Jira.");
+        }
+        try {
+            ResponseEntity<String> response = exchangeSecure(uri, new HttpEntity<>(bearerHeaders(token, cleanDomain)), String.class);
+            JsonNode root = objectMapper.readTree(response.getBody());
+            List<JsonNode> out = new java.util.ArrayList<>();
+            for (JsonNode project : root.path("projects")) {
+                for (JsonNode type : project.path("issuetypes")) out.add(type);
+            }
+            return out;
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            throw new JiraWriteException(e.getStatusCode().value(), jiraErrorReason(e, "listar tipos do projeto " + pk));
+        } catch (JiraWriteException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new JiraWriteException(0, "Erro ao listar tipos do projeto " + pk + ": " + describe(e));
+        }
+    }
+
+    /**
+     * Leitura: os comentários mais recentes da issue (id e corpo). Base da checagem anti-duplicação do passo de
+     * comentar e da conferência do envio. Até 100, do mais novo para o mais antigo.
+     */
+    public List<JsonNode> listComments(String domain, String token, String issueKey) {
+        String cleanDomain = cleanDomain(domain);
+        String key = assertIssueKey(issueKey);
+        URI uri;
+        try {
+            uri = new URI("https://" + cleanDomain + "/rest/api/2/issue/" + key + "/comment?maxResults=100&orderBy=-created");
+        } catch (Exception e) {
+            throw new JiraWriteException(400, "Erro ao construir URL do Jira.");
+        }
+        try {
+            ResponseEntity<String> response = exchangeSecure(uri, new HttpEntity<>(bearerHeaders(token, cleanDomain)), String.class);
+            List<JsonNode> out = new java.util.ArrayList<>();
+            objectMapper.readTree(response.getBody()).path("comments").forEach(out::add);
+            return out;
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            throw new JiraWriteException(e.getStatusCode().value(), jiraErrorReason(e, "ler os comentários de " + key));
+        } catch (JiraWriteException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new JiraWriteException(0, "Erro ao ler os comentários de " + key + ": " + describe(e));
+        }
+    }
+
+    /**
+     * Leitura: GET editmeta diz quais campos este usuário pode editar nesta issue (permissão, tela e status).
+     * Lança 403 com motivo claro quando "summary" não é editável, para não confundir com bloqueio de proxy no PUT.
+     */
+    public void assertSummaryEditable(String domain, String token, String issueKey) {
+        String cleanDomain = cleanDomain(domain);
+        String key = assertIssueKey(issueKey);
+        URI uri;
+        try {
+            uri = new URI("https://" + cleanDomain + "/rest/api/2/issue/" + key + "/editmeta");
+        } catch (Exception e) {
+            throw new JiraWriteException(400, "Erro ao construir URL do Jira.");
+        }
+        JsonNode meta;
+        try {
+            ResponseEntity<String> response = exchangeSecure(uri, new HttpEntity<>(bearerHeaders(token, cleanDomain)), String.class);
+            meta = objectMapper.readTree(response.getBody());
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            throw new JiraWriteException(e.getStatusCode().value(), jiraErrorReason(e, "consultar o que pode ser editado em " + key));
+        } catch (JiraWriteException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new JiraWriteException(0, "Erro ao consultar o editmeta de " + key + ": " + describe(e));
+        }
+        if (!meta.path("fields").has("summary")) {
+            throw new JiraWriteException(403, "O Jira não deixa este usuário editar o título de " + key
+                    + " (permissão de edição no projeto, tela de edição sem o campo ou status da issue). Não é bloqueio de proxy.");
+        }
+    }
+
+    /** Escrita 1/3: troca SÓ o título (summary) da issue. Nenhum outro campo é enviado. */
+    public void updateIssueSummary(String domain, String token, String issueKey, String newSummary) {
+        String key = assertIssueKey(issueKey);
+        if (newSummary == null || newSummary.isBlank()) throw new JiraWriteException(400, "Título vazio.");
+        if (newSummary.length() > 255) throw new JiraWriteException(400, "Título com mais de 255 caracteres.");
+        ObjectNode body = objectMapper.createObjectNode();
+        body.putObject("fields").put("summary", newSummary.trim());
+        writeJson(domain, token, "/rest/api/2/issue/" + key, HttpMethod.PUT, body, "renomear " + key);
+    }
+
+    /**
+     * Escrita 2/3: cria uma sub-tarefa sob `parentKey`. Campos enviados: projeto, pai, tipo, título e, se houver,
+     * estimativa original em horas. Devolve a chave criada.
+     */
+    public String createSubtask(String domain, String token, String projectKey, String parentKey, String issueTypeName,
+                                String summary, Double estimateHours) {
+        String parent = assertIssueKey(parentKey);
+        if (issueTypeName == null || issueTypeName.isBlank()) throw new JiraWriteException(400, "Tipo da sub-tarefa vazio.");
+        if (summary == null || summary.isBlank()) throw new JiraWriteException(400, "Título da sub-tarefa vazio.");
+        ObjectNode fields = objectMapper.createObjectNode();
+        fields.putObject("project").put("key", projectKey.trim());
+        fields.putObject("parent").put("key", parent);
+        fields.putObject("issuetype").put("name", issueTypeName.trim());
+        fields.put("summary", summary.trim().length() > 255 ? summary.trim().substring(0, 255) : summary.trim());
+        if (estimateHours != null && estimateHours > 0) {
+            fields.putObject("timetracking").put("originalEstimate", formatJiraDuration(estimateHours));
+        }
+        ObjectNode body = objectMapper.createObjectNode();
+        body.set("fields", fields);
+        JsonNode created = writeJson(domain, token, "/rest/api/2/issue", HttpMethod.POST, body, "criar sub-tarefa em " + parent);
+        String key = created == null ? null : created.path("key").asText(null);
+        if (key == null || key.isBlank()) throw new JiraWriteException(502, "O Jira criou a sub-tarefa mas não devolveu a chave.");
+        return key;
+    }
+
+    /** Escrita 3/3: comenta na issue. Devolve o id do comentário. */
+    public String addComment(String domain, String token, String issueKey, String commentBody) {
+        String key = assertIssueKey(issueKey);
+        if (commentBody == null || commentBody.isBlank()) throw new JiraWriteException(400, "Comentário vazio.");
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("body", commentBody.trim());
+        JsonNode created = writeJson(domain, token, "/rest/api/2/issue/" + key + "/comment", HttpMethod.POST, body, "comentar em " + key);
+        return created == null ? null : created.path("id").asText(null);
+    }
+
+    /** Horas decimais → duração do Jira ("10h", "1h 30m"). */
+    static String formatJiraDuration(double hours) {
+        long totalMinutes = Math.round(hours * 60);
+        long h = totalMinutes / 60;
+        long m = totalMinutes % 60;
+        if (m == 0) return h + "h";
+        if (h == 0) return m + "m";
+        return h + "h " + m + "m";
+    }
+
+    private JsonNode writeJson(String domain, String token, String path, HttpMethod method, JsonNode body, String action) {
+        String cleanDomain = cleanDomain(domain);
+        URI uri;
+        try {
+            uri = new URI("https://" + cleanDomain + path);
+        } catch (Exception e) {
+            throw new JiraWriteException(400, "Erro ao construir URL do Jira.");
+        }
+        assertNotBlockedHost(uri);
+        HttpEntity<String> entity;
+        try {
+            entity = new HttpEntity<>(objectMapper.writeValueAsString(body), bearerHeaders(token, cleanDomain));
+        } catch (Exception e) {
+            throw new JiraWriteException(400, "Erro ao montar o pedido para o Jira.");
+        }
+        try {
+            ResponseEntity<String> response;
+            try {
+                response = writeWithRetry(strictRestTemplate, uri, method, entity);
+            } catch (org.springframework.web.client.ResourceAccessException e) {
+                if (!isTlsTrustFailure(e)) throw e;
+                log.warn("TLS handshake falhou com validação padrão para {} — tentando com trust-all na escrita.", uri.getHost());
+                response = writeWithRetry(trustAllRestTemplate, uri, method, entity);
+            }
+            int status = response.getStatusCode().value();
+            if (status >= 300 && status < 400) {
+                // Redirecionamento em escrita não é seguido: o Jira respondeu algo que não é a API esperada.
+                throw new JiraWriteException(status, "O Jira redirecionou ao " + action + "; verifique o domínio configurado.");
+            }
+            String respBody = response.getBody();
+            return (respBody == null || respBody.isBlank()) ? null : objectMapper.readTree(respBody);
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            // Corpo e content-type ajudam a distinguir "sem permissão" (JSON do Jira) de bloqueio de proxy/XSRF (HTML).
+            log.warn("Escrita no Jira falhou ({}): status {}, content-type {}, corpo: {}", action, e.getStatusCode().value(),
+                    e.getResponseHeaders() == null ? null : e.getResponseHeaders().getContentType(), snippet(e.getResponseBodyAsString(), 600));
+            throw new JiraWriteException(e.getStatusCode().value(), jiraErrorReason(e, action));
+        } catch (JiraWriteException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("Escrita no Jira falhou ({}): {}", action, describe(e));
+            throw new JiraWriteException(0, "Erro ao " + action + ": " + describe(e));
+        }
+    }
+
+    private ResponseEntity<String> writeWithRetry(RestTemplate restTemplate, URI uri, HttpMethod method, HttpEntity<String> entity) {
+        int attempt = 0;
+        while (true) {
+            try {
+                return restTemplate.exchange(uri, method, entity, String.class);
+            } catch (org.springframework.web.client.HttpStatusCodeException e) {
+                if (e.getStatusCode().value() == 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
+                    long waitMs = retryAfterMillis(e, attempt);
+                    log.warn("Jira rate limited (429) on write to {}, retry {}/{} after {}ms", uri.getHost(), attempt + 1, MAX_RATE_LIMIT_RETRIES, waitMs);
+                    sleepUninterruptibly(waitMs);
+                    attempt++;
+                    continue;
+                }
+                throw e;
+            }
+        }
+    }
+
+    /**
+     * Motivo legível a partir do erro do Jira: junta `errorMessages` e `errors` do corpo (ex.: "issuetype: tipo
+     * inválido"), ou um texto por status. Nunca inclui token nem URL.
+     */
+    private String jiraErrorReason(org.springframework.web.client.HttpStatusCodeException e, String action) {
+        int status = e.getStatusCode().value();
+        String prefix = "Não foi possível " + action;
+        try {
+            JsonNode root = objectMapper.readTree(e.getResponseBodyAsString());
+            List<String> parts = new java.util.ArrayList<>();
+            for (JsonNode m : root.path("errorMessages")) parts.add(m.asText());
+            JsonNode errors = root.path("errors");
+            if (errors.isObject()) {
+                errors.fields().forEachRemaining(f -> parts.add(f.getKey() + ": " + f.getValue().asText()));
+            }
+            if (!parts.isEmpty()) {
+                String joined = String.join("; ", parts);
+                return prefix + " (" + status + "): " + (joined.length() > 500 ? joined.substring(0, 500) : joined);
+            }
+        } catch (Exception ignored) {
+            // corpo não é JSON; cai no texto por status
+        }
+        String raw = e.getResponseBodyAsString();
+        if (raw != null && raw.stripLeading().regionMatches(true, 0, "<", 0, 1)) {
+            // HTML no lugar da API: proxy/WAF ou checagem XSRF do Jira, não é falta de permissão do usuário.
+            java.util.regex.Matcher t = java.util.regex.Pattern.compile("(?is)<title>\\s*(.*?)\\s*</title>").matcher(raw);
+            String title = t.find() ? snippet(t.group(1), 120) : "";
+            return prefix + " (" + status + "): o Jira respondeu uma página HTML em vez da API"
+                    + (title.isEmpty() ? "" : " (\"" + title + "\")") + "; provável bloqueio de proxy/XSRF, não falta de permissão.";
+        }
+        return switch (status) {
+            case 401 -> prefix + ": token do Jira inválido ou expirado (401).";
+            case 403 -> prefix + ": sem permissão no Jira para esta ação (403).";
+            case 404 -> prefix + ": issue não encontrada no Jira (404).";
+            default -> prefix + " (" + status + ").";
+        };
+    }
+
+    /** Primeiros n caracteres, sem quebras de linha, para log/mensagem. */
+    private static String snippet(String s, int n) {
+        if (s == null) return "";
+        String one = s.replaceAll("\\s+", " ").trim();
+        return one.length() > n ? one.substring(0, n) + "…" : one;
     }
 }

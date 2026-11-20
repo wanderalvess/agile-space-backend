@@ -10,4 +10,5 @@ import java.util.List;
 public interface SprintPlanningTaskRepository extends JpaRepository<SprintPlanningTask, String> {
     List<SprintPlanningTask> findByPlanningIdOrderByOrderAsc(String planningId);
     void deleteByPlanningId(String planningId);
+    List<SprintPlanningTask> findByIdIn(java.util.Collection<String> ids);
 }

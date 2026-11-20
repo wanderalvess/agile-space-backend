@@ -66,6 +66,18 @@ public class KnowledgeDocument {
     private LocalDateTime updatedAt;
 
     private String updatedBy;
+
+    // Squad do autor no momento da criação (definida no servidor). Documentos antigos ficam sem squad:
+    // só o autor e ADMIN editam. A liderança dessa squad também edita.
+    @Column(name = "squad_id")
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String squadId;
+
+    // Calculado a cada resposta (não é coluna): a tela usa para mostrar editar/apagar/restaurar.
+    @Transient
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private Boolean canEdit;
+
     private LocalDateTime deletedAt;
     private String deletedBy;
 

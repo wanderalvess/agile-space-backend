@@ -41,6 +41,15 @@ public class ProjectController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão inválida ou expirada"));
     }
 
+    static boolean isSelfOrAdmin(User caller, String identifier) {
+        if ("ADMIN".equalsIgnoreCase(caller.getRole())) return true;
+        if (identifier == null) return false;
+        String id = identifier.trim();
+        return id.equals(caller.getId())
+                || (caller.getEmail() != null && id.equalsIgnoreCase(caller.getEmail().trim()))
+                || (caller.getJiraAccountId() != null && id.equals(caller.getJiraAccountId().trim()));
+    }
+
     /**
      * Lista todos os projetos cadastrados com seus metadados de governança.
      */
@@ -68,8 +77,8 @@ public class ProjectController {
     }
 
     /**
-     * Cria um projeto do zero, sem depender do Jira. O usuário autenticado vira o Agile Master
-     * do projeto e é automaticamente movido pra ele (mesmo comportamento de /auth/switch-project).
+     * Cria um projeto do zero, sem depender do Jira. Só AM/PL/admin criam. O usuário entra com o papel que
+     * já tem (nenhum papel é concedido) e é automaticamente movido pra ele (mesmo comportamento de /auth/switch-project).
      */
     @PostMapping
     public ResponseEntity<AuthResponseDto> createProject(
@@ -139,10 +148,15 @@ public class ProjectController {
     }
 
     /**
-     * Resolve os projetos e cargos acessíveis para um usuário.
+     * Resolve os projetos e cargos acessíveis para um usuário. Só o próprio usuário (id, e-mail ou conta do Jira)
+     * ou um admin: o resultado lista as equipes e os cargos da pessoa.
      */
     @GetMapping("/user/{identifier}")
-    public ResponseEntity<UserProjectAccessDto> getUserProjects(@PathVariable String identifier) {
+    public ResponseEntity<UserProjectAccessDto> getUserProjects(@PathVariable String identifier, HttpServletRequest httpRequest) {
+        User caller = currentUser(httpRequest);
+        if (!isSelfOrAdmin(caller, identifier)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Você só pode consultar os seus próprios projetos.");
+        }
         Optional<User> userOpt = userRepository.findById(identifier);
         if (userOpt.isEmpty()) {
             userOpt = userRepository.findByEmail(identifier);

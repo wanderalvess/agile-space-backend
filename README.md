@@ -1,6 +1,6 @@
-# Agile Space Backend 🚀
+# Portal Tech V&D Backend 🚀
 
-O **Agile Space Backend** é o motor central (API REST, WebSockets e Servidor MCP) da plataforma **Espaço Ágil**. Este repositório foi construído utilizando uma arquitetura escalável e resiliente em **Java 17+ com Spring Boot 3.5**, responsável por gerenciar cerimônias ágeis em tempo real, métricas e consolidação de squads, segurança de segredos (Vault), base de conhecimento com RAG vetorial e integrações para agentes de inteligência artificial.
+O **Portal Tech V&D Backend** é o motor central (API REST, WebSockets e Servidor MCP) do **Portal Tech V&D**, o hub de tecnologia de Varejo e Distribuição. Este repositório foi construído utilizando uma arquitetura escalável e resiliente em **Java 17+ com Spring Boot 3.5**, responsável por gerenciar cerimônias ágeis em tempo real, métricas e consolidação de squads, segurança de segredos (Vault), base de conhecimento com RAG vetorial e integrações para agentes de inteligência artificial.
 
 ---
 
@@ -34,7 +34,7 @@ A arquitetura do sistema é modularizada por domínios de negócio ágil:
   - `Retrospectivas Inteligentes`: Retro boards dinâmicos com colunas configuráveis, limite de votos por membro e fusão inteligente de cards preservando histórico integral (`originalTexts`).
   - `Sprint Showcase`: Sessões de Sprint Review com suporte ao Modo Teatro, renderização de evidências e proxy autenticado de mídias do Jira.
   - `Brainstorming Alpha`: Espaço colaborativo síncrono para dinâmicas de ideação.
-- **Gestão de Squads e Métricas (Squad Pulse & Jiradash):** Integração com snapshots do Jira, métricas diárias, consolidação (rollups) de saúde do time, capacidade e cache compartilhado de consultas JQL.
+- **Gestão de Squads e Métricas (Squad Pulse):** Integração com snapshots do Jira, métricas diárias, consolidação (rollups) de saúde do time, capacidade e cache compartilhado de consultas JQL.
 - **Daily Flow & Health Check:** Controle de humor, reporte de impedimentos e diagnóstico anônimo periódico do clima da squad.
 - **Plano de Ação (Action Plan):** Gestão tática de melhorias derivadas das retrospectivas com metodologia 5W2H, responsáveis e prazos.
 - **Vault (Cofre de Segredos):** Serviço de compartilhamento seguro de credenciais com expiração temporal (1h, 24h) ou visualização única (`once`).
@@ -297,4 +297,4 @@ keytool -importcert \
 
 ---
 
-**Agile Space Backend** — Potencializando a colaboração e a engenharia de software de alta performance.
+**Portal Tech V&D Backend** — o servidor do hub de tecnologia de Varejo e Distribuição.

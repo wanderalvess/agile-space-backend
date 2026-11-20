@@ -25,4 +25,13 @@ final class ValidationSupport {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " excede o limite de " + max + " itens");
         }
     }
+
+    /** Teto para campos de texto livre longos (descrição, notas): acima disso é abuso, não conteúdo. */
+    static final int MAX_FREE_TEXT = 20_000;
+
+    static void requireMaxLength(String value, int max, String field) {
+        if (value != null && value.length() > max) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " excede o limite de " + max + " caracteres");
+        }
+    }
 }

@@ -34,6 +34,18 @@ class KnowledgeServiceTest {
     @Mock
     private KnowledgeRepository repository;
 
+    @Mock
+    private com.agilespace.backend.repository.KnowledgeDocumentVersionRepository versionRepository;
+
+    @Mock
+    private com.agilespace.backend.repository.UserRepository userRepository;
+
+    @Mock
+    private SquadAccessService squadAccessService;
+
+    @org.mockito.Spy
+    private com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+
     @InjectMocks
     private KnowledgeService service;
 
@@ -42,15 +54,15 @@ class KnowledgeServiceTest {
     class SearchAndListTests {
 
         @Test
-        @DisplayName("Deve listar documentos ativos excluindo registros deletados quando sem filtros")
+        @DisplayName("Deve listar só publicados e indexados quando sem filtros")
         void shouldListActiveDocumentsWithoutFilter() {
             Page<KnowledgeDocument> page = new PageImpl<>(Collections.singletonList(new KnowledgeDocument()));
-            when(repository.findByStatusNot(eq("deleted"), any(Pageable.class))).thenReturn(page);
+            when(repository.findByStatusIn(eq(KnowledgeService.LISTED_STATUSES), any(Pageable.class))).thenReturn(page);
 
             Page<KnowledgeDocument> result = service.listDocuments(null, null, PageRequest.of(0, 10));
 
             assertEquals(1, result.getTotalElements());
-            verify(repository).findByStatusNot(eq("deleted"), any(Pageable.class));
+            verify(repository).findByStatusIn(eq(KnowledgeService.LISTED_STATUSES), any(Pageable.class));
         }
 
         @Test
@@ -60,7 +72,7 @@ class KnowledgeServiceTest {
                     .tags(new HashSet<>(Arrays.asList("react", "architecture")))
                     .build();
             Page<KnowledgeDocument> page = new PageImpl<>(Collections.singletonList(doc));
-            when(repository.searchActive(eq("arquitetura"), eq("deleted"), any(Pageable.class))).thenReturn(page);
+            when(repository.searchByStatuses(eq("arquitetura"), eq(KnowledgeService.LISTED_STATUSES), any(Pageable.class))).thenReturn(page);
 
             Set<String> tags = Collections.singleton("react");
             Page<KnowledgeDocument> result = service.listDocuments("arquitetura", tags, PageRequest.of(0, 10));
@@ -89,7 +101,7 @@ class KnowledgeServiceTest {
         @Test
         @DisplayName("Deve publicar novo documento com status padrão 'published'")
         void shouldSaveNewDocumentAsPublished() {
-            KnowledgeDocument doc = KnowledgeDocument.builder().title("Manual Agile Space").build();
+            KnowledgeDocument doc = KnowledgeDocument.builder().title("Manual Portal Tech V&D").build();
             when(repository.save(any(KnowledgeDocument.class))).thenAnswer(i -> i.getArgument(0));
 
             KnowledgeDocument saved = service.saveOrUpdateDocument(doc);

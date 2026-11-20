@@ -15,4 +15,7 @@ public interface SprintPlanningRepository extends JpaRepository<SprintPlanning, 
     // pra colunas/tabelas relacionais — antes vivia em settings->>'isReadyForPoker' via query nativa.
     @Query("SELECT s FROM SprintPlanning s WHERE s.settings.isReadyForPoker = true ORDER BY s.createdAt DESC")
     List<SprintPlanning> findReadyForPoker(Pageable pageable);
+
+    @Query("SELECT s FROM SprintPlanning s WHERE s.settings.isReadyForPoker = true AND s.createdBy = :createdBy ORDER BY s.createdAt DESC")
+    List<SprintPlanning> findReadyForPokerByCreator(@org.springframework.data.repository.query.Param("createdBy") String createdBy, Pageable pageable);
 }

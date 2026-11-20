@@ -1,5 +1,6 @@
 package com.agilespace.backend.service;
 
+import com.agilespace.backend.domain.MembershipSource;
 import com.agilespace.backend.domain.ProjectConfig;
 import com.agilespace.backend.domain.ProjectMemberRole;
 import com.agilespace.backend.domain.SquadMember;
@@ -9,6 +10,7 @@ import com.agilespace.backend.repository.ProjectConfigRepository;
 import com.agilespace.backend.repository.ProjectMemberRoleRepository;
 import com.agilespace.backend.repository.SquadMemberRepository;
 import com.agilespace.backend.repository.UserRepository;
+import com.agilespace.backend.security.JiraAccountIdGuard;
 import com.agilespace.backend.security.JwtTokenUtil;
 import com.agilespace.backend.security.PasswordUtil;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +23,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Optional;
+import java.time.Instant;
 import java.util.UUID;
 
 @Service
@@ -34,6 +37,50 @@ public class AuthService {
     private final SquadMemberRepository squadMemberRepository;
     private final UserProjectResolverService userProjectResolverService;
     private final JwtTokenUtil jwtTokenUtil;
+    private final JiraAccountIdGuard jiraAccountIdGuard;
+
+    /** Etapa 4 (app.membership.lead-level). Montagem manual: legacy (o nível da conta sai como está gravado). */
+    private com.agilespace.backend.security.LeadPolicy leadPolicy = com.agilespace.backend.security.LeadPolicy.LEGACY;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setLeadPolicy(com.agilespace.backend.security.LeadPolicy leadPolicy) {
+        if (leadPolicy != null) this.leadPolicy = leadPolicy;
+    }
+
+    /** Com lead-level=off o nível de conta só tem dois valores: um LEAD legado sai como MEMBER no token e na sessão. */
+    private String sessionRole(String role) {
+        return leadPolicy.isOff() ? com.agilespace.backend.domain.UserRole.parse(role).name() : role;
+    }
+
+    /**
+     * Modelo novo de vínculo (opcionais, fora do construtor: o modo decide se entram em jogo; ausentes = legacy).
+     * Ver app.membership.mode em application.yml e docs/membership-api.md.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private MembershipService membershipService;
+
+    /** Preenche o cargo de quem está sem um com a role do Jira da linha do roster. Opcional (montagem manual: não preenche). */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CargoPreenchimento cargoPreenchimento;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private MembershipShadowService membershipShadowService;
+
+    /** Opcional (não entra no construtor): só serve para o logout limpar o cache de estado da conta. */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.agilespace.backend.security.UserSessionGuard sessionGuard;
+
+    /** Hash de uma senha qualquer, só para gastar o mesmo tempo quando o e-mail não existe (evita enumeração por tempo de resposta). */
+    private static volatile String dummyHash;
+
+    private static String dummyHash() {
+        String h = dummyHash;
+        if (h == null) {
+            h = PasswordUtil.hashPassword("senha-inexistente-" + UUID.randomUUID());
+            dummyHash = h;
+        }
+        return h;
+    }
 
     // Vazio (default em application.yml) = autocadastro liberado pra qualquer e-mail — usado em
     // dev/teste, onde os fixtures usam @empresa.com.br. Em produção (application-prod.yml) tem
@@ -41,44 +88,87 @@ public class AuthService {
     @Value("${app.security.allowed-email-domain:}")
     private String allowedEmailDomain;
 
+    // Opt-in para fechar o autocadastro (APP_REGISTRATION_ENABLED=false) depois que todo mundo entrou.
+    // Padrão true: o comportamento de quem usa hoje não muda.
+    @Value("${app.security.registration-enabled:true}")
+    private boolean registrationEnabled = true;
+
+    /** Domínios permitidos no autocadastro (lista separada por vírgula, sem "@"). Vazio = qualquer e-mail (dev/teste). */
+    List<String> allowedDomains() {
+        if (allowedEmailDomain == null || allowedEmailDomain.isBlank()) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(allowedEmailDomain.split(","))
+                .map(d -> d.trim().toLowerCase())
+                .map(d -> d.startsWith("@") ? d.substring(1) : d)
+                .filter(d -> !d.isEmpty())
+                .toList();
+    }
+
+    /**
+     * Casamento exato do domínio: exatamente um "@" e o que vem depois dele igual a um domínio da lista.
+     * Evita "evil-totvs.com.br" (endsWith frouxo) e "a@x.com@totvs.com.br".
+     */
+    boolean isEmailDomainAllowed(String email) {
+        List<String> domains = allowedDomains();
+        if (domains.isEmpty()) {
+            return true;
+        }
+        if (email == null) {
+            return false;
+        }
+        String clean = email.trim().toLowerCase();
+        int at = clean.indexOf('@');
+        if (at <= 0 || at != clean.lastIndexOf('@')) {
+            return false;
+        }
+        return domains.contains(clean.substring(at + 1));
+    }
+
+    private String describeAllowedDomains() {
+        return String.join(", ", allowedDomains().stream().map(d -> "@" + d).toList());
+    }
+
     /**
      * Realiza o login do usuário, valida a senha com PBKDF2 e resolve seus projetos/cargos.
      */
     @Transactional
     public AuthResponseDto login(LoginRequestDto request) {
         String identifier = request.getEmail().trim().toLowerCase();
-        User user = findUserByIdentifier(identifier)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "E-mail ou senha incorretos"));
+        User user = findUserByIdentifier(identifier).orElse(null);
+        if (user == null) {
+            PasswordUtil.verifyPassword(request.getPassword(), dummyHash());
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "E-mail ou senha incorretos");
+        }
         String cleanEmail = user.getEmail();
+
+        // Validação da senha antes de revelar que a conta está inativa
+        if (user.getPasswordHash() == null || !PasswordUtil.verifyPassword(request.getPassword(), user.getPasswordHash())) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "E-mail ou senha incorretos");
+        }
 
         if (!user.isActive()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Usuário inativo no sistema");
         }
 
-        // Validação da senha
-        if (user.getPasswordHash() == null || !PasswordUtil.verifyPassword(request.getPassword(), user.getPasswordHash())) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "E-mail ou senha incorretos");
-        }
+        user.setLastLoginAt(java.time.LocalDateTime.now());
+        userRepository.save(user);
 
         // Resolve projetos e lideranças
-        UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(user);
+        Resolved resolved = resolveAccess(user);
+        boolean rosterFallback = false;
 
         // Se o usuário ainda não tiver um defaultProjectId e possuir projetos associados, define o primeiro
-        if (user.getDefaultProjectId() == null && !access.getProjects().isEmpty()) {
-            user.setDefaultProjectId(access.getProjects().get(0).getProjectId());
-            if (user.getSquadId() == null || user.getSquadId().isBlank()) {
-                user.setSquadId(access.getProjects().get(0).getProjectId());
-            }
+        if (user.getDefaultProjectId() == null && !resolved.access().getProjects().isEmpty()) {
+            user.setDefaultProjectId(resolved.access().getProjects().get(0).getProjectId());
             userRepository.save(user);
-            access = userProjectResolverService.resolveUserAccess(user);
-        } else if ((user.getSquadId() == null || user.getSquadId().isBlank()) && user.getDefaultProjectId() != null) {
-            user.setSquadId(user.getDefaultProjectId());
-            userRepository.save(user);
-        } else if (user.getSquadId() == null || user.getSquadId().isBlank()) {
+            resolved = resolveAccess(user);
+        } else if (user.getDefaultProjectId() == null) {
+            // Etapa 5 do vínculo: users.squad_id não é mais lida nem gravada; só a preferência default_project_id.
             List<SquadMember> matchedMembers = squadMemberRepository.findByUserIdentifier(cleanEmail);
             if (!matchedMembers.isEmpty()) {
+                rosterFallback = true;
                 user.setDefaultProjectId(matchedMembers.get(0).getSquadId());
-                user.setSquadId(matchedMembers.get(0).getSquadId());
                 userRepository.save(user);
                 for (SquadMember sm : matchedMembers) {
                     if (sm.getClaimedByUid() == null) {
@@ -86,11 +176,40 @@ public class AuthService {
                         squadMemberRepository.save(sm);
                     }
                 }
-                access = userProjectResolverService.resolveUserAccess(user);
+                preencherCargoDoRoster(user, matchedMembers, "login por roster");
+                resolved = resolveAccess(user);
             }
         }
 
-        return buildAuthResponse(user, access);
+        if (resolved.access().getProjects().isEmpty()) {
+            // Sessão sem nenhuma linha em project_member_roles. Antes isso passava em silêncio (principalmente o fallback
+            // por roster acima, que grava default_project_id sem criar vínculo). Não bloqueia o login: fica
+            // registrado e, no modelo novo, /me/memberships e a sessão trazem legacyOnly=true. Conta nova, sem rastro
+            // nenhum, só vai para o onboarding (não é "legado").
+            boolean traces = rosterFallback || hasSquadTrace(user.getDefaultProjectId());
+            if (traces) {
+                log.warn("Login sem vínculo em project_member_roles (só roster/default_project_id antigo): user={} roster_fallback={}",
+                        user.getId(), rosterFallback);
+            } else {
+                log.debug("Login de conta sem vínculo e sem rastro do modelo antigo: user={}", user.getId());
+            }
+        }
+
+        return buildAuthResponse(user, resolved);
+    }
+
+    /** Cargo vazio + roster do Jira da pessoa: usa a role da linha mais recente (updated_at) que tiver role. */
+    private void preencherCargoDoRoster(User user, List<SquadMember> linhas, String origem) {
+        if (cargoPreenchimento == null || linhas == null) return;
+        linhas.stream()
+                .filter(sm -> sm.getRole() != null && !sm.getRole().isBlank())
+                .max(java.util.Comparator.comparing(sm -> sm.getUpdatedAt() == null ? "" : sm.getUpdatedAt()))
+                .ifPresent(sm -> cargoPreenchimento.preencherSeVazio(user, sm.getRole(), origem));
+    }
+
+    private static boolean hasSquadTrace(String squad) {
+        return squad != null && !squad.isBlank()
+                && !"Sem Time".equalsIgnoreCase(squad.trim()) && !"Sem Squad".equalsIgnoreCase(squad.trim());
     }
 
     /**
@@ -117,10 +236,14 @@ public class AuthService {
     public AuthResponseDto register(RegisterRequestDto request) {
         String cleanEmail = request.getEmail().trim().toLowerCase();
 
-        if (allowedEmailDomain != null && !allowedEmailDomain.isBlank()
-                && !cleanEmail.endsWith("@" + allowedEmailDomain.toLowerCase())) {
+        if (!registrationEnabled) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Cadastro restrito a e-mails corporativos @" + allowedEmailDomain);
+                    "O cadastro está fechado. Peça acesso a um administrador.");
+        }
+
+        if (!isEmailDomainAllowed(cleanEmail)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Cadastro restrito a e-mails corporativos: " + describeAllowedDomains());
         }
 
         Optional<User> existingUser = userRepository.findByEmail(cleanEmail);
@@ -130,10 +253,25 @@ public class AuthService {
 
         String passwordHash = PasswordUtil.hashPassword(request.getPassword());
 
+        // Id do Jira digitado no cadastro só vale se não for de outra pessoa do roster (ele liga a conta
+        // a equipes e liderança). Se for, o cadastro segue sem ele; o vínculo certo é o "Sou eu".
+        String requestedJiraId = request.getJiraAccountId() != null ? request.getJiraAccountId().trim() : null;
+        if (requestedJiraId != null && !requestedJiraId.isEmpty() && jiraAccountIdGuard != null
+                && !jiraAccountIdGuard.isFreeFor(requestedJiraId, existingUser.map(User::getId).orElse(null), cleanEmail)) {
+            log.warn("Cadastro de {} ignorou jiraAccountId que pertence a outra pessoa do roster", cleanEmail);
+            requestedJiraId = null;
+        }
+
         // Busca se a pessoa já possui papéis atribuídos no Profields
         List<ProjectMemberRole> roles = projectMemberRoleRepository.findByEmailIgnoreCase(cleanEmail);
         List<SquadMember> squadMembers = squadMemberRepository.findByUserIdentifier(cleanEmail);
-        String defaultProject = request.getDefaultProjectId();
+        // O projeto padrão NUNCA vem do corpo do cadastro. Em authz=legacy, default_project_id vale como "é da squad":
+        // quem digitasse a chave de outra squad leria e gravaria nela sem vínculo nenhum. Só o roster (por e-mail) e o
+        // vínculo/convite definem a squad inicial.
+        if (request.getDefaultProjectId() != null && !request.getDefaultProjectId().isBlank()) {
+            log.warn("Cadastro de {} ignorou defaultProjectId enviado pelo cliente", cleanEmail);
+        }
+        String defaultProject = null;
         String segment = request.getSegmentName();
         String tribe = request.getTribeName();
 
@@ -164,15 +302,12 @@ public class AuthService {
             if (user.getName() == null || user.getName().isBlank()) {
                 user.setName(request.getName().trim());
             }
-            if (request.getJiraAccountId() != null && !request.getJiraAccountId().isBlank()
+            if (requestedJiraId != null && !requestedJiraId.isEmpty()
                     && (user.getJiraAccountId() == null || user.getJiraAccountId().isBlank())) {
-                user.setJiraAccountId(request.getJiraAccountId().trim());
+                user.setJiraAccountId(requestedJiraId);
             }
             if (user.getDefaultProjectId() == null || user.getDefaultProjectId().isBlank()) {
                 user.setDefaultProjectId(defaultProject);
-            }
-            if (user.getSquadId() == null || user.getSquadId().isBlank()) {
-                user.setSquadId(defaultProject);
             }
             if (user.getSegmentName() == null || user.getSegmentName().isBlank()) {
                 user.setSegmentName(segment);
@@ -188,9 +323,8 @@ public class AuthService {
                     .passwordHash(passwordHash)
                     .authProvider("LOCAL")
                     .role("MEMBER")
-                    .jiraAccountId(request.getJiraAccountId() != null ? request.getJiraAccountId().trim() : null)
+                    .jiraAccountId(requestedJiraId != null && !requestedJiraId.isEmpty() ? requestedJiraId : null)
                     .defaultProjectId(defaultProject)
-                    .squadId(defaultProject)
                     .segmentName(segment)
                     .tribeName(tribe)
                     .active(true)
@@ -212,8 +346,16 @@ public class AuthService {
             squadMemberRepository.save(sm);
         }
 
-        UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(user);
-        return buildAuthResponse(user, access);
+        // Cadastro que casa com o roster do Jira (por e-mail): quem está sem cargo recebe o que o Jira trouxe.
+        if (cargoPreenchimento != null) {
+            for (ProjectMemberRole r : roles) {
+                if (MembershipSource.importOwned(r.getSource())
+                        && cargoPreenchimento.preencherSeVazio(user, r.getRoleName(), "cadastro por e-mail do roster")) break;
+            }
+            preencherCargoDoRoster(user, squadMembers, "cadastro por e-mail do roster");
+        }
+
+        return buildAuthResponse(user, resolveAccess(user));
     }
 
     /**
@@ -224,8 +366,7 @@ public class AuthService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão inválida ou expirada"));
 
-        UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(user);
-        return buildAuthResponse(user, access);
+        return buildAuthResponse(user, resolveAccess(user));
     }
 
     /**
@@ -236,23 +377,114 @@ public class AuthService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado"));
 
-        UserProjectAccessDto currentAccess = userProjectResolverService.resolveUserAccess(user);
-        boolean hasAccess = currentAccess.getProjects().stream()
-                .anyMatch(p -> p.getProjectId().equalsIgnoreCase(newProjectId));
-        if (!hasAccess) {
+        // Valida contra os vínculos do modo ativo (legacy/shadow: resolvedor antigo; new: MembershipService). Nunca afrouxa:
+        // sem vínculo na squad pedida, 403.
+        UserProjectAccessDto currentAccess = resolveAccess(user).access();
+        UserProjectAccessDto.ProjectAccessItem target = currentAccess.getProjects().stream()
+                .filter(p -> p.getProjectId().equalsIgnoreCase(newProjectId))
+                .findFirst().orElse(null);
+        if (target == null) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Usuário não tem acesso a este projeto");
         }
 
-        user.setDefaultProjectId(newProjectId);
-        user.setSquadId(newProjectId);
+        // Grava só a preferência default_project_id (Etapa 5 do vínculo: users.squad_id foi aposentada). No modelo novo
+        // grava o id canônico do vínculo (o legado gravava o texto como veio, inclusive com outra caixa).
+        String toStore = membershipMode() == MembershipMode.NEW ? target.getProjectId() : newProjectId;
+        user.setDefaultProjectId(toStore);
         user = userRepository.save(user);
+        if (membershipService != null) {
+            membershipService.evict(userId);
+        }
 
-        UserProjectAccessDto access = userProjectResolverService.resolveUserAccess(user);
-        return buildAuthResponse(user, access);
+        return buildAuthResponse(user, resolveAccess(user));
     }
 
-    private AuthResponseDto buildAuthResponse(User user, UserProjectAccessDto access) {
-        String activeProjId = (user.getDefaultProjectId() != null) ? user.getDefaultProjectId() : access.getPrimaryProjectId();
+    private AuthResponseDto buildAuthResponse(User user, Resolved resolved) {
+        return buildAuthResponse(user, resolved, Instant.now().getEpochSecond());
+    }
+
+    /** Vínculos que alimentam a sessão: o access (accessibleProjects), a squad ativa e, no modelo novo, legacyOnly. */
+    private record Resolved(UserProjectAccessDto access, String activeProjectId, Boolean legacyOnly) { }
+
+    private MembershipMode membershipMode() {
+        return membershipService == null ? MembershipMode.LEGACY : membershipService.mode();
+    }
+
+    /**
+     * Resolve os vínculos conforme app.membership.mode. LEGACY e SHADOW devolvem exatamente o que o resolvedor antigo
+     * devolvia (a squad ativa continua sendo users.default_project_id sem validar); SHADOW ainda compara com o modelo
+     * novo e registra as divergências. NEW usa o {@link MembershipService}: squad ativa validada contra os vínculos.
+     */
+    private Resolved resolveAccess(User user) {
+        MembershipMode mode = membershipMode();
+        if (mode == MembershipMode.NEW) {
+            MembershipService.View view = membershipService.forUser(user);
+            return new Resolved(MembershipService.toAccess(user, view), view.activeProjectId(), view.legacyOnly() ? Boolean.TRUE : null);
+        }
+        UserProjectAccessDto legacy = userProjectResolverService.resolveUserAccess(user);
+        String active = user.getDefaultProjectId() != null ? user.getDefaultProjectId() : legacy.getPrimaryProjectId();
+        if (mode == MembershipMode.SHADOW && membershipShadowService != null) {
+            membershipShadowService.record(user, legacy, active);
+        }
+        return new Resolved(legacy, active, null);
+    }
+
+    /**
+     * Renova a sessão: emite um token novo (mais 24 h por padrão) preservando o instante do login original.
+     * Depois do teto absoluto (app.security.jwt-max-session-seconds, 7 dias) é preciso entrar de novo.
+     */
+    @Transactional(readOnly = true)
+    public AuthResponseDto refresh(String userId, long sessionStartEpochSeconds) {
+        long now = Instant.now().getEpochSecond();
+        if (sessionStartEpochSeconds <= 0 || now - sessionStartEpochSeconds > jwtTokenUtil.getMaxSessionSeconds()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão expirada: entre novamente");
+        }
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão inválida ou expirada"));
+        if (!user.isActive()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão inválida: conta inativa");
+        }
+        return buildAuthResponse(user, resolveAccess(user), sessionStartEpochSeconds);
+    }
+
+    /**
+     * Troca a própria senha (exige a atual). As outras sessões abertas caem; a resposta traz um token novo
+     * para a sessão de quem trocou continuar.
+     */
+    @Transactional
+    public AuthResponseDto changePassword(String userId, String currentPassword, String newPassword) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão inválida ou expirada"));
+        if (user.getPasswordHash() == null || !PasswordUtil.verifyPassword(currentPassword, user.getPasswordHash())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Senha atual incorreta");
+        }
+        if (currentPassword.equals(newPassword)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A nova senha precisa ser diferente da atual");
+        }
+        user.setPasswordHash(PasswordUtil.hashPassword(newPassword));
+        user.setTokensValidAfter(Instant.now().getEpochSecond());
+        user = userRepository.save(user);
+        if (sessionGuard != null) {
+            sessionGuard.evict(userId);
+        }
+        return buildAuthResponse(user, resolveAccess(user));
+    }
+
+    /** Encerra a sessão no servidor: tokens emitidos até agora (de qualquer aparelho) deixam de valer. */
+    @Transactional
+    public void logout(String userId) {
+        userRepository.findById(userId).ifPresent(user -> {
+            user.setTokensValidAfter(Instant.now().getEpochSecond());
+            userRepository.save(user);
+            if (sessionGuard != null) {
+                sessionGuard.evict(userId);
+            }
+        });
+    }
+
+    private AuthResponseDto buildAuthResponse(User user, Resolved resolved, long authAt) {
+        UserProjectAccessDto access = resolved.access();
+        String activeProjId = resolved.activeProjectId();
         String activeProjName = "";
         String activeProjRole = "Membro";
         String segment = user.getSegmentName() != null ? user.getSegmentName() : "";
@@ -274,24 +506,26 @@ public class AuthService {
                 user.getId(),
                 user.getEmail(),
                 user.getName(),
-                user.getRole(),
+                sessionRole(user.getRole()),
                 activeProjId,
                 segment,
-                tribe
+                tribe,
+                authAt
         );
 
         return AuthResponseDto.builder()
                 .token(token)
                 .tokenType("Bearer")
-                .expiresIn(86400L)
+                .expiresIn(jwtTokenUtil.getExpirationSeconds())
                 .id(user.getId())
                 .email(user.getEmail())
                 .name(user.getName())
-                .role(user.getRole())
+                .role(sessionRole(user.getRole()))
                 .jobTitle(user.getJobTitle())
                 .authProvider(user.getAuthProvider())
                 .jiraAccountId(user.getJiraAccountId())
                 .avatarSeed(user.getAvatarSeed())
+                .photoUrl(UserPhotoService.photoUrl(user))
                 .activeProjectId(activeProjId)
                 .activeProjectName(activeProjName)
                 .activeProjectRole(activeProjRole)
@@ -299,6 +533,7 @@ public class AuthService {
                 .tribeName(tribe)
                 .isTransversalLeader(access.isTransversalLeader())
                 .accessibleProjects(access.getProjects())
+                .legacyOnly(resolved.legacyOnly())
                 .build();
     }
 }

@@ -37,10 +37,19 @@ class WorkItemControllerTest {
     private UserRepository userRepository;
 
     @Mock
-    private ProjectMemberRoleRepository projectMemberRoleRepository;
+    private com.agilespace.backend.service.SquadService squadService;
 
-    @InjectMocks
+    @Mock
+    private com.agilespace.backend.service.UserProjectResolverService userProjectResolverService;
+
     private WorkItemController controller;
+
+    @BeforeEach
+    void setUp() {
+        // SquadAccessService REAL por cima dos mocks: a regra de pertencimento é o que está sendo testado.
+        controller = new WorkItemController(workItemService,
+                new com.agilespace.backend.service.SquadAccessService(userRepository, squadService, userProjectResolverService));
+    }
 
     private HttpServletRequest requestAs(String userId, String role) {
         HttpServletRequest request = mock(HttpServletRequest.class);
@@ -51,18 +60,24 @@ class WorkItemControllerTest {
 
     /** Membro da squad SQ1: passa no requireSquadWriteAccess. */
     private HttpServletRequest memberOfSq1() {
-        User caller = User.builder().id("u1").email("joao@empresa.com.br").squadId("SQ1").build();
+        User caller = User.builder().id("u1").email("joao@empresa.com.br").defaultProjectId("SQ1").build();
         lenient().when(userRepository.findById("u1")).thenReturn(Optional.of(caller));
         return requestAs("u1", "MEMBER");
     }
 
+    /** Liderança da squad SQ1 (cargo de liderança + pertence à squad). */
+    private HttpServletRequest leaderOfSq1() {
+        User caller = User.builder().id("u5").email("lider@empresa.com.br").defaultProjectId("SQ1").jobTitle("tech lead").build();
+        lenient().when(userRepository.findById("u5")).thenReturn(Optional.of(caller));
+        return requestAs("u5", "MEMBER");
+    }
+
     /** Membro de outra squad: deve ser barrado ao mexer em work_items da SQ1. */
     private HttpServletRequest memberOfAnotherSquad() {
-        User caller = User.builder().id("u2").email("outro@empresa.com.br").squadId("SQ-OUTRA").build();
+        User caller = User.builder().id("u2").email("outro@empresa.com.br").defaultProjectId("SQ-OUTRA").build();
         lenient().when(userRepository.findById("u2")).thenReturn(Optional.of(caller));
         // requireSquadWriteAccess consulta ProjectMemberRoleRepository como fallback
         // (passo 2.1) antes de decidir — sem papel de projeto pra essa squad.
-        lenient().when(projectMemberRoleRepository.findByEmailIgnoreCase("outro@empresa.com.br")).thenReturn(List.of());
         return requestAs("u2", "MEMBER");
     }
 
@@ -109,10 +124,30 @@ class WorkItemControllerTest {
         @DisplayName("Deve delegar decisão de aceite/rejeição no showcase com feedback")
         void shouldRecordShowcaseDecisionWithFeedback() {
             ResponseEntity<Void> response = controller.showcaseDecision(
-                    "SQ1", "DDW-1", new WorkItemController.ShowcaseDecisionRequest("delivered", "Aceito pelo PO"), memberOfSq1());
+                    "SQ1", "DDW-1", new WorkItemController.ShowcaseDecisionRequest("delivered", "Aceito pelo PO"), leaderOfSq1());
 
             assertEquals(HttpStatus.OK, response.getStatusCode());
             verify(workItemService).showcaseDecision("SQ1", "DDW-1", "delivered", "Aceito pelo PO");
+        }
+
+        @Test
+        @DisplayName("Membro comum decide showcase (sem gate de liderança): Showcase/Review é colaborativo")
+        void shouldAllowShowcaseDecisionFromPlainMember() {
+            ResponseEntity<Void> response = controller.showcaseDecision(
+                    "SQ1", "DDW-1", new WorkItemController.ShowcaseDecisionRequest("delivered", "ok"), memberOfSq1());
+
+            assertEquals(HttpStatus.OK, response.getStatusCode());
+            verify(workItemService).showcaseDecision("SQ1", "DDW-1", "delivered", "ok");
+        }
+
+        @Test
+        @DisplayName("Admin decide showcase de qualquer squad")
+        void shouldAllowAdminShowcaseDecision() {
+            ResponseEntity<Void> response = controller.showcaseDecision(
+                    "SQ1", "DDW-1", new WorkItemController.ShowcaseDecisionRequest("delivered", "ok"), requestAs("admin1", "ADMIN"));
+
+            assertEquals(HttpStatus.OK, response.getStatusCode());
+            verify(workItemService).showcaseDecision("SQ1", "DDW-1", "delivered", "ok");
         }
 
         @Test
@@ -171,9 +206,8 @@ class WorkItemControllerTest {
             // perfil pra escrever em work_items de qualquer squad. O bypass só é seguro quando gated por
             // "matches" (mesma regra de SquadController.requireSquadWriteAccess) — este teste trava isso.
             User caller = User.builder().id("u4").email("lider.de.outra@empresa.com.br")
-                    .squadId("SQ-OUTRA").jobTitle("tech lead").build();
+                    .defaultProjectId("SQ-OUTRA").jobTitle("tech lead").build();
             when(userRepository.findById("u4")).thenReturn(Optional.of(caller));
-            lenient().when(projectMemberRoleRepository.findByEmailIgnoreCase("lider.de.outra@empresa.com.br")).thenReturn(List.of());
 
             ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> controller.estimateWorkItem(
                     "SQ1", "DDW-1", new WorkItemController.EstimateRequest(8.0), requestAs("u4", "MEMBER")));
@@ -183,23 +217,28 @@ class WorkItemControllerTest {
         }
 
         @Test
-        @DisplayName("Deve auto-vincular usuário sem squad à squad do work item e permitir a escrita")
-        void shouldAutoLinkUserWithoutSquadAndAllow() {
-            // requireSquadWriteAccess (passo 3, "Auto-vinculação caso não possua squad") vincula
-            // implicitamente quem ainda não tem squadId/defaultProjectId à squad que está tentando
-            // escrever, em vez de rejeitar — mesma regra replicada em SquadController. Não é a
-            // ausência de checagem; é a checagem decidindo permitir e reivindicar a squad.
+        @DisplayName("Usuário sem squad NÃO é mais vinculado a uma squad existente ao escrever work item (403)")
+        void shouldNotAutoLinkUserWithoutSquad() {
             User caller = User.builder().id("u3").email("sem.squad@empresa.com.br").build();
             when(userRepository.findById("u3")).thenReturn(Optional.of(caller));
-            lenient().when(projectMemberRoleRepository.findByEmailIgnoreCase("sem.squad@empresa.com.br")).thenReturn(List.of());
 
-            ResponseEntity<Void> response = controller.estimateWorkItem(
-                    "SQ1", "DDW-1", new WorkItemController.EstimateRequest(8.0), requestAs("u3", "MEMBER"));
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> controller.estimateWorkItem(
+                    "SQ1", "DDW-1", new WorkItemController.EstimateRequest(8.0), requestAs("u3", "MEMBER")));
 
-            assertEquals(HttpStatus.OK, response.getStatusCode());
-            assertEquals("SQ1", caller.getSquadId());
-            verify(userRepository).save(caller);
-            verify(workItemService).estimateWorkItem("SQ1", "DDW-1", 8.0);
+            assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+            assertNull(caller.getDefaultProjectId());
+            verify(userRepository, never()).save(any());
+            verifyNoInteractions(workItemService);
+        }
+
+        @Test
+        @DisplayName("Chave de issue fora do formato ABC-123 é recusada com 400")
+        void shouldRejectMalformedJiraKey() {
+            ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> controller.estimateWorkItem(
+                    "SQ1", "nao e chave", new WorkItemController.EstimateRequest(8.0), memberOfSq1()));
+
+            assertEquals(HttpStatus.BAD_REQUEST, ex.getStatusCode());
+            verifyNoInteractions(workItemService);
         }
 
         @Test

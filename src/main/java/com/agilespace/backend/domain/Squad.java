@@ -35,6 +35,14 @@ public class Squad {
     @Column(name = "sprint_field_id")
     private String sprintFieldId;
 
+    /** Id do campo Jira com a data/hora de início planejada (customfield_NNNNN). Nulo = autodetecta por nome. */
+    @Column(name = "jira_start_field", length = 100)
+    private String jiraStartField;
+
+    /** Id do campo Jira com a data/hora de fim planejada. Nulo = autodetecta por nome. */
+    @Column(name = "jira_end_field", length = 100)
+    private String jiraEndField;
+
     /** ID do quadro Scrum no Jira (rapidViewId). Guardado como texto; vazio = ainda não descoberto/informado. */
     @Column(name = "rapid_view_id", length = 50)
     private String rapidViewId;

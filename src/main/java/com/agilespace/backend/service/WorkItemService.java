@@ -7,7 +7,7 @@ import com.agilespace.backend.repository.SquadRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -18,7 +18,7 @@ import java.util.Map;
  * do Jira — em vez da antiga tabela work_items separada, que nunca era alimentada por um
  * sync de verdade. Os métodos seguem devolvendo WorkItem só como formato de resposta, pra
  * não quebrar o contrato que WorkItemController/frontend já consomem (ver plano de
- * unificação Squad Pulse + jiradash, Fase 1).
+ * unificação Squad Pulse, Fase 1).
  */
 @Service
 @RequiredArgsConstructor
@@ -42,7 +42,7 @@ public class WorkItemService {
                 .squadId(s.getSquadId())
                 .sprintId(s.getSprintId())
                 .jiraKey(s.getJiraKey())
-                .title(s.getJiraKey())
+                .title(s.getTitle() != null && !s.getTitle().isBlank() ? s.getTitle() : s.getJiraKey())
                 .type(s.getType())
                 .assigneeName(s.getAssigneeName())
                 .assigneeId(s.getAssigneeId())
@@ -57,8 +57,18 @@ public class WorkItemService {
                 .build();
     }
 
+    /** Estimativa: vazio limpa; senão um número finito entre 0 e 1000 (NaN/negativo/absurdo viravam dado da sprint). */
+    static void requireValidPoints(Double points) {
+        if (points == null) return;
+        if (points.isNaN() || points.isInfinite() || points < 0 || points > 1000) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "Estimativa inválida: use um número entre 0 e 1000.");
+        }
+    }
+
     @Transactional
     public void estimateWorkItem(String squadId, String jiraKey, Double pointsEstimated) {
+        requireValidPoints(pointsEstimated);
         SquadIssueSnapshot item = findOrCreate(squadId, jiraKey);
         if (item.getCeremonyStatus() == null || item.getCeremonyStatus().isBlank()) {
             item.setCeremonyStatus("backlog");
@@ -69,6 +79,9 @@ public class WorkItemService {
 
     @Transactional
     public void commitWorkItem(String squadId, String jiraKey, String sprintId) {
+        if (sprintId == null || sprintId.isBlank()) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "Informe a sprint do compromisso.");
+        }
         SquadIssueSnapshot item = findOrCreate(squadId, jiraKey);
         item.setCeremonyStatus("committed");
         item.setSprintId(sprintId);
@@ -77,10 +90,13 @@ public class WorkItemService {
 
     @Transactional
     public void showcaseDecision(String squadId, String jiraKey, String status, String feedback) {
+        if (status == null || !java.util.Set.of("committed", "delivered", "rejected", "carried_over").contains(status)) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "Status de decisão inválido.");
+        }
         SquadIssueSnapshot item = findOrCreate(squadId, jiraKey);
         item.setCeremonyStatus(status);
         item.setDecisionFeedback(feedback);
-        item.setDecidedAt(LocalDateTime.now().toString());
+        item.setDecidedAt(Instant.now().toString());
         issueSnapshotRepository.save(item);
     }
 
@@ -105,8 +121,10 @@ public class WorkItemService {
                 items = Collections.emptyList();
             }
 
-            // Fallback: se nenhum item estiver amarrado ao ID exato, busca todos os itens ativos (não-backlog) da squad
-            if (items.isEmpty()) {
+            // Squad com sprint ativa conhecida e sem itens nela: zero. Antes caía para "todos os itens não-backlog
+            // da squad", de TODAS as sprints, e o painel mostrava esse total como se fosse da sprint.
+            // Só squad SEM sprint ativa gravada (nunca sincronizou) usa os itens em jogo, porque não há sprint a separar.
+            if (items.isEmpty() && activeSprint == null) {
                 items = issueSnapshotRepository.findBySquadId(squadId).stream()
                         .filter(w -> w.getCeremonyStatus() != null && !"backlog".equalsIgnoreCase(w.getCeremonyStatus()))
                         .toList();
@@ -118,6 +136,9 @@ public class WorkItemService {
         double velocityReal = 0;
         double previsto = 0;
         int carryOvers = 0;
+        double carryOverPontos = 0;
+        int concluidosJira = 0;
+        int bugs = 0;
 
         for (SquadIssueSnapshot item : items) {
             double pts = item.getPointsEstimated() != null ? item.getPointsEstimated() : 0;
@@ -126,15 +147,28 @@ public class WorkItemService {
                 velocityReal += pts;
             } else if ("carried_over".equals(item.getCeremonyStatus())) {
                 carryOvers++;
+                carryOverPontos += pts;
+            }
+            if ("done".equals(item.getStatusCategory())) {
+                concluidosJira++;
+            }
+            if (Boolean.TRUE.equals(item.getIsBug())) {
+                bugs++;
             }
         }
 
-        return Map.of(
-                "velocityReal", velocityReal,
-                "previsto", previsto,
-                "entregue", velocityReal,
-                "carryOvers", carryOvers
-        );
+        // Os quatro primeiros vêm do estágio da cerimônia (Poker/Planner/Showcase); os quatro últimos, do Jira sincronizado.
+        // Campos novos são aditivos (docs/ceremony-radar-retro-api.md, 2.5).
+        Map<String, Object> stats = new java.util.LinkedHashMap<>();
+        stats.put("velocityReal", velocityReal);
+        stats.put("previsto", previsto);
+        stats.put("entregue", velocityReal);
+        stats.put("carryOvers", carryOvers);
+        stats.put("totalItens", items.size());
+        stats.put("concluidosJira", concluidosJira);
+        stats.put("bugs", bugs);
+        stats.put("carryOverPontos", carryOverPontos);
+        return stats;
     }
 
     public List<WorkItem> getAssignedWorkItems(String squadId, String identifier) {

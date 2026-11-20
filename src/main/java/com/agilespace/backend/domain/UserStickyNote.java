@@ -1,5 +1,7 @@
 package com.agilespace.backend.domain;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDateTime;
@@ -27,6 +29,20 @@ public class UserStickyNote {
 
     @Column(name = "is_pinned", nullable = false)
     private boolean isPinned;
+
+    // Lombok gera isPinned()/setPinned(), que o Jackson lê como "pinned" — mas o frontend usa
+    // "isPinned". Sem isto a nota fixada nunca voltava fixada depois de recarregar.
+    @JsonProperty("isPinned")
+    @JsonAlias("pinned")
+    public boolean isPinned() {
+        return isPinned;
+    }
+
+    @JsonProperty("isPinned")
+    @JsonAlias("pinned")
+    public void setPinned(boolean pinned) {
+        this.isPinned = pinned;
+    }
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;

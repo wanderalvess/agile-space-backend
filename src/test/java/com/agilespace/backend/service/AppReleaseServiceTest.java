@@ -125,9 +125,10 @@ public class AppReleaseServiceTest {
 
     @Test
     public void testCreateReleaseRejectsBlankTag() {
-        assertThrows(IllegalArgumentException.class,
-                () -> service.createRelease(AppReleaseDTO.builder().tag("   ").build()));
-        assertThrows(IllegalArgumentException.class,
+        assertEquals(org.springframework.http.HttpStatus.BAD_REQUEST, assertThrows(
+                org.springframework.web.server.ResponseStatusException.class,
+                () -> service.createRelease(AppReleaseDTO.builder().tag("   ").build())).getStatusCode());
+        assertThrows(org.springframework.web.server.ResponseStatusException.class,
                 () -> service.createRelease(AppReleaseDTO.builder().build()));
         verify(repository, never()).save(any());
     }
@@ -136,8 +137,9 @@ public class AppReleaseServiceTest {
     public void testCreateReleaseRejectsDuplicateTag() {
         when(repository.existsByTag("v4.0.0")).thenReturn(true);
 
-        assertThrows(IllegalArgumentException.class,
-                () -> service.createRelease(AppReleaseDTO.builder().tag("v4.0.0").build()));
+        assertEquals(org.springframework.http.HttpStatus.CONFLICT, assertThrows(
+                org.springframework.web.server.ResponseStatusException.class,
+                () -> service.createRelease(AppReleaseDTO.builder().tag("v4.0.0").build())).getStatusCode());
         verify(repository, never()).save(any());
     }
 
@@ -162,8 +164,9 @@ public class AppReleaseServiceTest {
         when(repository.findById("rel-1")).thenReturn(Optional.of(release("v4.0.0")));
         when(repository.existsByTag("v3.0.0")).thenReturn(true);
 
-        assertThrows(IllegalArgumentException.class,
-                () -> service.updateRelease("rel-1", AppReleaseDTO.builder().tag("v3.0.0").build()));
+        assertEquals(org.springframework.http.HttpStatus.CONFLICT, assertThrows(
+                org.springframework.web.server.ResponseStatusException.class,
+                () -> service.updateRelease("rel-1", AppReleaseDTO.builder().tag("v3.0.0").build())).getStatusCode());
         verify(repository, never()).save(any());
     }
 
@@ -181,8 +184,9 @@ public class AppReleaseServiceTest {
     public void testUpdateReleaseUnknownIdThrows() {
         when(repository.findById("ghost")).thenReturn(Optional.empty());
 
-        assertThrows(NoSuchElementException.class,
-                () -> service.updateRelease("ghost", AppReleaseDTO.builder().title("x").build()));
+        assertEquals(org.springframework.http.HttpStatus.NOT_FOUND, assertThrows(
+                org.springframework.web.server.ResponseStatusException.class,
+                () -> service.updateRelease("ghost", AppReleaseDTO.builder().title("x").build())).getStatusCode());
     }
 
     // ---------- deleteRelease ----------
@@ -200,7 +204,9 @@ public class AppReleaseServiceTest {
     public void testDeleteReleaseUnknownIdThrows() {
         when(repository.existsById("ghost")).thenReturn(false);
 
-        assertThrows(NoSuchElementException.class, () -> service.deleteRelease("ghost"));
+        assertEquals(org.springframework.http.HttpStatus.NOT_FOUND, assertThrows(
+                org.springframework.web.server.ResponseStatusException.class,
+                () -> service.deleteRelease("ghost")).getStatusCode());
         verify(repository, never()).deleteById(anyString());
     }
 

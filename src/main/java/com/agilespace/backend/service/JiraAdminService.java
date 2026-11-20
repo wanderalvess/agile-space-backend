@@ -14,19 +14,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.*;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.RestTemplate;
 
-import javax.net.ssl.HttpsURLConnection;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
-import java.io.IOException;
-import java.net.HttpURLConnection;
-import java.security.SecureRandom;
-import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -42,41 +32,28 @@ public class JiraAdminService {
     @Autowired
     private SquadMemberRepository squadMemberRepository;
 
+    @Autowired(required = false)
+    private SquadMemberExclusions squadMemberExclusions;
+
+    @Autowired(required = false)
+    private RosterMergeService rosterMerge;
+
     @Autowired
     private UserRepository userRepository;
+
+    /** Auditoria do cargo preenchido pelo Jira. Opcional: sem ele o preenchimento acontece, só não é auditado. */
+    @Autowired(required = false)
+    private CargoPreenchimento cargoPreenchimento;
 
     @Autowired
     private SquadMetricsRollupRepository squadMetricsRollupRepository;
 
-    private final RestTemplate restTemplate;
+    @Autowired
+    private JiraService jiraService;
+
     private final ObjectMapper objectMapper;
 
     public JiraAdminService() {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory() {
-            @Override
-            protected void prepareConnection(HttpURLConnection connection, String httpMethod) throws IOException {
-                if (connection instanceof HttpsURLConnection) {
-                    try {
-                        SSLContext sslContext = SSLContext.getInstance("TLS");
-                        sslContext.init(null, new TrustManager[]{
-                            new X509TrustManager() {
-                                public X509Certificate[] getAcceptedIssuers() { return null; }
-                                public void checkClientTrusted(X509Certificate[] certs, String authType) {}
-                                public void checkServerTrusted(X509Certificate[] certs, String authType) {}
-                            }
-                        }, new SecureRandom());
-                        ((HttpsURLConnection) connection).setSSLSocketFactory(sslContext.getSocketFactory());
-                        ((HttpsURLConnection) connection).setHostnameVerifier((hostname, session) -> true);
-                    } catch (Exception e) {
-                        log.error("Error setting trust-all SSL context", e);
-                    }
-                }
-                super.prepareConnection(connection, httpMethod);
-            }
-        };
-        factory.setConnectTimeout(15000);
-        factory.setReadTimeout(45000);
-        this.restTemplate = new RestTemplate(factory);
         this.objectMapper = new ObjectMapper();
     }
 
@@ -85,8 +62,11 @@ public class JiraAdminService {
      * retornando a lista para validação e edição antes da persistência no banco.
      */
     public JiraProjectPreviewDto previewProject(JiraSyncRequest request) {
-        String domain = request.getJiraDomain().trim().replace("https://", "").replace("http://", "");
+        String domain = JiraService.cleanDomain(request.getJiraDomain());
         String projectKey = request.getProjectKey().trim();
+        if (!projectKey.matches("[A-Za-z0-9_]{1,50}")) {
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, "Chave de projeto inválida");
+        }
         String token = request.getToken().trim();
 
         HttpHeaders headers = new HttpHeaders();
@@ -97,7 +77,7 @@ public class JiraAdminService {
         HttpEntity<Void> entity = new HttpEntity<>(headers);
 
         String projectUrl = "https://" + domain + "/rest/api/2/project/" + projectKey;
-        JsonNode projectNode = getJson(projectUrl, entity);
+        JsonNode projectNode = getJson(projectUrl, entity, domain);
         String projectName = projectNode.has("name") ? projectNode.get("name").asText() : projectKey;
 
         Map<String, MemberCandidate> candidateMap = new LinkedHashMap<>();
@@ -125,7 +105,7 @@ public class JiraAdminService {
         if (projectNode.has("lead") && !projectNode.get("lead").isNull()) {
             MemberInfo leadInfo = extractMemberInfo(projectNode.get("lead"));
             if (leadInfo != null) {
-                log.info("Project Lead detectado: {} ({})", leadInfo.displayName, leadInfo.accountId);
+                log.debug("Project Lead detectado no projeto {}", projectKey);
                 recordMember.accept(leadInfo, "Tech Lead");
             }
         }
@@ -138,7 +118,7 @@ public class JiraAdminService {
             } else {
                 try {
                     String rolesUrl = "https://" + domain + "/rest/api/2/project/" + projectKey + "/role";
-                    rolesNode = getJson(rolesUrl, entity);
+                    rolesNode = getJson(rolesUrl, entity, domain);
                 } catch (Exception e) {
                     log.warn("Falha ao buscar roles do projeto {} via endpoint /role: {}", projectKey, e.getMessage());
                 }
@@ -151,20 +131,23 @@ public class JiraAdminService {
                     String roleName = entry.getKey();
                     String roleUrl = entry.getValue().asText();
                     try {
-                        JsonNode roleDetail = getJson(roleUrl, entity);
+                        JsonNode roleDetail = getJson(roleUrl, entity, domain);
                         JsonNode actors = roleDetail.get("actors");
                         if (actors != null && actors.isArray()) {
                             for (JsonNode actor : actors) {
-                                MemberInfo m = extractMemberInfo(actor);
+                                boolean isGroupActor = actor.has("actorGroup")
+                                        || (actor.has("type") && actor.get("type").asText().contains("group"));
+                                MemberInfo m = isGroupActor ? null : extractMemberInfo(actor);
                                 if (m != null) {
-                                    log.info("Membro em Project Role '{}': {} ({})", roleName, m.displayName, m.accountId);
+                                    log.debug("Membro encontrado no Project Role '{}' do projeto {}", roleName, projectKey);
                                     recordMember.accept(m, roleName);
                                 } else if (actor.has("name") && (actor.has("actorGroup") || (actor.has("type") && actor.get("type").asText().contains("group")))) {
                                     String groupName = actor.has("name") ? actor.get("name").asText() : "";
                                     if (!groupName.isBlank()) {
                                         try {
-                                            String groupUrl = "https://" + domain + "/rest/api/2/group/member?groupname=" + groupName;
-                                            JsonNode groupNode = getJson(groupUrl, entity);
+                                            String groupUrl = "https://" + domain + "/rest/api/2/group/member?groupname="
+                                                    + java.net.URLEncoder.encode(groupName, java.nio.charset.StandardCharsets.UTF_8);
+                                            JsonNode groupNode = getJson(groupUrl, entity, domain);
                                             JsonNode values = groupNode.has("values") ? groupNode.get("values") : groupNode.get("users");
                                             if (values != null && values.isArray()) {
                                                 for (JsonNode uNode : values) {
@@ -193,7 +176,7 @@ public class JiraAdminService {
         // 3. Buscar Líderes de Componentes
         try {
             String compUrl = "https://" + domain + "/rest/api/2/project/" + projectKey + "/components";
-            JsonNode compNode = getJson(compUrl, entity);
+            JsonNode compNode = getJson(compUrl, entity, domain);
             if (compNode != null && compNode.isArray()) {
                 for (JsonNode comp : compNode) {
                     if (comp.has("lead") && !comp.get("lead").isNull()) {
@@ -211,7 +194,7 @@ public class JiraAdminService {
         // 4. Épicos e Iniciativas via JQL
         try {
             String epicSearchUrl = "https://" + domain + "/rest/api/2/search?jql=project%3D" + projectKey + "+AND+issuetype+in+(Epic%2CEpico%2C%C3%89pico%2CInitiative%2CIniciativa%2CFeature%2CTema)+ORDER+BY+updated+DESC&fields=*all&expand=names&maxResults=100";
-            collectMembersFromJql(epicSearchUrl, entity, recordMember);
+            collectMembersFromJql(epicSearchUrl, entity, recordMember, domain);
         } catch (Exception e) {
             log.warn("Falha ao buscar membros via épicos/iniciativas do projeto {}: {}", projectKey, e.getMessage());
         }
@@ -219,7 +202,7 @@ public class JiraAdminService {
         // 5. Tarefas Recentes via JQL
         try {
             String searchUrl = "https://" + domain + "/rest/api/2/search?jql=project%3D" + projectKey + "+ORDER+BY+updated+DESC&fields=*all&expand=names&maxResults=100";
-            collectMembersFromJql(searchUrl, entity, recordMember);
+            collectMembersFromJql(searchUrl, entity, recordMember, domain);
         } catch (Exception e) {
             log.warn("Falha ao buscar membros via tarefas recentes do projeto {}: {}", projectKey, e.getMessage());
         }
@@ -273,6 +256,9 @@ public class JiraAdminService {
         // 1.1 Salva ou atualiza o Rollup de Métricas da Squad
         SquadMetricsRollup rollup = squadMetricsRollupRepository.findById(projectKey).orElse(new SquadMetricsRollup());
         rollup.setSquadId(projectKey);
+        // A PK é atribuída à mão: sem ela o save falha no Postgres ("Identifier ... must be manually assigned").
+        // O rollup provisório da importação usa a chave da squad, o que também o faz ser achado pelo findById acima.
+        if (rollup.getDbId() == null || rollup.getDbId().isBlank()) rollup.setDbId(projectKey);
         if (rollup.getSprintName() == null || rollup.getSprintName().isBlank()) {
             rollup.setSprintName("Sprint Ativa (" + projectKey + ")");
         }
@@ -291,8 +277,17 @@ public class JiraAdminService {
         rollup.setComputedAt(Instant.now().toString());
         squadMetricsRollupRepository.save(rollup);
 
+        // Quem a liderança removeu à mão do time não volta por esta importação.
+        SquadMemberExclusions.Removed removedByHand = SquadMemberExclusions.of(squadMemberExclusions, projectKey);
         List<JiraMemberCandidateDto> approvedMembers = request.getMembers() != null
-                ? request.getMembers().stream().filter(JiraMemberCandidateDto::isSelected).collect(Collectors.toList())
+                ? request.getMembers().stream()
+                        .filter(JiraMemberCandidateDto::isSelected)
+                        .filter(m -> {
+                            boolean skip = removedByHand.matches(m.getJiraAccountId(), m.getEmail());
+                            if (skip) log.info("Importação da Squad {}: {} foi removido(a) à mão do time e não será recolocado(a).", projectKey, m.getDisplayName());
+                            return !skip;
+                        })
+                        .collect(Collectors.toList())
                 : Collections.emptyList();
 
         Set<String> approvedAccountIds = approvedMembers.stream()
@@ -306,26 +301,8 @@ public class JiraAdminService {
                 if (!approvedAccountIds.contains(current.getJiraAccountId())) {
                     log.info("Removendo membro não confirmado da Squad {}: {}", projectKey, current.getDisplayName());
                     squadMemberRepository.delete(current);
-
-                    // Se syncUsers ativo, desvincula o squadId do usuário
-                    if (request.isSyncUsers()) {
-                        userRepository.findByJiraAccountId(current.getJiraAccountId()).ifPresent(u -> {
-                            if (projectKey.equalsIgnoreCase(u.getSquadId())) {
-                                u.setSquadId(null);
-                                u.setUpdatedAt(LocalDateTime.now());
-                                userRepository.save(u);
-                            }
-                        });
-                        if (current.getEmail() != null && !current.getEmail().isBlank()) {
-                            userRepository.findByEmail(current.getEmail()).ifPresent(u -> {
-                                if (projectKey.equalsIgnoreCase(u.getSquadId())) {
-                                    u.setSquadId(null);
-                                    u.setUpdatedAt(LocalDateTime.now());
-                                    userRepository.save(u);
-                                }
-                            });
-                        }
-                    }
+                    // Etapa 5 do vínculo: a conta não é mais "desvinculada" aqui (users.squad_id foi aposentada; o
+                    // vínculo de acesso vive em project_member_roles e não é tocado pelo roster).
                 }
             }
         }
@@ -335,18 +312,48 @@ public class JiraAdminService {
         for (JiraMemberCandidateDto m : approvedMembers) {
             membersSaved++;
             String dbId = projectKey + "_" + m.getJiraAccountId();
-            SquadMember member = squadMemberRepository.findById(dbId).orElse(new SquadMember());
+            SquadMember member = squadMemberRepository.findById(dbId).orElse(null);
+            boolean sameOtherKey = false; // a pessoa já está no roster com outra chave: dados existentes valem mais
+            if (member == null) {
+                // Conta nova do Jira para quem já está no roster com outra chave (mesmo e-mail, ou pré-cadastro por nome):
+                // funde na linha existente em vez de criar uma segunda pessoa. Id gerado vira a conta real do Jira.
+                SquadMember same = PersonIdentity.resolve(squadMemberRepository.findBySquadIdOrderByDisplayNameAsc(projectKey),
+                        m.getJiraAccountId(), m.getEmail(), m.getDisplayName());
+                if (same != null && PersonIdentity.shouldAdoptIncomingId(same.getJiraAccountId(), m.getJiraAccountId())) {
+                    squadMemberRepository.delete(same);
+                    squadMemberRepository.flush();
+                    if (rosterMerge != null) rosterMerge.movePersonConfigs(projectKey, same.getJiraAccountId(), m.getJiraAccountId());
+                    member = new SquadMember();
+                    member.setClaimedByUid(same.getClaimedByUid());
+                    member.setCalibrationNotes(same.getCalibrationNotes());
+                    member.setOverrideType(same.getOverrideType());
+                    member.setCapacityHoursPerDay(same.getCapacityHoursPerDay());
+                    member.setClaimedByUid(same.getClaimedByUid() != null ? same.getClaimedByUid() : member.getClaimedByUid());
+                } else if (same != null) {
+                    member = same;
+                    dbId = same.getDbId();
+                    sameOtherKey = true;
+                }
+            }
+            if (member == null) member = new SquadMember();
             member.setDbId(dbId);
             member.setSquadId(projectKey);
-            member.setJiraAccountId(m.getJiraAccountId());
-            member.setDisplayName(m.getDisplayName());
-            member.setEmail(m.getEmail());
-            member.setRole(m.getRole());
-            member.setCapacityHoursPerDay(m.getCapacityHoursPerDay() != null ? m.getCapacityHoursPerDay() : 8.0);
+            if (member.getJiraAccountId() == null || dbId.equals(projectKey + "_" + m.getJiraAccountId())) {
+                member.setJiraAccountId(m.getJiraAccountId());
+            }
+            // A chave interna do Jira (JIRAUSER) não traz e-mail: não apaga o que a linha existente já tem.
+            if (!sameOtherKey || member.getDisplayName() == null) member.setDisplayName(PersonIdentity.cleanName(m.getDisplayName()));
+            String incomingEmail = PersonIdentity.normEmail(m.getEmail());
+            if (incomingEmail != null || member.getEmail() == null) member.setEmail(incomingEmail);
+            if (!sameOtherKey || member.getRole() == null) member.setRole(m.getRole());
+            // Horas calibradas à mão valem mais que o padrão da prévia: reimportar não pode zerar a calibração.
+            boolean calibrated = RosterMergeService.MANUAL.equalsIgnoreCase(member.getOverrideType()) && member.getCapacityHoursPerDay() != null;
+            if (!calibrated) member.setCapacityHoursPerDay(m.getCapacityHoursPerDay() != null ? m.getCapacityHoursPerDay() : 8.0);
             member.setUpdatedAt(Instant.now().toString());
 
-            if (request.isSyncUsers()) {
+            if (request.isSyncUsers() && !(sameOtherKey && member.getClaimedByUid() != null)) {
                 try {
+                    boolean cargoFilled = false;
                     User user = userRepository.findById(m.getJiraAccountId()).orElse(null);
                     if (user == null && m.getEmail() != null && !m.getEmail().isBlank()) {
                         user = userRepository.findByEmail(m.getEmail()).orElse(null);
@@ -360,8 +367,8 @@ public class JiraAdminService {
                         user.setId(m.getJiraAccountId());
                         user.setName(m.getDisplayName());
                         user.setEmail(m.getEmail() != null && !m.getEmail().isBlank() ? m.getEmail() : m.getJiraAccountId() + "@empresa.com");
-                        user.setJobTitle(m.getRole()); // Cargo validado pelo usuário (não é tier de autorização)
-                        user.setSquadId(projectKey);
+                        // Cargo inicial = role do Jira (canônica). Não é tier de autorização.
+                        user.setJobTitle(CargoNames.canonical(m.getRole()));
                         user.setJiraAccountId(m.getJiraAccountId());
                         user.setAvatarSeed(m.getDisplayName());
                         user.setDailyHours(m.getCapacityHoursPerDay() != null ? m.getCapacityHoursPerDay().intValue() : 8);
@@ -369,18 +376,20 @@ public class JiraAdminService {
                         user.setUpdatedAt(LocalDateTime.now());
                         user = userRepository.save(user);
                     } else {
-                        // Atualiza dados e cargo validado. NUNCA grava em user.role: esse campo é o tier
-                        // de autorização (ver User.role/UserRole) e sincronizar squad não deve poder
-                        // rebaixar/elevar o acesso admin de alguém a partir de um texto de cargo do Jira.
+                        // Atualiza dados. NUNCA grava em user.role: esse campo é o tier de autorização
+                        // (ver User.role/UserRole) e sincronizar squad não deve poder rebaixar/elevar o
+                        // acesso admin de alguém a partir de um texto de cargo do Jira.
+                        // Cargo (users.job_title): o definido na administração vale de ponta a ponta, então a
+                        // sincronização NUNCA o sobrescreve; só preenche quem está sem cargo (role do Jira, canônica).
                         user.setName(m.getDisplayName());
-                        user.setJobTitle(m.getRole());
-                        user.setSquadId(projectKey);
+                        cargoFilled = CargoNames.fillIfBlank(user, m.getRole());
                         user.setJiraAccountId(m.getJiraAccountId());
                         if (m.getCapacityHoursPerDay() != null) {
                             user.setDailyHours(m.getCapacityHoursPerDay().intValue());
                         }
                         user.setUpdatedAt(LocalDateTime.now());
                         user = userRepository.save(user);
+                        if (cargoFilled && cargoPreenchimento != null) cargoPreenchimento.registrar(user, "sincronização do Jira");
                     }
 
                     member.setClaimedByUid(user.getId());
@@ -391,6 +400,7 @@ public class JiraAdminService {
 
             squadMemberRepository.save(member);
         }
+        consolidateRoster(projectKey);
 
         return JiraSyncResult.builder()
                 .squadId(projectKey)
@@ -398,6 +408,17 @@ public class JiraAdminService {
                 .membersFound(membersSaved)
                 .syncedAt(Instant.now().toString())
                 .build();
+    }
+
+    /** Funde pares da mesma pessoa que já estavam no roster (ex.: chave interna JIRAUSER x nome de usuário). Nunca derruba a importação. */
+    private void consolidateRoster(String squadId) {
+        if (rosterMerge == null) return;
+        try {
+            int n = rosterMerge.consolidate(squadId);
+            if (n > 0) log.info("Importação da Squad {}: {} linha(s) duplicada(s) do roster fundida(s).", squadId, n);
+        } catch (Exception e) {
+            log.warn("Importação da Squad {}: não foi possível fundir duplicatas do roster: {}", squadId, e.getMessage());
+        }
     }
 
     /**
@@ -417,8 +438,8 @@ public class JiraAdminService {
         return confirmSync(confirm);
     }
 
-    private void collectMembersFromJql(String searchUrl, HttpEntity<Void> entity, java.util.function.BiConsumer<MemberInfo, String> recordMember) {
-        JsonNode searchNode = getJson(searchUrl, entity);
+    private void collectMembersFromJql(String searchUrl, HttpEntity<Void> entity, java.util.function.BiConsumer<MemberInfo, String> recordMember, String domain) {
+        JsonNode searchNode = getJson(searchUrl, entity, domain);
         Map<String, String> fieldNamesMap = new HashMap<>();
         if (searchNode.has("names") && searchNode.get("names").isObject()) {
             Iterator<Map.Entry<String, JsonNode>> it = searchNode.get("names").fields();
@@ -440,6 +461,7 @@ public class JiraAdminService {
                     JsonNode fieldValue = fEntry.getValue();
                     String rawRoleName = fieldNamesMap.getOrDefault(fieldKey, fieldKey);
 
+                    if ("project".equalsIgnoreCase(fieldKey) || "issuetype".equalsIgnoreCase(fieldKey)) continue;
                     if ("assignee".equalsIgnoreCase(fieldKey)) {
                         rawRoleName = "Developer";
                     } else if ("reporter".equalsIgnoreCase(fieldKey) || "creator".equalsIgnoreCase(fieldKey)) {
@@ -466,10 +488,23 @@ public class JiraAdminService {
         }
     }
 
-    private JsonNode getJson(String url, HttpEntity<Void> entity) {
+    /**
+     * GET no Jira. A URL pode vir de dentro de uma resposta do próprio Jira (links dos Project Roles); por isso só
+     * é seguida se for https e do MESMO host configurado — senão o token e a requisição iriam para onde o JSON mandar.
+     */
+    private JsonNode getJson(String url, HttpEntity<Void> entity, String domain) {
+        java.net.URI uri;
         try {
-            java.net.URI uri = java.net.URI.create(url);
-            ResponseEntity<String> response = restTemplate.exchange(uri, HttpMethod.GET, entity, String.class);
+            uri = java.net.URI.create(url);
+        } catch (IllegalArgumentException e) {
+            throw new RuntimeException("Endereço inválido devolvido pelo Jira.", e);
+        }
+        String expectedHost = domain.replaceFirst(":[0-9]+$", "");
+        if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null || !uri.getHost().equalsIgnoreCase(expectedHost)) {
+            throw new RuntimeException("Endereço fora do domínio do Jira configurado foi ignorado.");
+        }
+        try {
+            ResponseEntity<String> response = jiraService.exchangeGet(uri, entity);
             return objectMapper.readTree(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             String body = e.getResponseBodyAsString();
@@ -487,9 +522,9 @@ public class JiraAdminService {
                     throw re;
                 } catch (Exception ignored) {}
             }
-            throw new RuntimeException("Failed to GET " + url + ": " + e.getStatusCode() + " " + e.getStatusText(), e);
+            throw new RuntimeException("O Jira respondeu " + e.getStatusCode().value() + " ao consultar o projeto.", e);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to GET " + url + ": " + e.getMessage(), e);
+            throw new RuntimeException("Falha ao consultar o Jira: " + JiraService.describe(e), e);
         }
     }
 
@@ -509,8 +544,48 @@ public class JiraAdminService {
                combined.contains("automation");
     }
 
+    /** Prefixos de caixa compartilhada/serviço no e-mail ou usuário (ex.: engenharia.vd@...): não é uma pessoa, precisa de revisão. */
+    private static final java.util.regex.Pattern SHARED_MAILBOX = java.util.regex.Pattern.compile(
+            "^(engenharia|suporte|support|atendimento|noreply|no-reply|naoresponda|contato|financeiro|automacao|integracao)[._-].*");
+
+    /**
+     * Conta que parece caixa compartilhada ou de serviço (não pessoa): o e-mail ou o usuário começa com um prefixo de área
+     * seguido de ponto/hífen/sublinhado (engenharia.vd). Só olha a parte local do e-mail e o nome de usuário, nunca o nome
+     * de exibição, para não barrar pessoa real de nome parecido.
+     */
+    static boolean looksLikeSharedMailbox(String email, String accountId) {
+        for (String raw : new String[] {email, accountId}) {
+            if (raw == null || raw.isBlank()) continue;
+            String local = raw.trim().toLowerCase(java.util.Locale.ROOT);
+            int at = local.indexOf('@');
+            if (at >= 0) local = local.substring(0, at);
+            if (SHARED_MAILBOX.matcher(local).matches()) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Conta de aplicativo/integração do Jira Cloud ({@code accountType != atlassian/customer}) ou de add-on do Server
+     * ({@code addon_...}); nunca é pessoa.
+     */
+    static boolean isApplicationAccount(JsonNode node) {
+        if (node == null || !node.isObject()) return false;
+        if (node.hasNonNull("accountType")) {
+            String t = node.get("accountType").asText("").toLowerCase(java.util.Locale.ROOT);
+            if (!t.isEmpty() && !t.equals("atlassian") && !t.equals("customer")) return true;
+        }
+        for (String f : new String[] {"name", "key"}) {
+            if (node.hasNonNull(f) && node.get(f).asText("").toLowerCase(java.util.Locale.ROOT).startsWith("addon_")) return true;
+        }
+        return false;
+    }
+
     private boolean isUserObject(JsonNode node) {
         if (node == null || !node.isObject()) return false;
+        // Objeto com "self" que não é de usuário (projeto, componente, versão, status...) nunca é pessoa. Sem isto, o campo
+        // "project" das issues ({name: "Projeto X - Y", key: "ABC"}) entrava como pessoa sem e-mail com o nome da squad.
+        if (node.hasNonNull("self") && !node.get("self").asText().contains("/user")) return false;
+        if (isApplicationAccount(node)) return false;
         if (node.has("self") && node.get("self").asText().contains("/user")) return true;
         if (node.has("actorUser") && node.get("actorUser").isObject()) return true;
         if (node.has("displayName") && (node.has("name") || node.has("key") || node.has("accountId") || node.has("emailAddress") || node.has("avatarUrls") || node.has("active"))) return true;
@@ -573,14 +648,20 @@ public class JiraAdminService {
         return new MemberInfo(accountId, displayName, email, extractAvatarUrl(userNode));
     }
 
-    private RoleScore evaluateRole(String rawRoleName) {
+    /** `token` como palavra inteira ("rte" casa em "RTE", não em "Suporte"/"Parte"; "ui" não casa em "Equipe"). */
+    static boolean hasWord(String name, String token) {
+        return java.util.regex.Pattern.compile("(?<![\\p{L}\\p{N}])" + java.util.regex.Pattern.quote(token) + "(?![\\p{L}\\p{N}])")
+                .matcher(name).find();
+    }
+
+    static RoleScore evaluateRole(String rawRoleName) {
         if (rawRoleName == null || rawRoleName.isBlank()) return new RoleScore("Developer", 10);
         String name = rawRoleName.toLowerCase(java.util.Locale.ROOT).trim();
 
         // 1. Gestão de Produto (Product Owner, PM, GPM, Dono do Produto) -> Score 100
         if (name.contains("product owner") || name.equals("po") || name.equals("p.o") || 
             name.equals("p.o.") || name.contains("dono do produto") || name.contains("product manager") || 
-            name.contains("gpm") || name.contains("líder de produto") || name.contains("lider de produto") ||
+            hasWord(name, "gpm") || name.contains("líder de produto") || name.contains("lider de produto") ||
             name.contains("lead product") || name.contains("analista de produto") || name.contains("product lead") ||
             name.contains("gerente de produto")) {
             return new RoleScore("Product Owner", 100);
@@ -592,17 +673,23 @@ public class JiraAdminService {
             name.equals("gp") || name.equals("pm") || name.contains("coordenador") || 
             name.contains("coordenadora") || name.contains("coordenação") || name.contains("coordenacao") ||
             name.contains("engineering manager") || name.equals("em") || name.contains("diretor") || 
-            name.contains("head") || name.contains("management") || name.contains("administrators") ||
+            hasWord(name, "head") || name.contains("management") || name.contains("administrators") ||
             name.contains("administrador") || name.contains("administradora") || name.contains("people lead") ||
             name.equals("pl") || name.contains("líder de pessoas") || name.contains("lider de pessoas")) {
             return new RoleScore("People Lead", 96);
         }
 
-        // 3. Gestão Ágil / Facilitação (Agile Master / Scrum Master / Agilista / RTE) -> Score 95
-        if (name.contains("agile master") || name.contains("scrum master") || name.equals("am") || 
-            name.equals("sm") || name.contains("agilista") || name.contains("facilitador") || 
-            name.contains("facilitadora") || name.contains("rte") || name.contains("release train") ||
-            name.contains("scrum") || name.contains("agile coach") || name.equals("ac")) {
+        // 3. Agile Coach / Agile Coaching é cargo próprio (liderança transversal da tribo), não Agile Master.
+        // Vem antes do bloco do AM porque "agile coaching" não pode cair no "scrum"/"agile" mais abaixo.
+        if (name.contains("agile coach") || name.contains("coaching") || name.equals("coach") || name.equals("ac")) {
+            return new RoleScore("Agile Coach", 94);
+        }
+
+        // 4. Gestão Ágil / Facilitação (Agile Master / Scrum Master / Agilista / RTE) -> Score 95
+        if (name.contains("agile master") || name.contains("scrum master") || name.equals("am") ||
+            name.equals("sm") || name.contains("agilista") || name.contains("facilitador") ||
+            name.contains("facilitadora") || hasWord(name, "rte") || name.contains("release train") ||
+            name.contains("scrum")) {
             return new RoleScore("Agile Master", 95);
         }
 
@@ -625,19 +712,19 @@ public class JiraAdminService {
         }
 
         // 6. QA / Qualidade -> Score 70
-        if (name.contains("qa") || name.contains("teste") || name.contains("test") || 
+        if (hasWord(name, "qa") || name.contains("teste") || name.contains("test") || 
             name.contains("qualidade") || name.contains("tester") || name.contains("quality")) {
             return new RoleScore("QA", 70);
         }
 
         // 7. Design / UX / UI -> Score 65
-        if (name.contains("ux") || name.contains("ui") || name.contains("design") || 
+        if (hasWord(name, "ux") || hasWord(name, "ui") || name.contains("design") || 
             name.contains("designer") || name.contains("produto visual")) {
             return new RoleScore("UX/Designer", 65);
         }
 
         // 8. Especialista de Negócio / SME -> Score 60
-        if (name.contains("sme") || name.contains("subject matter expert") || name.contains("especialista") ||
+        if (hasWord(name, "sme") || name.contains("subject matter expert") || name.contains("especialista") ||
             name.contains("business owner") || name.contains("analista de negócio") || name.contains("analista de negocio") ||
             name.contains("business analyst") || name.equals("ba") || name.contains("consultor") || name.contains("consultora")) {
             return new RoleScore("SME", 60);
@@ -645,7 +732,7 @@ public class JiraAdminService {
 
         // 9. Desenvolvedores -> Score 50
         if (name.contains("desenvolvedor") || name.contains("desenvolvedora") || name.contains("developer") || 
-            name.contains("dev") || name.contains("programador") || name.contains("programadora") || 
+            hasWord(name, "dev") || name.contains("programador") || name.contains("programadora") || 
             name.contains("engenheiro") || name.contains("engenheira") || name.contains("software") || 
             name.contains("analista") || name.contains("assignee") || name.contains("responsável") || 
             name.contains("responsavel")) {
@@ -655,7 +742,7 @@ public class JiraAdminService {
         return new RoleScore("Developer", 10);
     }
 
-    private static class RoleScore {
+    static class RoleScore {
         final String canonicalRole;
         final int score;
         RoleScore(String canonicalRole, int score) {

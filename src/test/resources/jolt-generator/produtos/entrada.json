@@ -1,0 +1,297 @@
+{
+    "first": false,
+    "items": [
+        {
+            "produto": {
+                "codigo": 217,
+                "descricao": "AP CELULAR GALAXY ACE PLUS S7500 SAMSUNG",
+                "embalagem": "UN",
+                "codigoDeBarra": "217000",
+                "palete": {
+                    "lastroPalete": {
+                        "valor": 0
+                    },
+                    "camadaPalete": {
+                        "valor": 0
+                    },
+                    "normaPalete": {
+                        "valor": 0
+                    }
+                },
+                "pesoBruto": {
+                    "valor": 0.5
+                },
+                "usaWms": false,
+                "codigoSecao": 4,
+                "unidade": {
+                    "sigla": "UN",
+                    "descricao": "Unitário"
+                },
+                "revenda": true,
+                "codigoMarca": 0,
+                "pesoLiquido": {
+                    "valor": 0.5
+                },
+                "induzLote": false,
+                "dimensao": {
+                    "altura": {
+                        "valor": 0
+                    },
+                    "largura": {
+                        "valor": 0
+                    },
+                    "comprimento": {
+                        "valor": 0
+                    }
+                },
+                "tipoComissao": "P",
+                "pesoVariavel": false,
+                "codigoCategoria": 0,
+                "codigoSubCategoria": 0,
+                "nomeFornecedor": "VITI VINICOLA CERESER LTDA.",
+                "codigoFornecedor": 10,
+                "prazoMaxValidade": 0,
+                "controlaSerie": false,
+                "estoquePorLote": false,
+                "codigoLinhaProduto": 0,
+                "tipoProduto": "NORMAL",
+                "tipoEstoque": "PADRAO",
+                "codigoDepartamento": 4,
+                "controladoIbama": false,
+                "imuneTributacao": false,
+                "usaFreteEspecial": false,
+                "prazoMedioVenda": 0,
+                "quantidadeCaixa": {
+                    "valor": 1
+                },
+                "codigoProdutoPrincipal": 2,
+                "skuProdutoPrincipal": "2000-2",
+                "quantidadeUnitaria": {
+                    "valor": 1
+                },
+                "tipoMercadoria": "LIBERADO",
+                "enderecoApanha": {
+                    "rua": 1,
+                    "modulo": 1,
+                    "numero": 1,
+                    "apartamento": 1
+                },
+                "quantidadeMinimaAtacado": {
+                    "valor": 8000
+                },
+                "descricoes": [
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null
+                ],
+                "tipoFracaoProduto": "ACEITA_FRACIONAMENTO",
+                "multiplo": {
+                    "valor": 0.5
+                },
+                "classificacaoProduto": "NORMAL",
+                "pesoBrutoMaster": {
+                    "valor": 0
+                },
+                "pesoLiquidoMaster": {
+                    "valor": 0
+                },
+                "custoFornecedor": 0,
+                "custoFornecedorSemSt": 0,
+                "custoProximaCompra": 0,
+                "custoProximaCompraSemSt": 0,
+                "compraConsignado": false,
+                "percentualPis": 3.65,
+                "percentualCofins": 7,
+                "situacao": "Ativo",
+                "origemProd": "7",
+                "cnpjFornecedor": "22003149000248",
+                "embalagens": [
+                    {
+                        "unidade": {
+                            "sigla": "UN",
+                            "descricao": "Unitário"
+                        },
+                        "embalagem": "UN",
+                        "produto": 217,
+                        "filial": {
+                            "codigo": "1",
+                            "razaoSocial": "TOTVS - UNIDADE GOIANIA",
+                            "uf": "GO",
+                            "broker": false
+                        },
+                        "fatorPreco": 555,
+                        "codigoDeBarra": "7895446522569",
+                        "permiteVendaBalcao": false,
+                        "permiteVendaTelemarketing": false,
+                        "quantidadeMinimaAtacado": 8000,
+                        "fatorConversao": {
+                            "valor": 1
+                        },
+                        "pesoBruto": {
+                            "valor": 0
+                        },
+                        "inativo": false
+                    },
+                    {
+                        "unidade": {
+                            "sigla": "UN",
+                            "descricao": "Unitário"
+                        },
+                        "embalagem": "UN",
+                        "produto": 217,
+                        "filial": {
+                            "codigo": "1",
+                            "razaoSocial": "TOTVS - UNIDADE GOIANIA",
+                            "uf": "GO",
+                            "broker": false
+                        },
+                        "fatorPreco": 600,
+                        "codigoDeBarra": "217000",
+                        "permiteVendaBalcao": false,
+                        "permiteVendaTelemarketing": false,
+                        "quantidadeMinimaAtacado": 0,
+                        "fatorConversao": {
+                            "valor": 1
+                        },
+                        "pesoBruto": {},
+                        "inativo": false
+                    }
+                ],
+                "produtosSimilares": [],
+                "conciliaImportacao": false,
+                "frios": false,
+                "dtcadastro": "2014-09-29T00:00:00",
+                "dtultalter": "2026-10-08T11:15:53",
+                "codfilial": "1",
+                "codProdPrincOriginal": 2
+            },
+            "piscofins": [
+                {
+                    "codTribPisCofins": 1,
+                    "cst": "02",
+                    "aliquotaPis": 0.0165,
+                    "aliquotaCofins": 0.0765,
+                    "codProd": 217
+                }
+            ],
+            "icms": [
+                {
+                    "id": 3,
+                    "baseCalculo": {
+                        "valor": 0
+                    },
+                    "aliquota": {
+                        "valor": 0
+                    },
+                    "reducaoBaseCalculo": {
+                        "valor": 0
+                    },
+                    "dataUltimaAlteracao": "2025-05-22T09:28:20",
+                    "substituicaoTributaria": {
+                        "valor": {
+                            "valor": 0
+                        },
+                        "baseCalculo": {
+                            "valor": 0
+                        },
+                        "id": 3,
+                        "substituicaoTributaria": {
+                            "valor": 0
+                        },
+                        "baseSubstituicaoTributaria": {
+                            "valor": 0
+                        },
+                        "reducaoBaseCalculo": {
+                            "valor": 0
+                        },
+                        "tipoSubstituicaoTributaria": {
+                            "descricao": "SEM ST"
+                        },
+                        "iva": {
+                            "valor": 0
+                        },
+                        "icmsExterno": {
+                            "valor": 1.00
+                        },
+                        "icmsInterno": {
+                            "valor": 0
+                        },
+                        "pauta": {
+                            "valor": 0
+                        },
+                        "stGnre": false,
+                        "baseFecp": {
+                            "valor": 0
+                        },
+                        "aliquotaFecp": {
+                            "valor": 0
+                        },
+                        "valorFecp": {
+                            "valor": 0
+                        },
+                        "dataUltimaAlteracao": "2025-05-22T09:28:20",
+                        "tipo": "ST",
+                        "aliquota": {
+                            "valor": 0
+                        }
+                    },
+                    "fcp": {
+                        "id": 3,
+                        "valorBaseFcp": {
+                            "valor": 0
+                        },
+                        "percentualFcp": {
+                            "valor": 0
+                        },
+                        "motivoDesoneracaoIcms": 0,
+                        "descontaDesoneracaoNf": false,
+                        "tipoTrib": "",
+                        "baseCalculo": {
+                            "valor": 0
+                        },
+                        "tipo": "FCP",
+                        "aliquota": {
+                            "valor": 0
+                        },
+                        "reducaoBaseCalculo": {
+                            "valor": 100.00
+                        },
+                        "valor": {
+                            "valor": 0
+                        }
+                    },
+                    "modalidadeVarejo": "ISENTO",
+                    "indiceTributoImpressoraVarejo": "II",
+                    "simboloVarejo": "II",
+                    "cst": "40",
+                    "codProd": 217,
+                    "codFilial": "1",
+                    "tipo": "ICMS",
+                    "valor": {
+                        "valor": 0
+                    }
+                }
+            ],
+            "ncm": [
+                {
+                    "id": "34031110-34031110",
+                    "codigoNcm": "34031110",
+                    "codigoExcecao": 0,
+                    "aliquotaNacional": 0,
+                    "aliquotaEstadual": 0,
+                    "aliquotaImportada": 0,
+                    "aliquotaMunicipal": 0,
+                    "dataUltimaAtualizacao": "2026-06-25T15:30:20",
+                    "dataCadastro": "2014-09-29T00:00:00",
+                    "codProd": 217,
+                    "codFilial": "99"
+                }
+            ]
+        }
+    ],
+    "hasNext": false
+}

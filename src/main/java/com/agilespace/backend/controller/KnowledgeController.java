@@ -20,6 +20,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import com.agilespace.backend.dto.KnowledgeVersionDto;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -27,7 +28,6 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/knowledge")
 @RequiredArgsConstructor
-@CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class KnowledgeController {
 
     private final KnowledgeService knowledgeService;
@@ -39,35 +39,45 @@ public class KnowledgeController {
             @RequestParam(value = "query", required = false) String query,
             @RequestParam(value = "tags", required = false) Set<String> tags,
             @RequestParam(value = "status", required = false) String status,
-            @PageableDefault(size = 20) Pageable pageable) {
-        return ResponseEntity.ok(knowledgeService.listDocuments(query, tags, status, pageable));
+            @PageableDefault(size = 20) Pageable pageable,
+            HttpServletRequest request) {
+        Page<KnowledgeDocument> page = knowledgeService.listDocuments(query, tags, status, pageable, resolveUserId(request), isAdmin(request));
+        knowledgeService.markEditable(page.getContent(), resolveUserId(request), isAdmin(request));
+        return ResponseEntity.ok(page);
     }
 
     // Overload preservado para compatibilidade de origem com chamadas existentes sem filtro de status.
     public ResponseEntity<Page<KnowledgeDocument>> listDocuments(String query, Set<String> tags, Pageable pageable) {
-        return listDocuments(query, tags, null, pageable);
+        return listDocuments(query, tags, null, pageable, null);
     }
 
     @PostMapping("/search/semantic")
     public ResponseEntity<Page<KnowledgeDocument>> semanticSearch(
             @RequestBody Map<String, Object> body,
             @PageableDefault(size = 10) Pageable pageable) {
-        @SuppressWarnings("unchecked")
-        List<Double> rawEmbedding = (List<Double>) body.get("embedding");
-        if (rawEmbedding == null || rawEmbedding.isEmpty()) {
-            return ResponseEntity.badRequest().build();
+        Object raw = body.get("embedding");
+        if (!(raw instanceof List<?> rawEmbedding) || rawEmbedding.isEmpty() || rawEmbedding.size() > KnowledgeService.MAX_EMBEDDING_DIMS) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "Informe 'embedding': uma lista de números com 1 a " + KnowledgeService.MAX_EMBEDDING_DIMS + " posições.");
         }
         float[] queryEmbedding = new float[rawEmbedding.size()];
         for (int i = 0; i < rawEmbedding.size(); i++) {
-            queryEmbedding[i] = rawEmbedding.get(i).floatValue();
+            // JSON com inteiros (ex.: 0) chegava como Integer e estourava ClassCastException (500).
+            if (!(rawEmbedding.get(i) instanceof Number n)) {
+                throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
+                        "O 'embedding' deve conter apenas números.");
+            }
+            queryEmbedding[i] = n.floatValue();
         }
         return ResponseEntity.ok(knowledgeService.semanticSearch(queryEmbedding, pageable));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<KnowledgeDocument> getDocumentById(@PathVariable("id") UUID id) {
+    public ResponseEntity<KnowledgeDocument> getDocumentById(@PathVariable("id") UUID id, HttpServletRequest request) {
         try {
-            return ResponseEntity.ok(knowledgeService.getDocumentById(id));
+            KnowledgeDocument doc = knowledgeService.getReadableDocument(id, resolveUserId(request), isAdmin(request));
+            knowledgeService.markEditable(List.of(doc), resolveUserId(request), isAdmin(request));
+            return ResponseEntity.ok(doc);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }
@@ -78,8 +88,11 @@ public class KnowledgeController {
     // pra não dar pra um autor forjar a autoria de outra pessoa.
     @PostMapping
     public ResponseEntity<KnowledgeDocument> saveOrUpdateDocument(@Valid @RequestBody KnowledgeDocument doc, HttpServletRequest request) {
-        doc.setAuthorId(resolveUserId(request));
-        return ResponseEntity.status(HttpStatus.CREATED).body(knowledgeService.saveOrUpdateDocument(doc));
+        String callerId = resolveUserId(request);
+        doc.setAuthorId(callerId);
+        KnowledgeDocument saved = knowledgeService.saveOrUpdateDocument(doc, isAdmin(request));
+        knowledgeService.markEditable(List.of(saved), callerId, isAdmin(request));
+        return ResponseEntity.status(HttpStatus.CREATED).body(saved);
     }
 
     @PutMapping("/{id}")
@@ -87,9 +100,12 @@ public class KnowledgeController {
             @PathVariable("id") UUID id,
             @Valid @RequestBody KnowledgeDocument doc,
             HttpServletRequest request) {
-        doc.setUpdatedBy(resolveUserId(request));
+        String callerId = resolveUserId(request);
+        doc.setUpdatedBy(callerId);
         try {
-            return ResponseEntity.ok(knowledgeService.updateDocument(id, doc));
+            KnowledgeDocument saved = knowledgeService.updateDocument(id, doc, callerId, isAdmin(request));
+            knowledgeService.markEditable(List.of(saved), callerId, isAdmin(request));
+            return ResponseEntity.ok(saved);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }
@@ -100,19 +116,49 @@ public class KnowledgeController {
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteDocument(@PathVariable("id") UUID id, HttpServletRequest request) {
         String callerId = resolveUserId(request);
-        String role = (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE);
         try {
-            knowledgeService.deleteDocument(id, callerId, "ADMIN".equalsIgnoreCase(role));
+            knowledgeService.deleteDocument(id, callerId, isAdmin(request));
             return ResponseEntity.noContent().build();
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }
     }
 
-    @PostMapping("/{id}/view")
-    public ResponseEntity<KnowledgeDocument> incrementViews(@PathVariable("id") UUID id) {
+    @GetMapping("/{id}/versions")
+    public ResponseEntity<List<KnowledgeVersionDto>> listVersions(@PathVariable("id") UUID id, HttpServletRequest request) {
         try {
-            return ResponseEntity.ok(knowledgeService.incrementViews(id));
+            return ResponseEntity.ok(knowledgeService.listVersions(id, resolveUserId(request), isAdmin(request)));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @GetMapping("/{id}/versions/{number}")
+    public ResponseEntity<KnowledgeVersionDto> getVersion(@PathVariable("id") UUID id, @PathVariable("number") int number, HttpServletRequest request) {
+        try {
+            return ResponseEntity.ok(knowledgeService.getVersion(id, number, resolveUserId(request), isAdmin(request)));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /** Restaura uma versão (cria uma nova versão). Mesma permissão de edição. */
+    @PostMapping("/{id}/versions/{number}/restore")
+    public ResponseEntity<KnowledgeDocument> restoreVersion(@PathVariable("id") UUID id, @PathVariable("number") int number, HttpServletRequest request) {
+        String callerId = resolveUserId(request);
+        try {
+            KnowledgeDocument saved = knowledgeService.restoreVersion(id, number, callerId, isAdmin(request));
+            knowledgeService.markEditable(List.of(saved), callerId, isAdmin(request));
+            return ResponseEntity.ok(saved);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @PostMapping("/{id}/view")
+    public ResponseEntity<KnowledgeDocument> incrementViews(@PathVariable("id") UUID id, HttpServletRequest request) {
+        try {
+            return ResponseEntity.ok(knowledgeService.incrementViews(id, resolveUserId(request), isAdmin(request)));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }
@@ -195,7 +241,7 @@ public class KnowledgeController {
             @RequestBody Map<String, Object> body, HttpServletRequest request) {
         String userId = resolveUserId(request);
         String userName = userRepository.findById(userId).map(User::getName).orElse(userId);
-        long tokens = body.get("tokens") != null ? ((Number) body.get("tokens")).longValue() : 0L;
+        long tokens = body.get("tokens") instanceof Number n ? n.longValue() : 0L;
         knowledgeService.incrementTokenUsage(userId, userName, tokens);
         return ResponseEntity.ok().build();
     }
@@ -205,7 +251,12 @@ public class KnowledgeController {
         return ResponseEntity.ok(knowledgeService.getTopTokenUsage());
     }
 
+    private boolean isAdmin(HttpServletRequest request) {
+        return request != null && "ADMIN".equalsIgnoreCase((String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ROLE));
+    }
+
     private String resolveUserId(HttpServletRequest request) {
+        if (request == null) return null;
         return (String) request.getAttribute(JwtAuthenticationFilter.ATTR_USER_ID);
     }
 }

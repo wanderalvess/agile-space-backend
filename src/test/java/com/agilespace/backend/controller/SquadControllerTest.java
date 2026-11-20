@@ -51,7 +51,8 @@ public class SquadControllerTest {
         // acesso abaixo (não-membro é barrado, alias DDWMISSI/MISSI, etc.) perderiam o sentido.
         com.agilespace.backend.service.SquadAccessService squadAccessService =
                 new com.agilespace.backend.service.SquadAccessService(userRepository, service, userProjectResolverService);
-        controller = new SquadController(service, squadSyncService, squadSyncGuard, null, userRepository, userProjectResolverService, squadAccessService);
+        controller = new SquadController(service, squadSyncService, squadSyncGuard, null, userRepository, userProjectResolverService, squadAccessService, null,
+                new com.agilespace.backend.service.SquadBootstrapService(userRepository, service));
     }
 
     private HttpServletRequest adminRequest() {
@@ -83,7 +84,7 @@ public class SquadControllerTest {
 
         ResponseEntity<Squad> response = controller.getSquad("sq-1", adminRequest());
         
-        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
     }
 
     @Test
@@ -103,7 +104,7 @@ public class SquadControllerTest {
         // usuário autenticado da aplicação lia dado de qualquer squad.
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-other");
+        caller.setDefaultProjectId("sq-other");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
 
         assertThrows(ResponseStatusException.class, () -> controller.getSquad("sq-1", memberRequest("user-1")));
@@ -114,7 +115,7 @@ public class SquadControllerTest {
     public void testGetSquad_memberOfSquad_succeeds() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-1");
+        caller.setDefaultProjectId("sq-1");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
         when(service.getSquad("sq-1")).thenReturn(Optional.of(new Squad()));
 
@@ -127,7 +128,7 @@ public class SquadControllerTest {
     public void testGetSquad_admin_neverConsultsUserRepository() {
         ResponseEntity<Squad> response = controller.getSquad("sq-1", adminRequest());
 
-        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
         verifyNoInteractions(userRepository);
     }
 
@@ -135,7 +136,7 @@ public class SquadControllerTest {
     public void testGetIssues_nonMemberOfSquad_forbidden() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-other");
+        caller.setDefaultProjectId("sq-other");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
 
         assertThrows(ResponseStatusException.class,
@@ -147,7 +148,7 @@ public class SquadControllerTest {
     public void testGetMemberMetrics_memberOfSquad_succeeds() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-1");
+        caller.setDefaultProjectId("sq-1");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
         when(service.getMemberMetrics("sq-1")).thenReturn(List.of());
 
@@ -161,7 +162,7 @@ public class SquadControllerTest {
     public void testSaveSquad_nonMemberOfSquad_forbidden() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-other");
+        caller.setDefaultProjectId("sq-other");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
 
         assertThrows(ResponseStatusException.class,
@@ -169,7 +170,7 @@ public class SquadControllerTest {
 
         // requireSquadWriteAccess consulta squadService.getMembers como último fallback
         // (checagem por squad_members) antes de negar — interação esperada, não um bug.
-        verify(service).getMembers("sq-1");
+        verify(service, atLeastOnce()).getMembers("sq-1");
     }
 
     @Test
@@ -200,7 +201,7 @@ public class SquadControllerTest {
     public void testSyncSquad_usesCallerIdFromToken_neverFromRequestBody() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-1");
+        caller.setDefaultProjectId("sq-1");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
 
         controller.syncSquad("sq-1", false, memberRequest("user-1"));
@@ -214,7 +215,7 @@ public class SquadControllerTest {
     public void testSyncSquad_nonMemberOfSquad_forbidden() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-other");
+        caller.setDefaultProjectId("sq-other");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
 
         assertThrows(ResponseStatusException.class,
@@ -227,7 +228,7 @@ public class SquadControllerTest {
     public void testForceResyncSprint_memberOfSquad_delegatesToSyncService() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-1");
+        caller.setDefaultProjectId("sq-1");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
 
         ResponseEntity<Void> response = controller.forceResyncSprint("sq-1", "SPRINT-42", memberRequest("user-1"));
@@ -240,7 +241,7 @@ public class SquadControllerTest {
     public void testCreatePanel_nonMemberOfSquad_forbidden() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-other");
+        caller.setDefaultProjectId("sq-other");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
 
         assertThrows(ResponseStatusException.class,
@@ -255,7 +256,7 @@ public class SquadControllerTest {
     public void testCreatePanel_memberOfSquad_succeeds() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-1");
+        caller.setDefaultProjectId("sq-1");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
         SquadPanel panel = new SquadPanel();
         when(service.createPanel(eq("sq-1"), eq("user-1"), eq(panel))).thenReturn(panel);
@@ -283,7 +284,7 @@ public class SquadControllerTest {
     public void testSaveSquad_missiAlias_succeeds() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("MISSI");
+        caller.setDefaultProjectId("MISSI");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
         Squad squad = new Squad();
         when(service.saveSquad(squad)).thenReturn(squad);
@@ -305,7 +306,7 @@ public class SquadControllerTest {
         ResponseEntity<Squad> response = controller.saveSquad("DDWMISSI", squad, memberRequest("user-1"));
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertEquals("DDWMISSI", caller.getSquadId());
+        assertEquals("DDWMISSI", caller.getDefaultProjectId());
         assertEquals("DDWMISSI", caller.getDefaultProjectId());
         verify(userRepository).save(caller);
     }
@@ -314,7 +315,7 @@ public class SquadControllerTest {
     public void testSaveSquad_dbAdminRole_succeeds() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-other");
+        caller.setDefaultProjectId("sq-other");
         caller.setRole("ADMIN");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
         Squad squad = new Squad();
@@ -329,7 +330,7 @@ public class SquadControllerTest {
     public void testSaveSquad_leadershipJobTitle_succeeds() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("DDWMISSI");
+        caller.setDefaultProjectId("DDWMISSI");
         caller.setJobTitle("Agile Master");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
         Squad squad = new Squad();
@@ -344,7 +345,7 @@ public class SquadControllerTest {
     public void testSaveSquad_leadershipJobTitle_otherSquad_forbidden() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("sq-other");
+        caller.setDefaultProjectId("sq-other");
         caller.setJobTitle("Agile Master");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
         when(service.getMembers("DDWMISSI")).thenReturn(java.util.List.of());
@@ -360,7 +361,7 @@ public class SquadControllerTest {
         User caller = new User();
         caller.setId("user-1");
         caller.setEmail("wanderson@totvs.com.br");
-        caller.setSquadId("sq-other");
+        caller.setDefaultProjectId("sq-other");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
 
         com.agilespace.backend.domain.SquadMember member = new com.agilespace.backend.domain.SquadMember();
@@ -380,7 +381,7 @@ public class SquadControllerTest {
     public void testSaveSquad_semTimeAutoAssign_succeeds() {
         User caller = new User();
         caller.setId("user-1");
-        caller.setSquadId("Sem Time");
+        caller.setDefaultProjectId("Sem Time");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(caller));
         Squad squad = new Squad();
         when(service.saveSquad(squad)).thenReturn(squad);
@@ -388,7 +389,42 @@ public class SquadControllerTest {
         ResponseEntity<Squad> response = controller.saveSquad("DDWMISSI", squad, memberRequest("user-1"));
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertEquals("DDWMISSI", caller.getSquadId());
+        assertEquals("DDWMISSI", caller.getDefaultProjectId());
         verify(userRepository).save(caller);
+    }
+
+    private Squad squadWith(String mode, String ceremoniesJson) throws Exception {
+        Squad sq = new Squad();
+        sq.setCeremonyMode(mode);
+        if (ceremoniesJson != null) sq.setCeremonies(new com.fasterxml.jackson.databind.ObjectMapper().readTree(ceremoniesJson));
+        return sq;
+    }
+
+    @Test
+    void ceremonyConfigAcceptsContractValues() throws Exception {
+        SquadController.requireValidCeremonyConfig(squadWith(null, null));
+        SquadController.requireValidCeremonyConfig(squadWith("google_calendar", null));
+        SquadController.requireValidCeremonyConfig(squadWith("manual",
+                "[{\"id\":\"1\",\"title\":\"Daily\",\"daysOfWeek\":[\"MON\",\"FRI\"],\"startTime\":\"09:00\",\"durationMinutes\":15,\"meetLink\":\"https://meet.google.com/x\"}]"));
+    }
+
+    @Test
+    void ceremonyConfigRejectsUnknownModeAndBadStructure() throws Exception {
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+                () -> SquadController.requireValidCeremonyConfig(squadWith("zoom", null))).getStatusCode());
+        String[] bad = {
+                "{\"title\":\"x\"}",
+                "[\"texto\"]",
+                "[{\"title\":\"\",\"daysOfWeek\":[\"MON\"],\"startTime\":\"09:00\",\"durationMinutes\":15}]",
+                "[{\"title\":\"D\",\"daysOfWeek\":[],\"startTime\":\"09:00\",\"durationMinutes\":15}]",
+                "[{\"title\":\"D\",\"daysOfWeek\":[\"XXX\"],\"startTime\":\"09:00\",\"durationMinutes\":15}]",
+                "[{\"title\":\"D\",\"daysOfWeek\":[\"MON\"],\"startTime\":\"25:00\",\"durationMinutes\":15}]",
+                "[{\"title\":\"D\",\"daysOfWeek\":[\"MON\"],\"startTime\":\"09:00\",\"durationMinutes\":0}]",
+                "[{\"title\":\"D\",\"daysOfWeek\":[\"MON\"],\"startTime\":\"09:00\",\"durationMinutes\":99999}]",
+        };
+        for (String json : bad) {
+            assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+                    () -> SquadController.requireValidCeremonyConfig(squadWith("manual", json)), json).getStatusCode());
+        }
     }
 }

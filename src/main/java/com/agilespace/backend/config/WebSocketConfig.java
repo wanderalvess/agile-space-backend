@@ -1,11 +1,18 @@
 package com.agilespace.backend.config;
 
+import com.agilespace.backend.security.BoardExistsHandshakeInterceptor;
 import com.agilespace.backend.security.JwtHandshakeInterceptor;
+import com.agilespace.backend.security.RetroBoardHandshakeInterceptor;
+import com.agilespace.backend.security.SprintPlanHandshakeInterceptor;
+import com.agilespace.backend.service.BrainstormingService;
+import com.agilespace.backend.service.HealthCheckService;
 import com.agilespace.backend.websocket.BrainstormingWebSocketHandler;
 import com.agilespace.backend.websocket.HealthCheckWebSocketHandler;
 import com.agilespace.backend.websocket.PokerWebSocketHandler;
 import com.agilespace.backend.websocket.RetroWebSocketHandler;
 import com.agilespace.backend.websocket.ShowcaseWebSocketHandler;
+import com.agilespace.backend.websocket.SprintPlanWebSocketHandler;
+import com.agilespace.backend.websocket.UserWebSocketHandler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
@@ -25,7 +32,13 @@ public class WebSocketConfig implements WebSocketConfigurer {
     private final HealthCheckWebSocketHandler healthCheckWebSocketHandler;
     private final BrainstormingWebSocketHandler brainstormingWebSocketHandler;
     private final ShowcaseWebSocketHandler showcaseWebSocketHandler;
+    private final UserWebSocketHandler userWebSocketHandler;
+    private final SprintPlanWebSocketHandler sprintPlanWebSocketHandler;
+    private final SprintPlanHandshakeInterceptor sprintPlanHandshakeInterceptor;
     private final JwtHandshakeInterceptor jwtHandshakeInterceptor;
+    private final RetroBoardHandshakeInterceptor retroBoardHandshakeInterceptor;
+    private final HealthCheckService healthCheckService;
+    private final BrainstormingService brainstormingService;
 
     @Value("${app.cors.allowed-origins}")
     private List<String> allowedOrigins;
@@ -37,18 +50,25 @@ public class WebSocketConfig implements WebSocketConfigurer {
         // autenticado por token (JwtHandshakeInterceptor), isso só evita que qualquer site
         // abra uma conexão de WebSocket contra a API a partir do browser de um usuário logado.
         registry.addHandler(retroWebSocketHandler, "/ws/retro/*")
-                .addInterceptors(jwtHandshakeInterceptor)
+                .addInterceptors(jwtHandshakeInterceptor, retroBoardHandshakeInterceptor)
                 .setAllowedOrigins(origins);
         registry.addHandler(pokerWebSocketHandler, "/ws/poker/*")
                 .addInterceptors(jwtHandshakeInterceptor)
                 .setAllowedOrigins(origins);
         registry.addHandler(healthCheckWebSocketHandler, "/ws/health-check/*")
-                .addInterceptors(jwtHandshakeInterceptor)
+                .addInterceptors(jwtHandshakeInterceptor, new BoardExistsHandshakeInterceptor(healthCheckService::boardExists))
                 .setAllowedOrigins(origins);
         registry.addHandler(brainstormingWebSocketHandler, "/ws/brainstorming/*")
-                .addInterceptors(jwtHandshakeInterceptor)
+                .addInterceptors(jwtHandshakeInterceptor, new BoardExistsHandshakeInterceptor(brainstormingService::boardExists))
                 .setAllowedOrigins(origins);
         registry.addHandler(showcaseWebSocketHandler, "/ws/showcase/*")
+                .addInterceptors(jwtHandshakeInterceptor)
+                .setAllowedOrigins(origins);
+        registry.addHandler(sprintPlanWebSocketHandler, "/ws/sprint-plan/*")
+                .addInterceptors(jwtHandshakeInterceptor, sprintPlanHandshakeInterceptor)
+                .setAllowedOrigins(origins);
+        // Canal do usuário (sinais de notificação/mensagem/aviso). Sem sala: o escopo é o userId do próprio JWT.
+        registry.addHandler(userWebSocketHandler, "/ws/user")
                 .addInterceptors(jwtHandshakeInterceptor)
                 .setAllowedOrigins(origins);
     }

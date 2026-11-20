@@ -51,6 +51,10 @@ public class OnboardingService {
     private final SquadMemberRepository squadMemberRepository;
     private final UserRepository userRepository;
 
+    /** Preenche o cargo de quem está sem um com a role do Jira da linha. Opcional (montagem manual: não preenche). */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CargoPreenchimento cargoPreenchimento;
+
     /** Minúsculo, sem acento e com espaços colapsados — base de toda comparação de nome. */
     static String normalize(String value) {
         if (value == null) return "";
@@ -79,6 +83,26 @@ public class OnboardingService {
     }
 
     /**
+     * Regra de identidade do "sou eu" (a mais conservadora que preserva o fluxo):
+     * 1. e-mail do usuário = e-mail da linha, ou conta do Jira do usuário = conta da linha → pode;
+     * 2. linha COM e-mail/conta diferente da do usuário → nunca (é outra pessoa; o caminho é o convite);
+     * 3. linha sem e-mail nem conta (só nome) → só se o nome completo normalizado for igual E o usuário já estiver
+     *    aprovado no projeto (já tem vínculo nele, ex.: aceitou convite). Nome sozinho não prova nada: User.name é editável.
+     */
+    static boolean identityAllowsClaim(ProjectMemberRole row, User user, List<ProjectMemberRole> projectRows) {
+        boolean rowHasEmail = row.getEmail() != null && !row.getEmail().isBlank();
+        boolean rowHasAccount = row.getJiraAccountId() != null && !row.getJiraAccountId().isBlank();
+        if (rowHasEmail && user.getEmail() != null && row.getEmail().trim().equalsIgnoreCase(user.getEmail().trim())) return true;
+        if (rowHasAccount && user.getJiraAccountId() != null && row.getJiraAccountId().trim().equals(user.getJiraAccountId().trim())) return true;
+        if (rowHasEmail) return false;
+        if (rowHasAccount) return false;
+        String rowName = normalize(row.getDisplayName());
+        if (rowName.isBlank() || !rowName.equals(normalize(user.getName()))) return false;
+        return projectRows != null && projectRows.stream()
+                .anyMatch(m -> user.getId() != null && user.getId().equals(m.getUserId()));
+    }
+
+    /**
      * Candidatos a "é você?": linhas do roster cujo nome bate com o nome da conta
      * logada e que ainda não pertencem a outra conta.
      */
@@ -99,6 +123,8 @@ public class OnboardingService {
                 // ser autovinculada, e oferecer um "sim, sou eu" que depois nega seria pior
                 // do que não oferecer.
                 .filter(r -> !r.isLeadership())
+                // Só oferece "sim, sou eu" quando o claim seria aceito (mesma regra de identidade).
+                .filter(r -> identityAllowsClaim(r, user, projectMemberRoleRepository.findByProjectId(r.getProjectId())))
                 .sorted(Comparator.comparing(ProjectMemberRole::getProjectId))
                 .limit(MAX_SUGGESTIONS)
                 .toList();
@@ -181,6 +207,49 @@ public class OnboardingService {
                     "Papel de liderança não pode ser autovinculado. Peça um link de convite a quem já lidera o time.");
         }
 
+        boolean alreadyMine = user.getId() != null && user.getId().equals(row.getUserId());
+        if (!alreadyMine && !identityAllowsClaim(row, user, projectMemberRoleRepository.findByProjectId(row.getProjectId()))) {
+            log.warn("Onboarding: claim negado — usuário {} não comprova identidade para a linha {} do projeto {}",
+                    user.getId(), row.getId(), row.getProjectId());
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Não foi possível confirmar que essa linha é você: o e-mail ou a conta do Jira não bate com o seu login. "
+                            + "Peça um link de convite a quem lidera o time.");
+        }
+
+        applyLink(row, user, com.agilespace.backend.domain.MembershipSource.CLAIM);
+
+        log.info("Onboarding: usuário {} reivindicou a linha {} ({}) no projeto {}",
+                user.getId(), row.getId(), row.getRoleName(), row.getProjectId());
+
+        return row.getProjectId();
+    }
+
+    /**
+     * Vínculo decidido por um admin (pedido de vínculo aprovado): mesma gravação do {@link #claim}, mas SEM a checagem de
+     * identidade (o admin é quem a confirma) e permitindo linha de liderança (a trava de "liderança nunca é autodeclarada"
+     * vale só para o self-service). Linha já vinculada a outra conta continua sendo 409. Idempotente para a mesma conta.
+     */
+    @Transactional
+    public void linkApproved(ProjectMemberRole row, User user) {
+        if (row.getUserId() != null && !row.getUserId().isBlank() && !row.getUserId().equals(user.getId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Essa pessoa já está vinculada a outra conta. Peça pra quem administra o projeto desfazer o vínculo antes.");
+        }
+        applyLink(row, user, com.agilespace.backend.domain.MembershipSource.APPROVED);
+        log.info("Vínculo aprovado por admin: usuário {} ligado à linha {} ({}) no projeto {}",
+                user.getId(), row.getId(), row.getRoleName(), row.getProjectId());
+    }
+
+    /**
+     * Grava o vínculo: userId na linha e accountId do Jira herdado. O roster da squad (horas/capacidade) liga à pessoa
+     * pelo jira_account_id herdado aqui; squad_members.claimed_by_uid deixou de ser gravado (Etapa 5 do vínculo).
+     */
+    private void applyLink(ProjectMemberRole row, User user, String linkSource) {
+        // Registra como a conta entrou na linha. Linha de decisão humana (MANUAL/INVITE/MIGRATION) mantém a origem.
+        boolean alreadyMine = user.getId() != null && user.getId().equals(row.getUserId());
+        // Só linha que o Jira "possui" (legado/JIRA/BACKFILL) carrega o cargo do Jira; MANUAL/INVITE/MIGRATION é decisão humana.
+        boolean linhaDoJira = com.agilespace.backend.domain.MembershipSource.importOwned(row.getSource());
+        if (!alreadyMine) row.setSource(com.agilespace.backend.domain.MembershipSource.afterLink(row.getSource(), linkSource));
         row.setUserId(user.getId());
         projectMemberRoleRepository.save(row);
 
@@ -196,21 +265,10 @@ public class OnboardingService {
             userRepository.save(user);
         }
 
-        // Mesma pessoa no roster da squad (horas/capacidade) passa a apontar pra conta.
-        for (String identifier : new String[] { row.getJiraAccountId(), row.getEmail(), row.getDisplayName() }) {
-            if (identifier == null || identifier.isBlank()) continue;
-            for (SquadMember sm : squadMemberRepository.findByUserIdentifier(identifier.trim())) {
-                if (sm.getClaimedByUid() == null || sm.getClaimedByUid().isBlank()) {
-                    sm.setClaimedByUid(user.getId());
-                    squadMemberRepository.save(sm);
-                }
-            }
+        // Quem entra sem cargo recebe o que o Jira trouxe para a linha (nunca sobrescreve um cargo já definido).
+        if (linhaDoJira && cargoPreenchimento != null) {
+            cargoPreenchimento.preencherSeVazio(user, row.getRoleName(), "vínculo " + linkSource + " na linha " + row.getId());
         }
-
-        log.info("Onboarding: usuário {} reivindicou a linha {} ({}) no projeto {}",
-                user.getId(), row.getId(), row.getRoleName(), row.getProjectId());
-
-        return row.getProjectId();
     }
 
     private int countMembers(String projectId) {
@@ -219,17 +277,18 @@ public class OnboardingService {
 
     private OnboardingRosterDto toDto(String projectId, List<ProjectMemberRole> members, int total, User user) {
         Optional<ProjectConfig> project = projectConfigRepository.findById(projectId);
+        List<ProjectMemberRole> projectRows = projectMemberRoleRepository.findByProjectId(projectId);
         return OnboardingRosterDto.builder()
                 .projectId(projectId)
                 .projectName(project.map(ProjectConfig::getName).orElse(projectId))
                 .segmentName(project.map(ProjectConfig::getSegmentName).orElse(""))
                 .tribeName(project.map(ProjectConfig::getTribeName).orElse(""))
                 .memberCount(total)
-                .members(members.stream().map(r -> toCandidate(r, user)).toList())
+                .members(members.stream().map(r -> toCandidate(r, user, projectRows)).toList())
                 .build();
     }
 
-    private OnboardingRosterDto.Candidate toCandidate(ProjectMemberRole r, User user) {
+    private OnboardingRosterDto.Candidate toCandidate(ProjectMemberRole r, User user, List<ProjectMemberRole> projectRows) {
         boolean claimedByMe = r.getUserId() != null && r.getUserId().equals(user.getId());
         boolean claimed = r.getUserId() != null && !r.getUserId().isBlank();
         return OnboardingRosterDto.Candidate.builder()
@@ -241,7 +300,7 @@ public class OnboardingService {
                 .leadership(r.isLeadership())
                 .claimed(claimed)
                 .claimedByMe(claimedByMe)
-                .claimable(!r.isLeadership() && (!claimed || claimedByMe))
+                .claimable(!r.isLeadership() && (!claimed || claimedByMe) && (claimedByMe || identityAllowsClaim(r, user, projectRows)))
                 .emailHint(maskEmail(r.getEmail()))
                 .build();
     }

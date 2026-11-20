@@ -7,5 +7,6 @@ import java.util.List;
 
 @Repository
 public interface UserQuickLinkRepository extends JpaRepository<UserQuickLink, String> {
+    long countByUserId(String userId);
     List<UserQuickLink> findByUserIdOrderByCreatedAtDesc(String userId);
 }

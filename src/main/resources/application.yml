@@ -1,6 +1,13 @@
 spring:
   application:
     name: agile-space-backend
+  lifecycle:
+    timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:30s}
+  servlet:
+    multipart:
+      # Anexos dos cards da Review (PNG/JPEG/PDF, até 10 MB cada). O padrão do Spring é 1 MB.
+      max-file-size: 10MB
+      max-request-size: 11MB
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/espacoagil}
     username: ${DB_USERNAME:postgres}
@@ -39,6 +46,9 @@ spring:
 
 server:
   port: ${PORT:8002}
+  # Deploy/restart: para de aceitar conexões novas e deixa as requisições em andamento terminarem (até o prazo
+  # abaixo) em vez de cortá-las no meio, como um envio ao Jira que já criou metade das sub-tarefas.
+  shutdown: graceful
   error:
     include-message: always
     include-binding-errors: always
@@ -62,6 +72,9 @@ springdoc:
     tryItOutEnabled: true
 
 app:
+  uploads:
+    # Onde ficam os anexos dos cards. No Docker é o volume agile-space-uploads (/data/uploads).
+    dir: ${UPLOADS_DIR:./data/uploads}
   security:
     # Obrigatório em produção. Defina a variável de ambiente APP_ENCRYPTION_SECRET.
     # Em dev local, pode usar um valor padrão. Em produção, nunca use fallback hardcoded.
@@ -78,11 +91,89 @@ app:
     # default de dev/teste (fixtures usam @empresa.com.br). Produção restringe via
     # application-prod.yml.
     allowed-email-domain: ${ALLOWED_EMAIL_DOMAIN:}
+    # Proxies reversos confiáveis (IPs/CIDRs separados por vírgula) cujo X-Forwarded-For o RateLimitFilter
+    # pode ler para achar o IP real do cliente. Vazio (default) = o cabeçalho é IGNORADO e o limite vale por
+    # endereço da conexão, então um cliente não escapa do limite forjando XFF. Atrás do Caddy do docker-compose
+    # (profile "proxy") use TRUSTED_PROXIES=172.16.0.0/12 (faixa padrão das redes Docker); sem isso todos
+    # compartilham o balde do proxy. Ver DEPLOYMENT.md.
+    trusted-proxies: ${TRUSTED_PROXIES:}
+  ratelimit:
+    # Limites por minuto (balde em memória, instância única). Padrões = comportamento anterior.
+    # Requisições com JWT válido contam por ID DO USUÁRIO (vários usuários atrás do mesmo IP/NAT não se bloqueiam).
+    user-per-minute: ${RATELIMIT_USER_PER_MINUTE:300}
+    per-user-enabled: ${RATELIMIT_PER_USER_ENABLED:true}
+    # Sem JWT válido: por IP.
+    general-per-ip-per-minute: ${RATELIMIT_GENERAL_PER_IP_PER_MINUTE:300}
+    # login/cadastro/forgot/reset/change-password: sempre por IP, faixa apertada.
+    auth-per-ip-per-minute: ${RATELIMIT_AUTH_PER_IP_PER_MINUTE:10}
+    # Leitura pública de convite (/api/public/invites/**): por IP, balde separado. Folgado (1200) porque
+    # um escritório inteiro atrás de NAT compartilha o mesmo IP.
+    public-invite-per-ip-per-minute: ${RATELIMIT_PUBLIC_INVITE_PER_IP_PER_MINUTE:1200}
+  brainstorming:
+    # Segundos que o facilitador precisa estar offline (sem WebSocket na sala) para outro participante assumir a facilitação.
+    # Criador do mural e ADMIN assumem sempre. Ver docs/ceremony-brainstorming-api.md.
+    facilitator-offline-seconds: ${BRAINSTORMING_FACILITATOR_OFFLINE_SECONDS:60}
   cors:
     # Lista separada por vírgula das origens que podem chamar a API com credenciais
     # (ver WebCorsConfig/WebSocketConfig). Default cobre só o frontend em dev local
     # (next dev -p 9002); em produção defina ALLOWED_ORIGINS com o(s) domínio(s) público(s).
     allowed-origins: ${ALLOWED_ORIGINS:http://localhost:9002}
+  membership:
+    # Migração do vínculo Pessoa x Squad x Papel (docs/vinculo-auditoria-e-plano.md, Etapa 1; contrato em docs/membership-api.md).
+    #   legacy = sessão (accessibleProjects/activeProject*) como antes, sem o modelo novo.
+    #   shadow = a resposta continua a do legado; o modelo novo roda em paralelo e as divergências vão para o log
+    #            (membership_divergence) e para o contador membership.divergence. Padrão.
+    #   new    = a resposta vem do modelo novo (squad ativa validada contra os vínculos).
+    # Valor desconhecido cai em legacy. Reverter = APP_MEMBERSHIP_MODE=legacy e reiniciar; não há migração de banco.
+    mode: ${APP_MEMBERSHIP_MODE:shadow}
+    # TTL do cache de vínculos por usuário (segundos; 0 desliga). Toda gravação de pmr/projeto o invalida.
+    cache-ttl-seconds: ${APP_MEMBERSHIP_CACHE_TTL_SECONDS:60}
+    # AUTORIZAÇÃO por squad (docs/vinculo-auditoria-e-plano.md, Etapa 2). ALTO RISCO: quem hoje acessa só por roster
+    # (squad_members), por users.squad_id solto ou por cargo (jobTitle) perde o acesso quando virar new.
+    #   legacy = decisão exatamente como antes (padrão; valor desconhecido também cai aqui, nunca em new).
+    #   shadow = a decisão continua a do legado; a regra nova roda em paralelo e cada divergência vira o log
+    #            authz_divergence e o contador authz.divergence{check,direction}.
+    #   new    = decide a regra nova: ADMIN e vínculos de project_member_roles (LEAD só com lead-level=legacy).
+    # Antes de virar new: GET /api/admin/membership/authz-diff e a categoria WOULD_LOSE_ACCESS de /report. Reverter =
+    # APP_MEMBERSHIP_AUTHZ=legacy e reiniciar; não há migração de banco.
+    authz: ${APP_MEMBERSHIP_AUTHZ:legacy}
+    # O que o nível de conta LEAD ainda concede (Etapa 4; docs/membership-api.md). Níveis de conta viram ADMIN|MEMBER: quem
+    # lidera uma squad tem um VÍNCULO de liderança (project_member_roles.is_leadership).
+    #   off    = LEAD não concede NADA (tratado como MEMBER em toda decisão de acesso). Padrão (instalação nova).
+    #   legacy = comportamento de antes (LEAD acessa/gerencia todas as squads, convida, facilita Poker, chaves de API).
+    # Valor desconhecido cai em legacy (errar a digitação nunca REMOVE acesso); para desligar escreva off. Reverter =
+    # APP_MEMBERSHIP_LEAD_LEVEL=legacy e reiniciar (contas já rebaixadas: POST /api/admin/membership/lead-restore).
+    lead-level: ${APP_MEMBERSHIP_LEAD_LEVEL:off}
+    # Repetição do MESMO log authz_divergence (conta, ponto, squad, sentido): no máximo a cada N segundos (0 = toda vez).
+    # O contador authz.divergence conta todas.
+    authz-log-dedupe-seconds: ${APP_MEMBERSHIP_AUTHZ_LOG_DEDUPE_SECONDS:60}
+    # Bootstrap de squad vazia (SquadBootstrapService). Só importa com authz=new:
+    #   off = padrão (valor desconhecido também): ninguém ganha acesso a squad vazia por aqui (403 para não-ADMIN).
+    #   on  = a primeira pessoa sem vínculo que escreve numa squad inexistente vira Agile Master dela (cria projeto + pmr).
+    #         ATENÇÃO: qualquer conta sem vínculo pode inventar uma chave de squad e ganhar poder de gerir equipes.
+    # Em authz=legacy|shadow o bootstrap segue como sempre (grava users.squad_id), independente desta chave.
+    bootstrap: ${APP_MEMBERSHIP_BOOTSTRAP:off}
+  showcase:
+    # Review (docs/ceremony-review-api.md). Trava de decisão: só ADMIN, liderança da squad (vínculo) e PO/SME da squad mudam o
+    # veredito e o feedback de um card; os demais recebem 403.
+    #   enforce = trava ligada. Padrão (qualquer valor diferente de off também).
+    #   off     = trava desligada (comportamento anterior). Reverter a trava sem redeploy = APP_SHOWCASE_DECISION_LOCK=off e reiniciar.
+    decision-lock: ${APP_SHOWCASE_DECISION_LOCK:enforce}
+    # Minutos sem renovar até o apresentador (estado em memória) deixar de valer.
+    presenter-ttl-minutes: ${APP_SHOWCASE_PRESENTER_TTL_MINUTES:240}
+  link-requests:
+    # Pedido de vínculo (docs/link-requests-squad-api.md, Etapa 3 do vínculo): AM/SM/PO/People Lead da squad aprovam
+    # contribuidores e People/Tribe Lead (ou ADMIN) aprovam liderança, pelas rotas /api/squads/{id}/link-requests*.
+    #   on  = rotas por squad ativas e notificação aos aprovadores da squad (ADMIN só como fallback). Padrão.
+    #   off = as rotas por squad respondem 404; só ADMIN aprova (/api/admin/link-requests) e só ADMIN é notificado.
+    # Valor desconhecido cai em off. Reverter = APP_LINK_REQUESTS_SQUAD_APPROVAL=off e reiniciar; sem migração de banco.
+    squad-approval: ${APP_LINK_REQUESTS_SQUAD_APPROVAL:on}
+  sessions:
+    # Encerra sozinha a sessão ao vivo (Scrum Poker síncrono e Review) que ficou aberta de um dia para o outro:
+    # sem nenhuma atividade desde o começo do dia de hoje, no fuso abaixo. Poker assíncrono não entra.
+    auto-close:
+      enabled: ${SESSIONS_AUTO_CLOSE_ENABLED:true}
+      zone: ${SESSIONS_AUTO_CLOSE_ZONE:America/Sao_Paulo}
   squad:
     scheduled-sync:
       # Desligado por padrão: ligar isso é uma mudança de comportamento real (um processo

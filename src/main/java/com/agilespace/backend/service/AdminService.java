@@ -1,12 +1,13 @@
 package com.agilespace.backend.service;
 
 import com.agilespace.backend.domain.AuditLog;
-import com.agilespace.backend.domain.GlobalAnnouncement;
 import com.agilespace.backend.domain.SystemConfig;
 import com.agilespace.backend.repository.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -19,9 +20,6 @@ public class AdminService {
 
     @Autowired
     private SystemConfigRepository configRepository;
-
-    @Autowired
-    private GlobalAnnouncementRepository announcementRepository;
 
     @Autowired
     private AuditLogRepository auditLogRepository;
@@ -46,25 +44,7 @@ public class AdminService {
         configRepository.save(config);
     }
 
-    // --- Announcements ---
-    @Transactional(readOnly = true)
-    public List<GlobalAnnouncement> getAnnouncements() {
-        return announcementRepository.findByOrderByCreatedAtDesc();
-    }
-
-    @Transactional
-    public GlobalAnnouncement createAnnouncement(GlobalAnnouncement announcement) {
-        if (announcement.getId() == null || announcement.getId().isEmpty()) {
-            announcement.setId(UUID.randomUUID().toString());
-        }
-        announcement.setCreatedAt(LocalDateTime.now());
-        return announcementRepository.save(announcement);
-    }
-
-    @Transactional
-    public void deleteAnnouncement(String id) {
-        announcementRepository.deleteById(id);
-    }
+    // Avisos (announcements): AnnouncementService.
 
     // --- Audit Logs ---
     @Transactional(readOnly = true)

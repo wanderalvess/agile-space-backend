@@ -2,6 +2,8 @@ package com.agilespace.backend.service;
 
 import com.agilespace.backend.domain.Prompt;
 import com.agilespace.backend.domain.PromptComment;
+import com.agilespace.backend.domain.PromptCollection;
+import com.agilespace.backend.repository.PromptCollectionRepository;
 import com.agilespace.backend.repository.PromptCommentRepository;
 import com.agilespace.backend.repository.PromptRepository;
 import org.junit.jupiter.api.DisplayName;
@@ -32,6 +34,16 @@ class PromptServiceTest {
 
     @Mock private PromptRepository promptRepository;
     @Mock private PromptCommentRepository commentRepository;
+    @Mock private PromptCollectionRepository promptCollectionRepository;
+    @Mock private com.agilespace.backend.repository.UserRepository userRepository;
+    @Mock private com.agilespace.backend.repository.PromptFavoriteRepository favoriteRepository;
+    @Mock private com.agilespace.backend.repository.PromptVersionRepository versionRepository;
+    @Mock private com.agilespace.backend.repository.PromptUsageEventRepository usageRepository;
+    @Mock private com.agilespace.backend.repository.PromptQueryRepository queryRepository;
+
+    private final PromptCaller owner = new PromptCaller("user-123", "MEMBER");
+    private final PromptCaller stranger = new PromptCaller("intruso", "MEMBER");
+    private final PromptCaller admin = new PromptCaller("adm", "ADMIN");
 
     @InjectMocks
     private PromptService service;
@@ -46,7 +58,7 @@ class PromptServiceTest {
             Page<Prompt> page = new PageImpl<>(Collections.singletonList(new Prompt()));
             when(promptRepository.searchPublic(eq("scrum"), eq("public"), any(Pageable.class))).thenReturn(page);
 
-            Page<Prompt> result = service.listPrompts("scrum", null, PageRequest.of(0, 10));
+            Page<Prompt> result = service.listPrompts("scrum", null, owner, PageRequest.of(0, 10));
 
             assertEquals(1, result.getTotalElements());
             verify(promptRepository).searchPublic(eq("scrum"), eq("public"), any(Pageable.class));
@@ -58,7 +70,7 @@ class PromptServiceTest {
             Page<Prompt> page = new PageImpl<>(Collections.singletonList(new Prompt()));
             when(promptRepository.findByAuthorId(eq("user-123"), any(Pageable.class))).thenReturn(page);
 
-            Page<Prompt> result = service.listPrompts(null, "user-123", PageRequest.of(0, 10));
+            Page<Prompt> result = service.listPrompts(null, "user-123", owner, PageRequest.of(0, 10));
 
             assertEquals(1, result.getTotalElements());
             verify(promptRepository).findByAuthorId(eq("user-123"), any(Pageable.class));
@@ -82,42 +94,220 @@ class PromptServiceTest {
         }
 
         @Test
-        @DisplayName("Deve incrementar contagem de utilização do prompt")
-        void shouldIncrementUseCount() {
-            UUID promptId = UUID.randomUUID();
-            Prompt prompt = Prompt.builder().id(promptId).useCount(10).build();
-            when(promptRepository.findById(promptId)).thenReturn(Optional.of(prompt));
+        @DisplayName("authorName vem do usuário autenticado, não do corpo; visibility 'PUBLIC' é normalizada")
+        void shouldTakeAuthorNameFromAuthenticatedUser() {
+            com.agilespace.backend.domain.User u = new com.agilespace.backend.domain.User();
+            u.setId("user-123");
+            u.setName("Nome Real");
+            when(userRepository.findById("user-123")).thenReturn(Optional.of(u));
             when(promptRepository.save(any(Prompt.class))).thenAnswer(i -> i.getArgument(0));
+            Prompt prompt = Prompt.builder().title("T").authorName("CEO Falso").visibility("PUBLIC").build();
 
-            Prompt updated = service.incrementUseCount(promptId);
+            Prompt saved = service.createPrompt(prompt, owner);
 
-            assertEquals(11, updated.getUseCount());
+            assertEquals("Nome Real", saved.getAuthorName());
+            assertEquals("public", saved.getVisibility());
         }
 
         @Test
-        @DisplayName("Deve excluir prompt e remover em cascata os comentários vinculados")
-        void shouldDeletePromptAndComments() {
+        @DisplayName("Visibilidade inválida cai em privado")
+        void shouldDefaultInvalidVisibilityToPrivate() {
+            when(promptRepository.save(any(Prompt.class))).thenAnswer(i -> i.getArgument(0));
+            Prompt saved = service.createPrompt(Prompt.builder().title("T").visibility("tudo").build(), owner);
+            assertEquals("private", saved.getVisibility());
+        }
+
+        @Test
+        @DisplayName("Deve incrementar contagem de utilização de forma atômica, sem salvar a entidade")
+        void shouldIncrementUseCount() {
             UUID promptId = UUID.randomUUID();
-            when(commentRepository.findByPromptIdOrderByCreatedAtAsc(promptId))
-                    .thenReturn(Collections.singletonList(new PromptComment()));
+            Prompt prompt = Prompt.builder().id(promptId).visibility("public").authorId("x").useCount(10).build();
+            when(promptRepository.findById(promptId)).thenReturn(Optional.of(prompt));
 
-            service.deletePrompt(promptId);
+            service.incrementUseCount(promptId, owner);
 
+            verify(promptRepository).incrementUseCount(promptId);
+            verify(promptRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("Não deve contar uso de item privado de outra pessoa")
+        void shouldNotCountUseOfForeignPrivate() {
+            UUID promptId = UUID.randomUUID();
+            Prompt prompt = Prompt.builder().id(promptId).visibility("private").authorId("outro").build();
+            when(promptRepository.findById(promptId)).thenReturn(Optional.of(prompt));
+
+            assertThrows(IllegalArgumentException.class, () -> service.incrementUseCount(promptId, owner));
+            verify(promptRepository, never()).incrementUseCount(any());
+        }
+
+        @Test
+        @DisplayName("Deve excluir prompt tirando-o das coleções e removendo os comentários")
+        void shouldDeletePromptFromCollectionsAndComments() {
+            UUID promptId = UUID.randomUUID();
+            Prompt prompt = Prompt.builder().id(promptId).visibility("public").authorId("user-123").build();
+            PromptCollection collection = PromptCollection.builder().ownerId("c").build();
+            collection.getItems().add(prompt);
+            when(promptRepository.findById(promptId)).thenReturn(Optional.of(prompt));
+            when(promptCollectionRepository.findDistinctByItemsId(promptId)).thenReturn(List.of(collection));
+            when(commentRepository.findByPromptId(promptId)).thenReturn(Collections.singletonList(new PromptComment()));
+
+            service.deletePrompt(promptId, owner);
+
+            assertTrue(collection.getItems().isEmpty());
+            verify(promptCollectionRepository).save(collection);
             verify(commentRepository).deleteAll(any());
-            verify(promptRepository).deleteById(promptId);
+            verify(promptRepository).delete(prompt);
+        }
+
+        @Test
+        @DisplayName("Não deve permitir que outra pessoa exclua ou edite o prompt; ADMIN pode")
+        void shouldRequireOwnerOrAdmin() {
+            UUID promptId = UUID.randomUUID();
+            Prompt prompt = Prompt.builder().id(promptId).visibility("public").authorId("user-123").title("t").build();
+            when(promptRepository.findById(promptId)).thenReturn(Optional.of(prompt));
+
+            assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                    () -> service.deletePrompt(promptId, stranger));
+            assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                    () -> service.updatePrompt(promptId, Prompt.builder().title("x").build(), stranger));
+            verify(promptRepository, never()).delete(any(Prompt.class));
+
+            service.deletePrompt(promptId, admin);
+            verify(promptRepository).delete(prompt);
+        }
+
+        @Test
+        @DisplayName("Criação usa a identidade do chamador, ignora id/autoria do corpo e normaliza visibilidade e tags")
+        void shouldForceAuthorOnCreate() {
+            Prompt prompt = Prompt.builder().id(UUID.randomUUID()).title("  Novo  ").authorId("vitima")
+                    .visibility("role").tags(new java.util.HashSet<>(List.of(" #IA ", "", "qa"))).build();
+            when(promptRepository.save(any(Prompt.class))).thenAnswer(i -> i.getArgument(0));
+
+            Prompt saved = service.createPrompt(prompt, owner);
+
+            assertNull(saved.getId());
+            assertEquals("user-123", saved.getAuthorId());
+            assertEquals("private", saved.getVisibility());
+            assertEquals("Novo", saved.getTitle());
+            assertEquals(java.util.Set.of("ia", "qa"), saved.getTags());
+        }
+
+        @Test
+        @DisplayName("Listagem de autor alheio devolve só os públicos")
+        void shouldListOnlyPublicOfOtherAuthor() {
+            when(promptRepository.findByAuthorIdAndVisibility(eq("user-123"), eq("public"), any(Pageable.class)))
+                    .thenReturn(new PageImpl<>(List.of()));
+
+            service.listPrompts(null, "user-123", stranger, PageRequest.of(0, 10));
+
+            verify(promptRepository).findByAuthorIdAndVisibility(eq("user-123"), eq("public"), any(Pageable.class));
+            verify(promptRepository, never()).findByAuthorId(any(), any());
+        }
+
+        @Test
+        @DisplayName("Paginação sem ordenação ganha updatedAt desc e tamanho limitado")
+        void shouldApplyDefaultSortAndCap() {
+            when(promptRepository.findByVisibility(eq("public"), any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
+
+            service.listPrompts(null, null, owner, PageRequest.of(0, 5000));
+
+            org.mockito.ArgumentCaptor<Pageable> captor = org.mockito.ArgumentCaptor.forClass(Pageable.class);
+            verify(promptRepository).findByVisibility(eq("public"), captor.capture());
+            assertEquals(200, captor.getValue().getPageSize());
+            assertNotNull(captor.getValue().getSort().getOrderFor("updatedAt"));
+        }
+
+        @Test
+        @DisplayName("Coleção só mostra a quem chama os itens que ele enxerga e não altera a entidade gerenciada")
+        void shouldHidePrivateItemsInCollectionView() {
+            UUID collectionId = UUID.randomUUID();
+            Prompt pub = Prompt.builder().id(UUID.randomUUID()).visibility("public").authorId("a").build();
+            Prompt priv = Prompt.builder().id(UUID.randomUUID()).visibility("private").authorId("a").build();
+            PromptCollection collection = PromptCollection.builder().id(collectionId).visibility("public").ownerId("a").build();
+            collection.getItems().add(pub);
+            collection.getItems().add(priv);
+            when(promptCollectionRepository.findById(collectionId)).thenReturn(Optional.of(collection));
+
+            PromptCollection view = service.getCollectionFor(collectionId, stranger);
+
+            assertEquals(List.of(pub), view.getItems());
+            assertEquals(2, collection.getItems().size());
+        }
+
+        @Test
+        @DisplayName("Coleção traz itemCount, hiddenCount e canEdit conforme quem lê")
+        void shouldExposeCountsAndCanEdit() {
+            UUID id = UUID.randomUUID();
+            Prompt pub = Prompt.builder().id(UUID.randomUUID()).visibility("public").authorId("a").build();
+            Prompt priv = Prompt.builder().id(UUID.randomUUID()).visibility("private").authorId("a").build();
+            PromptCollection c = PromptCollection.builder().id(id).visibility("public").ownerId("a").build();
+            c.getItems().add(pub);
+            c.getItems().add(priv);
+            when(promptCollectionRepository.findById(id)).thenReturn(Optional.of(c));
+
+            PromptCollection asStranger = service.getCollectionFor(id, stranger);
+            assertEquals(2, asStranger.getItemCount());
+            assertEquals(1, asStranger.getHiddenCount());
+            assertFalse(asStranger.getCanEdit());
+
+            PromptCollection asAdmin = service.getCollectionFor(id, admin);
+            assertEquals(0, asAdmin.getHiddenCount());
+            assertTrue(asAdmin.getCanEdit());
+        }
+
+        @Test
+        @DisplayName("Detalhe público: anônimo vê só itens públicos, sem edição; privada vira inexistente")
+        void shouldServePublicCollectionAnonymously() {
+            UUID id = UUID.randomUUID();
+            UUID privId = UUID.randomUUID();
+            Prompt pub = Prompt.builder().id(UUID.randomUUID()).visibility("public").authorId("a").build();
+            Prompt priv = Prompt.builder().id(UUID.randomUUID()).visibility("private").authorId("a").build();
+            PromptCollection c = PromptCollection.builder().id(id).visibility("public").ownerId("a").build();
+            c.getItems().add(pub);
+            c.getItems().add(priv);
+            when(promptCollectionRepository.findById(id)).thenReturn(Optional.of(c));
+            when(promptCollectionRepository.findById(privId)).thenReturn(Optional.of(
+                    PromptCollection.builder().id(privId).visibility("private").ownerId("a").build()));
+
+            PromptCollection view = service.getPublicCollection(id);
+            assertEquals(List.of(pub), view.getItems());
+            assertEquals(1, view.getHiddenCount());
+            assertFalse(view.getCanEdit());
+            assertThrows(IllegalArgumentException.class, () -> service.getPublicCollection(privId));
+        }
+
+        @Test
+        @DisplayName("Coleção privada de outra pessoa responde como inexistente; não dono não exclui coleção pública")
+        void shouldProtectCollections() {
+            UUID privateId = UUID.randomUUID();
+            UUID publicId = UUID.randomUUID();
+            when(promptCollectionRepository.findById(privateId)).thenReturn(Optional.of(
+                    PromptCollection.builder().id(privateId).visibility("private").ownerId("a").build()));
+            when(promptCollectionRepository.findById(publicId)).thenReturn(Optional.of(
+                    PromptCollection.builder().id(publicId).visibility("public").ownerId("a").build()));
+
+            assertThrows(IllegalArgumentException.class, () -> service.getCollectionFor(privateId, stranger));
+            assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                    () -> service.deleteCollection(publicId, stranger));
+            verify(promptCollectionRepository, never()).delete(any());
         }
 
         @Test
         @DisplayName("Deve adicionar comentário ao prompt com vínculo bidirecional")
         void shouldAddCommentToPrompt() {
             UUID promptId = UUID.randomUUID();
-            Prompt prompt = Prompt.builder().id(promptId).build();
+            Prompt prompt = Prompt.builder().id(promptId).visibility("public").build();
             when(promptRepository.findById(promptId)).thenReturn(Optional.of(prompt));
 
             PromptComment comment = new PromptComment();
             when(commentRepository.save(any(PromptComment.class))).thenAnswer(i -> i.getArgument(0));
 
-            PromptComment saved = service.addComment(promptId, comment);
+            comment.setContent("  ótimo  ");
+            PromptComment saved = service.addComment(promptId, comment, owner);
+
+            assertEquals("user-123", saved.getAuthorId());
+            assertEquals("ótimo", saved.getContent());
 
             assertNotNull(saved.getPrompt());
             assertEquals(promptId, saved.getPrompt().getId());

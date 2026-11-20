@@ -5,9 +5,17 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.annotation.JsonSetter;
+import org.hibernate.annotations.Fetch;
+import org.hibernate.annotations.FetchMode;
+
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Entity
 @Table(name = "retro_boards")
@@ -20,6 +28,11 @@ public class RetroBoard {
 
     @Id
     private String id; // UUID ou informado pelo criador
+
+    // Trava otimista (lost update); somente leitura no JSON.
+    @Version
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private Long version;
 
     @Column(nullable = false)
     private String creatorId;
@@ -98,9 +111,73 @@ public class RetroBoard {
 
     private String timerEndTime;
 
+    // Ordenar por votos por coluna: { "<columnId>": true }. JSON em texto.
+    @Convert(converter = RetroJsonConverters.BooleanMapConverter.class)
+    @Column(name = "column_sorts", columnDefinition = "text")
+    private Map<String, Boolean> columnSorts;
+
+    // Resumo sincronizado entre clientes (hoje { feedbackCount, actionItems }); JSON livre em texto.
+    @Convert(converter = RetroJsonConverters.JsonNodeConverter.class)
+    @Column(name = "summary", columnDefinition = "text")
+    private JsonNode summary;
+
+    // Encerramento da sessão inteira (POST /finish e /reopen); nulo = aberta (também todo board anterior à V79).
+    // `votingStatus` é outra coisa: a fase de votação dentro da sessão.
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    @Column(name = "finished_at")
+    private LocalDateTime finishedAt;
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @Column(name = "lifecycle", length = 20)
+    private String lifecycle;
+
+    /** OPEN|FINISHED. Só leitura no JSON: o corpo de POST/PATCH nunca encerra nem reabre. */
+    @JsonProperty(value = "lifecycleStatus", access = JsonProperty.Access.READ_ONLY)
+    public String getLifecycleStatus() {
+        return LIFECYCLE_FINISHED.equals(lifecycle) ? LIFECYCLE_FINISHED : "OPEN";
+    }
+
+    public static final String LIFECYCLE_FINISHED = "FINISHED";
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    public boolean isFinished() {
+        return LIFECYCLE_FINISHED.equals(lifecycle);
+    }
+
     // --- Nested Columns ---
     @ElementCollection(fetch = FetchType.EAGER)
+    @Fetch(FetchMode.SUBSELECT)
     @CollectionTable(name = "retro_board_columns", joinColumns = @JoinColumn(name = "board_id"))
     @Builder.Default
     private List<RetroColumnDef> columns = new ArrayList<>();
+
+    /**
+     * Visão aninhada do timer ({status, endTime(ms), initialDuration, remainingOnPause}) — o
+     * formato que o frontend usa (TimerState). Os campos planos timer* continuam sendo as colunas.
+     */
+    @JsonProperty("timer")
+    public Map<String, Object> getTimer() {
+        Map<String, Object> t = new LinkedHashMap<>();
+        t.put("status", timerStatus);
+        Long end = null;
+        if (timerEndTime != null && !timerEndTime.isBlank()) {
+            try { end = Long.parseLong(timerEndTime.trim()); } catch (NumberFormatException ignored) { }
+        }
+        t.put("endTime", end);
+        t.put("initialDuration", timerInitialDuration);
+        t.put("remainingOnPause", timerRemainingOnPause);
+        return t;
+    }
+
+    @JsonSetter("timer")
+    public void setTimer(Map<String, Object> t) {
+        if (t == null) return;
+        if (t.get("status") instanceof String s) timerStatus = s;
+        if (t.containsKey("endTime")) {
+            Object e = t.get("endTime");
+            timerEndTime = e == null ? null : String.valueOf(e instanceof Number n ? n.longValue() : e);
+        }
+        if (t.get("initialDuration") instanceof Number n) timerInitialDuration = n.intValue();
+        if (t.get("remainingOnPause") instanceof Number n) timerRemainingOnPause = n.intValue();
+    }
 }
