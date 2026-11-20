@@ -31,7 +31,27 @@ TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 OUT_FILE="$BACKUP_DIR/${DB_NAME}_${TIMESTAMP}.sql.gz"
 
 echo "[backup-db] Fazendo dump de '$DB_NAME' (container $DB_CONTAINER) -> $OUT_FILE"
-docker exec "$DB_CONTAINER" pg_dump -U "$DB_USER" "$DB_NAME" | gzip > "$OUT_FILE"
+# "pg_dump | gzip" esconderia a falha do pg_dump (o status do pipe é o do gzip, que sempre dá certo) e deixaria um
+# arquivo vazio com cara de backup. Por isso: grava o SQL num temporário, só comprime se o pg_dump terminou bem e só
+# renomeia depois de conferir que o dump chegou ao fim (o pg_dump fecha o arquivo com "dump complete").
+SQL_PART="$OUT_FILE.sql.part"
+if ! docker exec "$DB_CONTAINER" pg_dump -U "$DB_USER" "$DB_NAME" > "$SQL_PART"; then
+  rm -f "$SQL_PART"
+  echo "[backup-db] ERRO: pg_dump falhou em $DB_CONTAINER; nenhum backup foi gravado" >&2
+  exit 1
+fi
+if ! tail -n 5 "$SQL_PART" | grep -q "PostgreSQL database dump complete"; then
+  rm -f "$SQL_PART"
+  echo "[backup-db] ERRO: o dump de '$DB_NAME' veio incompleto; nenhum backup foi gravado" >&2
+  exit 1
+fi
+if ! gzip -c "$SQL_PART" > "$OUT_FILE.part"; then
+  rm -f "$SQL_PART" "$OUT_FILE.part"
+  echo "[backup-db] ERRO: não foi possível comprimir o dump (disco cheio?)" >&2
+  exit 1
+fi
+rm -f "$SQL_PART"
+mv "$OUT_FILE.part" "$OUT_FILE"
 
 SIZE="$(du -h "$OUT_FILE" | cut -f1)"
 echo "[backup-db] OK: $OUT_FILE ($SIZE)"

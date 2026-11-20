@@ -42,4 +42,6 @@ USER spring
 COPY --from=build /app/target/*.jar app.jar
 
 EXPOSE 8002
-ENTRYPOINT ["java", "-Duser.timezone=UTC", "-javaagent:/app/otel-agent.jar", "-jar", "app.jar"]
+# MaxRAMPercentage: sem isso o heap padrão é 25% do limite do container (cerca de 256 MB com 1 GB). 60% deixa o resto
+# para metaspace, threads, agente OpenTelemetry e buffers nativos sem estourar o limite (OOM kill).
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=60", "-Duser.timezone=UTC", "-javaagent:/app/otel-agent.jar", "-jar", "app.jar"]

@@ -1,6 +1,8 @@
 spring:
   application:
     name: agile-space-backend
+  lifecycle:
+    timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:30s}
   servlet:
     multipart:
       # Anexos dos cards da Review (PNG/JPEG/PDF, até 10 MB cada). O padrão do Spring é 1 MB.
@@ -44,6 +46,9 @@ spring:
 
 server:
   port: ${PORT:8002}
+  # Deploy/restart: para de aceitar conexões novas e deixa as requisições em andamento terminarem (até o prazo
+  # abaixo) em vez de cortá-las no meio, como um envio ao Jira que já criou metade das sub-tarefas.
+  shutdown: graceful
   error:
     include-message: always
     include-binding-errors: always

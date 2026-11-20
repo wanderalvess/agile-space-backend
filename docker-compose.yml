@@ -37,6 +37,8 @@ services:
   backend:
     build: .
     container_name: agile-space-backend
+    # O Spring espera até SHUTDOWN_TIMEOUT (30s) as requisições em andamento; o padrão do Docker (10s) mataria antes.
+    stop_grace_period: 45s
     restart: unless-stopped
     depends_on:
       db:
