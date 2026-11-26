@@ -29,6 +29,9 @@ public class SaveJoltProjectRequestDto {
     @Size(max = 255, message = "Identificador de squad inválido")
     private String squadId;
 
+    @Size(max = 2000, message = "A URL de origem aceita no máximo 2000 caracteres")
+    private String apiUrl;
+
     // Payloads: ~4 MB de texto cada (o motor de execução aceita no máximo 2 MB de entrada e de spec).
     @Size(max = 4_000_000, message = "O JSON de entrada excede o limite de 4 MB")
     private String inputJson;

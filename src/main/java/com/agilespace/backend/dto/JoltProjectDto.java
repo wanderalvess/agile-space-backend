@@ -26,6 +26,7 @@ public class JoltProjectDto {
     private String authorEmail;
     private String squadId;
 
+    private String apiUrl;
     private String inputJson;
     private String targetJson;
     private String specJson;

@@ -93,6 +93,26 @@ class JoltProjectServiceTest {
     }
 
     @Test
+    @DisplayName("A URL de origem do layout é gravada na criação e na edição, e volta no DTO")
+    void testApiUrlRoundTrip() {
+        when(projectRepository.saveAndFlush(any(JoltProject.class))).thenAnswer(inv -> {
+            JoltProject p = inv.getArgument(0);
+            if (p.getId() == null) p.setId(projectId);
+            return p;
+        });
+        when(versionRepository.save(any(JoltProjectVersion.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        JoltProjectDto created = projectService.createProject(
+                SaveJoltProjectRequestDto.builder().name("Pedido").apiUrl("https://api.exemplo.com.br/pedidos").build(), author);
+        assertEquals("https://api.exemplo.com.br/pedidos", created.getApiUrl());
+
+        when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+        JoltProjectDto updated = projectService.updateProject(projectId,
+                SaveJoltProjectRequestDto.builder().name("Pedido").apiUrl("https://novo.exemplo.com.br").build(), author);
+        assertEquals("https://novo.exemplo.com.br", updated.getApiUrl());
+    }
+
+    @Test
     @DisplayName("Criar com squad de outra equipe é recusado; admin pode")
     void testCreateWithForeignSquad() {
         SaveJoltProjectRequestDto dto = SaveJoltProjectRequestDto.builder().name("X").squadId("SQUAD-B").build();

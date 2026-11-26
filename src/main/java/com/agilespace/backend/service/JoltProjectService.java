@@ -110,6 +110,7 @@ public class JoltProjectService {
                 .authorName(caller.name() != null ? caller.name() : "Usuário")
                 .authorEmail(caller.email())
                 .squadId(squadId)
+                .apiUrl(dto.getApiUrl())
                 .inputJson(dto.getInputJson())
                 .targetJson(dto.getTargetJson())
                 .specJson(dto.getSpecJson())
@@ -148,6 +149,7 @@ public class JoltProjectService {
         if (dto.getIsPublic() != null) project.setIsPublic(dto.getIsPublic());
         if (dto.getSquadId() != null) project.setSquadId(validatedSquad(dto.getSquadId(), caller));
 
+        project.setApiUrl(dto.getApiUrl());
         project.setInputJson(dto.getInputJson());
         project.setTargetJson(dto.getTargetJson());
         project.setSpecJson(dto.getSpecJson());
@@ -312,6 +314,7 @@ public class JoltProjectService {
                 .authorName(p.getAuthorName())
                 .authorEmail(p.getAuthorEmail())
                 .squadId(p.getSquadId())
+                .apiUrl(p.getApiUrl())
                 .inputJson(p.getInputJson())
                 .targetJson(p.getTargetJson())
                 .specJson(p.getSpecJson())

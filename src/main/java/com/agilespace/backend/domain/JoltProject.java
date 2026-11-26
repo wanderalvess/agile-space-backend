@@ -52,6 +52,10 @@ public class JoltProject {
     private String squadId;
 
     // Payloads e nós do ReactFlow
+    /** URL de origem do layout (campo do Sandbox). */
+    @Column(columnDefinition = "TEXT")
+    private String apiUrl;
+
     @Column(columnDefinition = "TEXT")
     private String inputJson;
 
