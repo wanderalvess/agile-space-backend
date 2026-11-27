@@ -40,20 +40,21 @@ class JwtAuthenticationFilterPublicPathTest {
     }
 
     @Test
-    void joltTransformAndEngineInfoRequireLogin() throws Exception {
-        assertEquals(401, call("POST", "/api/jolt/transform").getStatus());
+    void joltTransformIsPublicButRestOfJoltRequiresLogin() throws Exception {
+        assertEquals(200, call("POST", "/api/jolt/transform").getStatus());
         assertEquals(401, call("GET", "/api/jolt/engine-info").getStatus());
+        assertEquals(401, call("GET", "/api/jolt/projects").getStatus());
         assertEquals(401, call("POST", "/api/jolt/generate").getStatus());
     }
 
     @Test
-    void joltTransformPassesWithValidToken() throws Exception {
+    void joltProjectsPassesWithValidToken() throws Exception {
         JwtTokenUtil tokenUtil = mock(JwtTokenUtil.class);
         when(tokenUtil.validateAndExtractClaims(anyString())).thenReturn(
                 new ObjectMapper().readTree("{\"sub\":\"u1\",\"role\":\"MEMBER\",\"email\":\"a@b.c\"}"));
         JwtAuthenticationFilter authenticated = new JwtAuthenticationFilter(tokenUtil);
 
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/jolt/transform");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/jolt/projects");
         request.addHeader("Authorization", "Bearer token-valido");
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();

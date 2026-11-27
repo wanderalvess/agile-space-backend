@@ -48,6 +48,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private int generalCapacity = 300;
     private int userCapacity = 300;
     private int publicInviteCapacity = 1200;
+    private int joltAnonCapacity = 60;
+    private static final String JOLT_TRANSFORM_PATH = "/api/jolt/transform";
+
+    /** Execução do Jolt sem login (POST /api/jolt/transform): por IP, em balde próprio. */
+    @Value("${app.ratelimit.jolt-anon-per-ip-per-minute:60}")
+    void setJoltAnonCapacity(int v) { this.joltAnonCapacity = Math.max(1, v); }
     private boolean perUserEnabled = true;
 
     @Value("${app.ratelimit.auth-per-ip-per-minute:10}")
@@ -95,6 +101,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final ConcurrentMap<String, Bucket> generalBuckets = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Bucket> userBuckets = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Bucket> inviteBuckets = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Bucket> joltBuckets = new ConcurrentHashMap<>();
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -111,6 +118,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
         Bucket bucket;
         if (isStrictAuthPath(uri)) {
             bucket = authBuckets.computeIfAbsent(clientIp(request), k -> newBucket(authCapacity));
+        } else if (JOLT_TRANSFORM_PATH.equals(uri) && authenticatedUserId(request) == null) {
+            // Execução anônima do Jolt: custa CPU, então tem balde próprio por IP, mais apertado que o geral.
+            bucket = joltBuckets.computeIfAbsent(clientIp(request), k -> newBucket(joltAnonCapacity));
         } else if (uri.startsWith(PUBLIC_INVITE_PREFIX)) {
             bucket = inviteBuckets.computeIfAbsent(clientIp(request), k -> newBucket(publicInviteCapacity));
         } else {

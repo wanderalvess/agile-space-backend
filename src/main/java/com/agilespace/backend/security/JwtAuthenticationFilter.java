@@ -38,7 +38,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             // Conclui a redefinição de senha com o token do link (quem usa não tem sessão).
             "/api/auth/reset-password",
             "/api/public",
-            // /api/jolt/transform e /api/jolt/engine-info exigem login (decisão de 2026-10: antes eram públicos).
+            // O Sandbox do Jolt roda sem conta (decisão de 2026-11-27): só a execução é pública, protegida por
+            // JoltRequestSizeFilter (corpo) e pelo balde próprio de RateLimitFilter. Geração (IA), layouts e engine-info exigem login.
+            "/api/jolt/transform",
             // API pública com API key própria (ApiKeyAuthenticationFilter), não JWT de sessão.
             "/api/v1",
             // Changelog é público por design (visível sem login) — ver ChangelogController.
