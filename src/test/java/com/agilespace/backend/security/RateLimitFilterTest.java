@@ -46,6 +46,24 @@ class RateLimitFilterTest {
     }
 
     @Test
+    @DisplayName("Execução anônima do Jolt: a rajada acima de 60/min por IP recebe 429, em balde separado do geral")
+    void shouldLimitAnonymousJoltTransformPerIp() throws Exception {
+        when(request.getRequestURI()).thenReturn("/api/jolt/transform");
+        when(request.getRemoteAddr()).thenReturn("10.0.0.7");
+        when(request.getHeader("X-Forwarded-For")).thenReturn(null);
+        PrintWriter writer = mock(PrintWriter.class);
+        when(response.getWriter()).thenReturn(writer);
+
+        for (int i = 0; i < 60; i++) filter.doFilterInternal(request, response, filterChain);
+        verify(filterChain, times(60)).doFilter(request, response);
+        verify(response, never()).setStatus(429);
+
+        filter.doFilterInternal(request, response, filterChain);
+        verify(response).setStatus(429);
+        verify(filterChain, times(60)).doFilter(request, response);
+    }
+
+    @Test
     @DisplayName("Permite requisições dentro do limite geral")
     void shouldAllowRequestsWithinGeneralLimit() throws Exception {
         when(request.getRequestURI()).thenReturn("/api/squads/SQ1");

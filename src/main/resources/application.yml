@@ -109,6 +109,8 @@ app:
     # Leitura pública de convite (/api/public/invites/**): por IP, balde separado. Folgado (1200) porque
     # um escritório inteiro atrás de NAT compartilha o mesmo IP.
     public-invite-per-ip-per-minute: ${RATELIMIT_PUBLIC_INVITE_PER_IP_PER_MINUTE:1200}
+    # Execução do Jolt sem login (POST /api/jolt/transform): por IP, balde separado.
+    jolt-anon-per-ip-per-minute: ${RATELIMIT_JOLT_ANON_PER_IP_PER_MINUTE:60}
   brainstorming:
     # Segundos que o facilitador precisa estar offline (sem WebSocket na sala) para outro participante assumir a facilitação.
     # Criador do mural e ADMIN assumem sempre. Ver docs/ceremony-brainstorming-api.md.

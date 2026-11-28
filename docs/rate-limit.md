@@ -16,6 +16,7 @@ WebSocket (`/ws/**`) e `OPTIONS` não passam pelo filtro. O IP vem de `X-Forward
 | `app.ratelimit.general-per-ip-per-minute` | `RATELIMIT_GENERAL_PER_IP_PER_MINUTE` | 300 |
 | `app.ratelimit.auth-per-ip-per-minute` | `RATELIMIT_AUTH_PER_IP_PER_MINUTE` | 10 |
 | `app.ratelimit.public-invite-per-ip-per-minute` | `RATELIMIT_PUBLIC_INVITE_PER_IP_PER_MINUTE` | 1200 (folgado por causa de NAT) |
+| `app.ratelimit.jolt-anon-per-ip-per-minute` | `RATELIMIT_JOLT_ANON_PER_IP_PER_MINUTE` | 60 (`POST /api/jolt/transform` sem login; com login vale o balde do usuário) |
 
 Resposta ao exceder: HTTP 429, cabeçalho `Retry-After` e `{"error": "Muitas requisições. Tente de novo em N s.", "message": "<mesmo texto>"}`. As duas chaves trazem o mesmo texto: `message` é a que o resto da API usa, e `error` fica por compatibilidade.
 
