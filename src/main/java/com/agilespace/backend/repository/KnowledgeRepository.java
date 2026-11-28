@@ -31,4 +31,18 @@ public interface KnowledgeRepository extends JpaRepository<KnowledgeDocument, UU
             @Param("statuses") java.util.Collection<String> statuses,
             Pageable pageable
     );
+
+    Optional<KnowledgeDocument> findByDocTypeAndExternalId(String docType, String externalId);
+
+    /** Manifesto da ingestão: o que já existe para o tipo (sem lixeira), para o cliente enviar só o que mudou. */
+    @Query("SELECT d FROM KnowledgeDocument d WHERE d.externalId IS NOT NULL AND d.status <> 'deleted' " +
+           "AND (:docType IS NULL OR d.docType = :docType)")
+    java.util.List<KnowledgeDocument> findManifest(@Param("docType") String docType);
+
+    java.util.List<KnowledgeDocument> findBySourceAndStatusIn(String source, java.util.Collection<String> statuses);
+
+    /** Documentos em busca (publicado/indexado) que ainda não têm nenhum trecho: alvo do backfill. */
+    @Query("SELECT d FROM KnowledgeDocument d WHERE d.status IN ('published','indexed') AND d.content IS NOT NULL " +
+           "AND NOT EXISTS (SELECT 1 FROM KnowledgeChunk c WHERE c.documentId = d.id) ORDER BY d.updatedAt")
+    java.util.List<KnowledgeDocument> findWithoutChunks(Pageable pageable);
 }

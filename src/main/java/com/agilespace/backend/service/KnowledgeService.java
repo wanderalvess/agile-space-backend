@@ -428,7 +428,7 @@ public class KnowledgeService {
         }
     }
 
-    private String squadOfUser(String userId) {
+    String squadOfUser(String userId) {
         if (userId == null || userRepository == null) {
             return null;
         }
@@ -445,7 +445,7 @@ public class KnowledgeService {
         return v == null ? "" : v;
     }
 
-    private boolean contentChanged(KnowledgeDocument existing, KnowledgeDocument incoming) {
+    boolean contentChanged(KnowledgeDocument existing, KnowledgeDocument incoming) {
         if (!Objects.equals(existing.getTitle(), incoming.getTitle())) return true;
         if (!nullToEmpty(existing.getContent()).equals(nullToEmpty(incoming.getContent()))) return true;
         if (incoming.getTags() == null) return false;
@@ -473,7 +473,7 @@ public class KnowledgeService {
     }
 
     /** Guarda o estado atual como uma nova versão e descarta as mais antigas além do limite. */
-    private void recordVersion(KnowledgeDocument doc, String changedBy, LocalDateTime at) {
+    void recordVersion(KnowledgeDocument doc, String changedBy, LocalDateTime at) {
         int next = versionRepository.findTopByDocumentIdOrderByVersionNumberDesc(doc.getId())
                 .map(v -> v.getVersionNumber() + 1).orElse(1);
         versionRepository.save(KnowledgeDocumentVersion.builder()
@@ -494,7 +494,7 @@ public class KnowledgeService {
     }
 
     /** Documento que ainda não tem histórico (criado antes desta função): registra o estado atual como versão inicial. */
-    private void ensureBaseline(KnowledgeDocument doc) {
+    void ensureBaseline(KnowledgeDocument doc) {
         if (versionRepository.countByDocumentId(doc.getId()) == 0) {
             LocalDateTime at = doc.getUpdatedAt() != null ? doc.getUpdatedAt()
                     : doc.getCreatedAt() != null ? doc.getCreatedAt() : LocalDateTime.now(ZoneOffset.UTC);

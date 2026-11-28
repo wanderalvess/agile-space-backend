@@ -87,4 +87,42 @@ public class KnowledgeDocument {
     @Column(columnDefinition = "TEXT")
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private float[] embedding;
+
+    // --- Ingestão pelo Hub (V103). Todos READ_ONLY no JSON: só o endpoint de ingestão (API key
+    // com KNOWLEDGE_WRITE) grava; o POST/PUT da UI ignora o que vier no corpo. ---
+
+    /** Tipo: api_doc, tdn_page, prompt, skill, instruction. Nulo = documento comum da UI. */
+    @Column(name = "doc_type", length = 30)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String docType;
+
+    /** Origem do conteúdo: code ou tdn. */
+    @Column(length = 20)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String source;
+
+    @Column(name = "source_url", columnDefinition = "TEXT")
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String sourceUrl;
+
+    /** Id estável vindo de fora; (docType, externalId) é a chave do upsert. */
+    @Column(name = "external_id")
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String externalId;
+
+    /** Tag/commit de origem do conteúdo. */
+    @Column(name = "doc_version", length = 100)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String docVersion;
+
+    /** SHA-256 calculado no servidor (título + conteúdo + metadados): decide se a ingestão precisa regravar. */
+    @Column(name = "content_hash", length = 64)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String contentHash;
+
+    /** shared (padrão, KB compartilhada entre squads) ou restricted. Hoje só gravado; ver KnowledgeIngestService. */
+    @Column(nullable = false, length = 20)
+    @Builder.Default
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String visibility = "shared";
 }
