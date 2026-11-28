@@ -141,4 +141,32 @@ class KnowledgeChunkServiceTest {
         assertEquals("Doc\nA > B\ncorpo", KnowledgeChunkService.embeddingInput("Doc", "A > B", "corpo"));
         assertEquals("corpo", KnowledgeChunkService.embeddingInput(null, "", "corpo"));
     }
+
+    @Test
+    @DisplayName("backfill processa até 100 docs sem trechos e avisa se ainda restam")
+    void backfillBatches() {
+        List<KnowledgeDocument> docs = new ArrayList<>();
+        for (int i = 0; i < KnowledgeChunkService.BACKFILL_BATCH + 1; i++) {
+            docs.add(KnowledgeDocument.builder().id(UUID.randomUUID()).title("D" + i).content("## S\ntexto " + i).build());
+        }
+        when(knowledgeRepository.findWithoutChunks(any())).thenReturn(docs);
+
+        var r = service.backfill();
+
+        assertEquals(KnowledgeChunkService.BACKFILL_BATCH, r.documents());
+        assertEquals(KnowledgeChunkService.BACKFILL_BATCH, r.chunks());
+        assertTrue(r.more());
+        verify(chunkRepository, times(KnowledgeChunkService.BACKFILL_BATCH)).saveAll(any());
+    }
+
+    @Test
+    @DisplayName("backfill sem pendências devolve zero e more=false")
+    void backfillNothingToDo() {
+        when(knowledgeRepository.findWithoutChunks(any())).thenReturn(List.of());
+
+        var r = service.backfill();
+
+        assertEquals(0, r.documents());
+        assertFalse(r.more());
+    }
 }

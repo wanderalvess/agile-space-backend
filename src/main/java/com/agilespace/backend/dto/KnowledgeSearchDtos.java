@@ -38,4 +38,8 @@ public final class KnowledgeSearchDtos {
 
     public record FillResponse(int updated, List<String> rejected) {
     }
+
+    /** more=true: ainda há documentos sem trechos; chame de novo. */
+    public record BackfillResponse(int documents, int chunks, boolean more) {
+    }
 }

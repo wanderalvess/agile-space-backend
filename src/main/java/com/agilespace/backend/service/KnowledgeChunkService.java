@@ -37,6 +37,7 @@ public class KnowledgeChunkService {
     /** Dimensão do modelo de embedding em uso; vetores de outro tamanho são recusados. */
     public static final int EMBEDDING_DIMS = 384;
     public static final int MAX_PENDING_BATCH = 200;
+    public static final int BACKFILL_BATCH = 100;
     static final int DEFAULT_K = 8;
     static final int MAX_K = 50;
     static final int RRF_K = 60;
@@ -73,6 +74,23 @@ public class KnowledgeChunkService {
         }
         chunkRepository.saveAll(toSave);
         return toSave.size();
+    }
+
+    /**
+     * Gera trechos dos documentos que ainda não têm (os criados pela UI antes da ingestão). Em lotes de
+     * {@value #BACKFILL_BATCH} por chamada; devolve quantos processou e se ainda restam.
+     */
+    @Transactional
+    public BackfillResponse backfill() {
+        List<KnowledgeDocument> docs = knowledgeRepository.findWithoutChunks(PageRequest.of(0, BACKFILL_BATCH + 1));
+        boolean more = docs.size() > BACKFILL_BATCH;
+        int processed = 0;
+        int chunks = 0;
+        for (KnowledgeDocument d : docs.subList(0, Math.min(docs.size(), BACKFILL_BATCH))) {
+            chunks += rebuild(d);
+            processed++;
+        }
+        return new BackfillResponse(processed, chunks, more);
     }
 
     @Transactional

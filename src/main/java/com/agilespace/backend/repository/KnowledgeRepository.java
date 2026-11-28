@@ -40,4 +40,9 @@ public interface KnowledgeRepository extends JpaRepository<KnowledgeDocument, UU
     java.util.List<KnowledgeDocument> findManifest(@Param("docType") String docType);
 
     java.util.List<KnowledgeDocument> findBySourceAndStatusIn(String source, java.util.Collection<String> statuses);
+
+    /** Documentos em busca (publicado/indexado) que ainda não têm nenhum trecho: alvo do backfill. */
+    @Query("SELECT d FROM KnowledgeDocument d WHERE d.status IN ('published','indexed') AND d.content IS NOT NULL " +
+           "AND NOT EXISTS (SELECT 1 FROM KnowledgeChunk c WHERE c.documentId = d.id) ORDER BY d.updatedAt")
+    java.util.List<KnowledgeDocument> findWithoutChunks(Pageable pageable);
 }

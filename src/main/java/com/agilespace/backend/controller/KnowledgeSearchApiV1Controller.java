@@ -4,6 +4,7 @@ import com.agilespace.backend.domain.ApiKeyScope;
 import com.agilespace.backend.dto.KnowledgeAskDtos.AskRequest;
 import com.agilespace.backend.dto.KnowledgeAskDtos.AskResponse;
 import com.agilespace.backend.dto.KnowledgeDivergenceDtos.Report;
+import com.agilespace.backend.dto.KnowledgeSearchDtos.BackfillResponse;
 import com.agilespace.backend.dto.KnowledgeSearchDtos.FillRequest;
 import com.agilespace.backend.dto.KnowledgeSearchDtos.FillResponse;
 import com.agilespace.backend.dto.KnowledgeSearchDtos.PendingChunk;
@@ -54,6 +55,13 @@ public class KnowledgeSearchApiV1Controller {
                                               HttpServletRequest request) {
         ApiKeyAccess.requireScope(request, ApiKeyScope.KNOWLEDGE_READ);
         return ResponseEntity.ok(divergenceService.report(module, limit));
+    }
+
+    /** Gera trechos dos documentos antigos (100 por chamada); repita enquanto more=true. */
+    @PostMapping("/chunks/backfill")
+    public ResponseEntity<BackfillResponse> backfill(HttpServletRequest request) {
+        ApiKeyAccess.requireScope(request, ApiKeyScope.KNOWLEDGE_WRITE);
+        return ResponseEntity.ok(chunkService.backfill());
     }
 
     /** Trechos sem embedding: o cliente calcula sobre 'input' e devolve em PUT /chunks/embeddings. */
