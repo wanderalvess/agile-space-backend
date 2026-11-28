@@ -42,6 +42,10 @@ public class KnowledgeChunkService {
     static final int MAX_K = 50;
     static final int RRF_K = 60;
     static final int CANDIDATES = 60;
+    static final int MAX_CANDIDATES = 120;
+    static final int MAX_PER_DOC = 2;
+    static final double EXACT_TITLE_BOOST = 0.05;
+    static final double PARTIAL_TITLE_BOOST = 0.02;
     static final float MIN_SIMILARITY = 0.2f;
     static final Set<String> LISTED = Set.of("published", "indexed");
 
@@ -67,7 +71,7 @@ public class KnowledgeChunkService {
         chunkRepository.deleteAllByDocumentId(doc.getId());
         List<KnowledgeChunk> toSave = new ArrayList<>();
         for (KnowledgeChunker.Chunk c : fresh) {
-            String h = textHash(c.headingPath(), c.text());
+            String h = textHash(doc.getTitle(), c.headingPath(), c.text());
             toSave.add(KnowledgeChunk.builder().documentId(doc.getId()).ordinal(c.ordinal())
                     .headingPath(blankToNull(c.headingPath())).text(c.text()).textHash(h)
                     .embedding(reusable.get(h)).build());
@@ -176,15 +180,62 @@ public class KnowledgeChunkService {
         List<UUID> vectorRanked = qvec == null ? List.of() : vectorSearch(qvec, f);
         String mode = tsq != null && qvec != null ? "hybrid" : tsq != null ? "text" : "vector";
 
-        List<Fused> fused = fuse(textRanked, vectorRanked, k);
-        return new SearchResponse(mode, loadHits(fused));
+        String q = req.query() == null ? null : req.query().trim().toLowerCase();
+        Set<UUID> exact = q == null || q.isEmpty() || q.length() > 255 ? Set.of() : titleExact(q, f);
+
+        // Candidatos além de k: o limite por documento e o reforço de título descartam/reordenam trechos.
+        List<Fused> fused = fuse(textRanked, vectorRanked, exact, Math.min(MAX_CANDIDATES, k * 5));
+        return new SearchResponse(mode, rerank(loadHits(fused), q, k));
+    }
+
+    /**
+     * Reforça título/externalId que contêm a pergunta inteira (o exato já entra reforçado na fusão) e limita a
+     * MAX_PER_DOC trechos por documento, para um documento não ocupar a lista inteira. Devolve no máximo k.
+     */
+    static List<Hit> rerank(List<Hit> hits, String query, int k) {
+        List<Hit> scored = new ArrayList<>();
+        boolean usable = query != null && query.length() >= 3;
+        for (Hit h : hits) {
+            double boost = 0;
+            if (usable) {
+                String title = h.title() == null ? "" : h.title().toLowerCase();
+                String ext = h.externalId() == null ? "" : h.externalId().toLowerCase();
+                boolean isExact = title.equals(query) || ext.equals(query);
+                if (!isExact && (title.contains(query) || ext.contains(query))) {
+                    boost = PARTIAL_TITLE_BOOST;
+                }
+            }
+            scored.add(boost == 0 ? h : new Hit(h.chunkId(), h.documentId(), h.docType(), h.externalId(), h.title(),
+                    h.headingPath(), h.text(), h.sourceUrl(), h.source(), h.module(), h.version(), h.score() + boost,
+                    h.textRank(), h.vectorRank()));
+        }
+        scored.sort(Comparator.comparingDouble(Hit::score).reversed());
+        Map<String, Integer> perDoc = new HashMap<>();
+        List<Hit> out = new ArrayList<>();
+        for (Hit h : scored) {
+            if (perDoc.merge(h.documentId(), 1, Integer::sum) <= MAX_PER_DOC) {
+                out.add(h);
+                if (out.size() == k) {
+                    break;
+                }
+            }
+        }
+        return out;
     }
 
     record Fused(UUID id, double score, Integer textRank, Integer vectorRank) {
     }
 
-    /** Reciprocal Rank Fusion: soma 1/(60+posição) de cada lista em que o trecho aparece. */
     static List<Fused> fuse(List<UUID> textRanked, List<UUID> vectorRanked, int k) {
+        return fuse(textRanked, vectorRanked, Set.of(), k);
+    }
+
+    /**
+     * Reciprocal Rank Fusion: soma 1/(60+posição) de cada lista em que o trecho aparece. Trechos de documento
+     * cujo título ou externalId é igual à pergunta entram nos candidatos mesmo sem aparecer nas listas e levam
+     * EXACT_TITLE_BOOST (maior que o RRF máximo, ~0,033): quem digita o nome exato quer aquele documento.
+     */
+    static List<Fused> fuse(List<UUID> textRanked, List<UUID> vectorRanked, Set<UUID> exactTitle, int k) {
         Map<UUID, Integer> tr = new HashMap<>();
         Map<UUID, Integer> vr = new HashMap<>();
         for (int i = 0; i < textRanked.size(); i++) {
@@ -195,11 +246,13 @@ public class KnowledgeChunkService {
         }
         Set<UUID> all = new LinkedHashSet<>(textRanked);
         all.addAll(vectorRanked);
+        all.addAll(exactTitle);
         return all.stream()
                 .map(id -> {
                     double s = 0;
                     if (tr.containsKey(id)) s += 1.0 / (RRF_K + tr.get(id));
                     if (vr.containsKey(id)) s += 1.0 / (RRF_K + vr.get(id));
+                    if (exactTitle.contains(id)) s += EXACT_TITLE_BOOST;
                     return new Fused(id, s, tr.get(id), vr.get(id));
                 })
                 .sorted(Comparator.comparingDouble(Fused::score).reversed())
@@ -248,6 +301,15 @@ public class KnowledgeChunkService {
                 + "WHERE c.tsv @@ q.query AND" + where(f, p)
                 + " ORDER BY ts_rank_cd(c.tsv, q.query) DESC, c.id LIMIT :lim";
         return jdbc.query(sql, p, (rs, i) -> rs.getObject("id", UUID.class));
+    }
+
+    /** Primeiros trechos de documentos cujo título ou externalId é exatamente a pergunta (minúsculas). */
+    private Set<UUID> titleExact(String q, Filter f) {
+        MapSqlParameterSource p = new MapSqlParameterSource("q", q);
+        String sql = "SELECT c.id FROM knowledge_chunk c JOIN knowledge_kb d ON d.id = c.document_id "
+                + "WHERE (lower(d.title) = :q OR lower(d.external_id) = :q) AND" + where(f, p)
+                + " ORDER BY c.ordinal LIMIT 3";
+        return new LinkedHashSet<>(jdbc.query(sql, p, (rs, i) -> rs.getObject("id", UUID.class)));
     }
 
     private List<UUID> vectorSearch(float[] q, Filter f) {
@@ -316,9 +378,13 @@ public class KnowledgeChunkService {
         return out;
     }
 
-    static String textHash(String headingPath, String text) {
+    /**
+     * Chave de reaproveitamento do embedding. Inclui o TÍTULO porque o texto embedado é título + caminho + trecho
+     * (ver embeddingInput): se só o título mudar, o embedding antigo ficou desatualizado e o trecho volta à fila.
+     */
+    static String textHash(String title, String headingPath, String text) {
         try {
-            String s = (headingPath == null ? "" : headingPath) + "\n" + text;
+            String s = (title == null ? "" : title.trim()) + "\n" + (headingPath == null ? "" : headingPath) + "\n" + text;
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(s.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
