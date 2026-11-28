@@ -37,6 +37,8 @@ class KnowledgeIngestServiceTest {
     private KnowledgeDocRelationRepository relationRepository;
     @Mock
     private KnowledgeService knowledgeService;
+    @Mock
+    private KnowledgeChunkService chunkService;
     @InjectMocks
     private KnowledgeIngestService service;
 
@@ -77,6 +79,7 @@ class KnowledgeIngestServiceTest {
         assertEquals("shared", d.getVisibility());
         assertEquals(64, d.getContentHash().length());
         verify(knowledgeService).recordVersion(eq(d), eq("u1"), any());
+        verify(chunkService).rebuild(d);
     }
 
     @Test
@@ -203,6 +206,7 @@ class KnowledgeIngestServiceTest {
 
         assertTrue(service.delete("skill", "s1", "u1"));
         assertEquals("deleted", d.getStatus());
+        verify(chunkService).remove(d.getId());
         assertEquals("u1", d.getDeletedBy());
         assertFalse(service.delete("skill", "s1", "u1"));
         assertFalse(service.delete("skill", "nada", "u1"));

@@ -27,8 +27,9 @@ import java.util.*;
  * versões e as validações do {@link KnowledgeService}. O hash do conteúdo é calculado AQUI (nunca confiado ao
  * cliente): item igual ao já gravado não é regravado.
  * <p>
- * Ainda não gera chunks nem embedding (fase seguinte). Se o conteúdo mudar e o item não trouxer embedding, o
- * embedding antigo é descartado (ficaria desatualizado), como já ocorre na reimportação do TDN.
+ * A cada criação ou mudança os trechos (chunks) do documento são regravados ({@link KnowledgeChunkService}); o
+ * embedding dos trechos é preenchido depois por quem tem o modelo. O campo embedding do item (documento inteiro)
+ * continua aceito por compatibilidade com o chat atual; se o conteúdo mudar sem ele, o antigo é descartado.
  */
 @Service
 @RequiredArgsConstructor
@@ -43,6 +44,7 @@ public class KnowledgeIngestService {
     private final KnowledgeRepository knowledgeRepository;
     private final KnowledgeDocRelationRepository relationRepository;
     private final KnowledgeService knowledgeService;
+    private final KnowledgeChunkService chunkService;
 
     @Transactional(readOnly = true)
     public List<ManifestEntry> manifest(String docType) {
@@ -122,6 +124,7 @@ public class KnowledgeIngestService {
         doc.setDeletedAt(LocalDateTime.now(ZoneOffset.UTC));
         doc.setDeletedBy(actorId);
         knowledgeRepository.save(doc);
+        chunkService.remove(doc.getId());
         return true;
     }
 
@@ -200,6 +203,7 @@ public class KnowledgeIngestService {
             if (changed) {
                 knowledgeService.recordVersion(saved, actorId, LocalDateTime.now(ZoneOffset.UTC));
             }
+            chunkService.rebuild(saved);
             queueRelations(saved.getId(), item, pendingRelations);
             return new ItemResult(docType, externalId, "updated", saved.getId().toString(), null, List.of());
         }
@@ -211,6 +215,7 @@ public class KnowledgeIngestService {
         doc.setSquadId(knowledgeService.squadOfUser(actorId));
         KnowledgeDocument saved = knowledgeRepository.save(doc);
         knowledgeService.recordVersion(saved, actorId, LocalDateTime.now(ZoneOffset.UTC));
+        chunkService.rebuild(saved);
         queueRelations(saved.getId(), item, pendingRelations);
         return new ItemResult(docType, externalId, "created", saved.getId().toString(), null, List.of());
     }
