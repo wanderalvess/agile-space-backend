@@ -31,4 +31,11 @@ public interface KnowledgeRepository extends JpaRepository<KnowledgeDocument, UU
             @Param("statuses") java.util.Collection<String> statuses,
             Pageable pageable
     );
+
+    Optional<KnowledgeDocument> findByDocTypeAndExternalId(String docType, String externalId);
+
+    /** Manifesto da ingestão: o que já existe para o tipo (sem lixeira), para o cliente enviar só o que mudou. */
+    @Query("SELECT d FROM KnowledgeDocument d WHERE d.externalId IS NOT NULL AND d.status <> 'deleted' " +
+           "AND (:docType IS NULL OR d.docType = :docType)")
+    java.util.List<KnowledgeDocument> findManifest(@Param("docType") String docType);
 }
