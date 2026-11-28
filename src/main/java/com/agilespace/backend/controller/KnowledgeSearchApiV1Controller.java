@@ -3,6 +3,7 @@ package com.agilespace.backend.controller;
 import com.agilespace.backend.domain.ApiKeyScope;
 import com.agilespace.backend.dto.KnowledgeAskDtos.AskRequest;
 import com.agilespace.backend.dto.KnowledgeAskDtos.AskResponse;
+import com.agilespace.backend.dto.KnowledgeDivergenceDtos.Report;
 import com.agilespace.backend.dto.KnowledgeSearchDtos.FillRequest;
 import com.agilespace.backend.dto.KnowledgeSearchDtos.FillResponse;
 import com.agilespace.backend.dto.KnowledgeSearchDtos.PendingChunk;
@@ -11,6 +12,7 @@ import com.agilespace.backend.dto.KnowledgeSearchDtos.SearchResponse;
 import com.agilespace.backend.security.ApiKeyAccess;
 import com.agilespace.backend.service.KnowledgeAskService;
 import com.agilespace.backend.service.KnowledgeChunkService;
+import com.agilespace.backend.service.KnowledgeDivergenceService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -29,6 +31,7 @@ public class KnowledgeSearchApiV1Controller {
 
     private final KnowledgeChunkService chunkService;
     private final KnowledgeAskService askService;
+    private final KnowledgeDivergenceService divergenceService;
 
     /** Texto (Postgres, português) e/ou vetor da pergunta; devolve trechos com origem para citação. */
     @PostMapping("/search")
@@ -42,6 +45,15 @@ public class KnowledgeSearchApiV1Controller {
     public ResponseEntity<AskResponse> ask(@RequestBody AskRequest body, HttpServletRequest request) {
         ApiKeyAccess.requireScope(request, ApiKeyScope.KNOWLEDGE_READ);
         return ResponseEntity.ok(askService.ask(body));
+    }
+
+    /** Pares código x TDN ligados por related, do mais divergente ao menos (comparação de identificadores). */
+    @GetMapping("/divergences")
+    public ResponseEntity<Report> divergences(@RequestParam(value = "module", required = false) String module,
+                                              @RequestParam(value = "limit", required = false) Integer limit,
+                                              HttpServletRequest request) {
+        ApiKeyAccess.requireScope(request, ApiKeyScope.KNOWLEDGE_READ);
+        return ResponseEntity.ok(divergenceService.report(module, limit));
     }
 
     /** Trechos sem embedding: o cliente calcula sobre 'input' e devolve em PUT /chunks/embeddings. */

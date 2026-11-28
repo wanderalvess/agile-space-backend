@@ -38,4 +38,6 @@ public interface KnowledgeRepository extends JpaRepository<KnowledgeDocument, UU
     @Query("SELECT d FROM KnowledgeDocument d WHERE d.externalId IS NOT NULL AND d.status <> 'deleted' " +
            "AND (:docType IS NULL OR d.docType = :docType)")
     java.util.List<KnowledgeDocument> findManifest(@Param("docType") String docType);
+
+    java.util.List<KnowledgeDocument> findBySourceAndStatusIn(String source, java.util.Collection<String> statuses);
 }

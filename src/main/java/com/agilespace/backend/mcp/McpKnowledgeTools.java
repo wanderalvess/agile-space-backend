@@ -6,8 +6,10 @@ import com.agilespace.backend.dto.KnowledgeAskDtos.AskRequest;
 import com.agilespace.backend.dto.KnowledgeAskDtos.AskResponse;
 import com.agilespace.backend.dto.KnowledgeSearchDtos.SearchRequest;
 import com.agilespace.backend.dto.KnowledgeSearchDtos.SearchResponse;
+import com.agilespace.backend.dto.KnowledgeDivergenceDtos.Report;
 import com.agilespace.backend.service.KnowledgeAskService;
 import com.agilespace.backend.service.KnowledgeChunkService;
+import com.agilespace.backend.service.KnowledgeDivergenceService;
 import com.agilespace.backend.service.KnowledgeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.model.ToolContext;
@@ -35,6 +37,7 @@ public class McpKnowledgeTools {
     private final KnowledgeService knowledgeService;
     private final KnowledgeChunkService chunkService;
     private final KnowledgeAskService askService;
+    private final KnowledgeDivergenceService divergenceService;
 
     @Tool(description = "Lista documentos da base de conhecimento do Espaço Ágil, com busca textual opcional")
     public DocumentPage listDocuments(
@@ -80,6 +83,17 @@ public class McpKnowledgeTools {
             ToolContext toolContext) {
         ApiKeyContext.from(toolContext).requireScope(ApiKeyScope.KNOWLEDGE_READ);
         return askService.ask(new AskRequest(question, null, k, docType, source, module, "none"));
+    }
+
+    @Tool(description = "Lista divergências entre a documentação de código e as páginas do TDN ligadas a ela: compara "
+            + "rotas, classes e campos citados nos dois lados e devolve os pares mais divergentes primeiro, com o que só "
+            + "existe em cada lado")
+    public Report listDivergences(
+            @ToolParam(description = "Filtra por módulo/aplicação", required = false) String module,
+            @ToolParam(description = "Máximo de pares (padrão 50)", required = false) Integer limit,
+            ToolContext toolContext) {
+        ApiKeyContext.from(toolContext).requireScope(ApiKeyScope.KNOWLEDGE_READ);
+        return divergenceService.report(module, limit);
     }
 
     @Tool(description = "Busca um documento da base de conhecimento pelo id")
