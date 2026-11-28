@@ -4,6 +4,7 @@ import com.agilespace.backend.domain.KnowledgeChunk;
 import com.agilespace.backend.domain.KnowledgeDocument;
 import com.agilespace.backend.dto.KnowledgeSearchDtos.EmbeddingFill;
 import com.agilespace.backend.dto.KnowledgeSearchDtos.FillResponse;
+import com.agilespace.backend.dto.KnowledgeSearchDtos.Hit;
 import com.agilespace.backend.dto.KnowledgeSearchDtos.SearchRequest;
 import com.agilespace.backend.repository.KnowledgeChunkRepository;
 import com.agilespace.backend.repository.KnowledgeRepository;
@@ -51,7 +52,7 @@ class KnowledgeChunkServiceTest {
         KnowledgeDocument doc = KnowledgeDocument.builder().id(docId).title("Doc")
                 .content("## A\ntexto igual\n\n## B\ntexto novo").build();
         KnowledgeChunk old = KnowledgeChunk.builder().documentId(docId).ordinal(0).headingPath("A").text("texto igual")
-                .textHash(KnowledgeChunkService.textHash("A", "texto igual")).embedding(new float[]{0.5f}).build();
+                .textHash(KnowledgeChunkService.textHash("Doc", "A", "texto igual")).embedding(new float[]{0.5f}).build();
         when(chunkRepository.findByDocumentIdOrderByOrdinalAsc(docId)).thenReturn(List.of(old));
 
         int n = service.rebuild(doc);
@@ -168,5 +169,66 @@ class KnowledgeChunkServiceTest {
 
         assertEquals(0, r.documents());
         assertFalse(r.more());
+    }
+
+    @Test
+    @DisplayName("só o título mudou: o embedding antigo não é reaproveitado e o trecho volta à fila")
+    void titleChangeInvalidatesEmbedding() {
+        UUID docId = UUID.randomUUID();
+        KnowledgeDocument doc = KnowledgeDocument.builder().id(docId).title("Título novo")
+                .content("## A\ntexto igual").build();
+        KnowledgeChunk old = KnowledgeChunk.builder().documentId(docId).ordinal(0).headingPath("A").text("texto igual")
+                .textHash(KnowledgeChunkService.textHash("Título velho", "A", "texto igual"))
+                .embedding(new float[]{0.5f}).build();
+        when(chunkRepository.findByDocumentIdOrderByOrdinalAsc(docId)).thenReturn(List.of(old));
+
+        service.rebuild(doc);
+
+        ArgumentCaptor<List<KnowledgeChunk>> cap = ArgumentCaptor.forClass(List.class);
+        verify(chunkRepository).saveAll(cap.capture());
+        assertNull(cap.getValue().get(0).getEmbedding());
+    }
+
+    private static Hit hit(String chunk, String doc, String title, String ext, double score) {
+        return new Hit(chunk, doc, "api_doc", ext, title, null, "t", null, "code", "m", "v", score, 1, null);
+    }
+
+    @Test
+    @DisplayName("título exato da pergunta entra nos candidatos e passa à frente dos demais")
+    void exactTitleBoostedInFusion() {
+        UUID a = UUID.randomUUID();
+        UUID b = UUID.randomUUID();
+        UUID onlyExact = UUID.randomUUID();
+
+        var fused = KnowledgeChunkService.fuse(List.of(a, b), List.of(), java.util.Set.of(onlyExact), 10);
+
+        assertEquals(onlyExact, fused.get(0).id());
+        assertEquals(3, fused.size());
+        assertNull(fused.get(0).textRank());
+    }
+
+    @Test
+    @DisplayName("rerank: no máximo 2 trechos por documento e título parcial sobe")
+    void rerankCapsPerDocumentAndBoostsPartialTitle() {
+        List<Hit> hits = List.of(
+                hit("c1", "d1", "Outro doc", "x:1", 0.032),
+                hit("c2", "d1", "Outro doc", "x:1", 0.031),
+                hit("c3", "d1", "Outro doc", "x:1", 0.030),
+                hit("c4", "d2", "PUT /embalagem/salvar - Embalagem", "x:2", 0.020));
+
+        List<Hit> out = KnowledgeChunkService.rerank(hits, "put /embalagem/salvar", 3);
+
+        assertEquals(3, out.size());
+        assertEquals("c4", out.get(0).chunkId());
+        assertEquals(2, out.stream().filter(h -> h.documentId().equals("d1")).count());
+    }
+
+    @Test
+    @DisplayName("rerank: sem texto de busca não reforça nada e respeita k")
+    void rerankWithoutQuery() {
+        List<Hit> hits = List.of(hit("a", "d1", "T", "e", 0.03), hit("b", "d2", "T2", "e2", 0.02));
+
+        assertEquals(1, KnowledgeChunkService.rerank(hits, null, 1).size());
+        assertEquals("a", KnowledgeChunkService.rerank(hits, null, 2).get(0).chunkId());
     }
 }
