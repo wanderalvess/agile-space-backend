@@ -1,12 +1,15 @@
 package com.agilespace.backend.controller;
 
 import com.agilespace.backend.domain.ApiKeyScope;
+import com.agilespace.backend.dto.KnowledgeAskDtos.AskRequest;
+import com.agilespace.backend.dto.KnowledgeAskDtos.AskResponse;
 import com.agilespace.backend.dto.KnowledgeSearchDtos.FillRequest;
 import com.agilespace.backend.dto.KnowledgeSearchDtos.FillResponse;
 import com.agilespace.backend.dto.KnowledgeSearchDtos.PendingChunk;
 import com.agilespace.backend.dto.KnowledgeSearchDtos.SearchRequest;
 import com.agilespace.backend.dto.KnowledgeSearchDtos.SearchResponse;
 import com.agilespace.backend.security.ApiKeyAccess;
+import com.agilespace.backend.service.KnowledgeAskService;
 import com.agilespace.backend.service.KnowledgeChunkService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -25,12 +28,20 @@ import java.util.List;
 public class KnowledgeSearchApiV1Controller {
 
     private final KnowledgeChunkService chunkService;
+    private final KnowledgeAskService askService;
 
     /** Texto (Postgres, português) e/ou vetor da pergunta; devolve trechos com origem para citação. */
     @PostMapping("/search")
     public ResponseEntity<SearchResponse> search(@RequestBody SearchRequest body, HttpServletRequest request) {
         ApiKeyAccess.requireScope(request, ApiKeyScope.KNOWLEDGE_READ);
         return ResponseEntity.ok(chunkService.search(body));
+    }
+
+    /** RAG sem LLM no servidor: devolve fontes numeradas e o prompt pronto; quem chama gera a resposta. */
+    @PostMapping("/ask")
+    public ResponseEntity<AskResponse> ask(@RequestBody AskRequest body, HttpServletRequest request) {
+        ApiKeyAccess.requireScope(request, ApiKeyScope.KNOWLEDGE_READ);
+        return ResponseEntity.ok(askService.ask(body));
     }
 
     /** Trechos sem embedding: o cliente calcula sobre 'input' e devolve em PUT /chunks/embeddings. */
